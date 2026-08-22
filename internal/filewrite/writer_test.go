@@ -207,7 +207,7 @@ func TestWriterWritesAndDeletesLyricsSidecarWithRevisionGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Changed || result.CurrentSidecarRevision != domain.SidecarRevision([]byte(content)) || result.After == nil || !result.After.Exists {
+	if !result.Changed || result.CurrentSidecarRevision != domain.SidecarRevision([]byte(content)) || result.BeforeContent != "" || result.AfterContent != content || result.After == nil || !result.After.Exists {
 		t.Fatalf("sidecar write result = %#v", result)
 	}
 	sidecarPath := filepath.Join(root, "song.lrc")
@@ -221,7 +221,7 @@ func TestWriterWritesAndDeletesLyricsSidecarWithRevisionGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !deleted.Changed || deleted.After != nil {
+	if !deleted.Changed || deleted.BeforeContent != content || deleted.After != nil || deleted.AfterContent != "" {
 		t.Fatalf("sidecar delete result = %#v", deleted)
 	}
 	if _, err := os.Stat(sidecarPath); !errors.Is(err, os.ErrNotExist) {

@@ -11,12 +11,13 @@
 - `PUT`/`DELETE /api/v1/tracks/:id/lyrics-sidecar` 支持创建、原子替换和删除，并同时校验音频 revision 与 sidecar content revision。
 - 写入使用同目录临时文件、`fsync`、rename 和目录同步；限制为 1 MiB，拒绝越界路径、符号链接和非普通文件。
 - sidecar 写入后重新扫描曲目索引，后续读取可观察到最新文件状态。
+- sidecar 写入/删除会进入 SQLite 修订历史，保存前后元数据和歌词内容快照；历史恢复预览和执行也会恢复 `.lrc` 文件。
 
 ## 一致性边界
 
 sidecar revision 是内容 SHA-256 前 12 字节，不依赖易变的文件修改时间。音频 revision 与 sidecar revision 分开防护，避免写标签时误覆盖用户刚修改的歌词文件。
 
-本阶段尚未把 sidecar 变更并入现有“标签级修订”历史表，也没有把音频标签和 sidecar 组合成跨文件事务；批量编排与统一审计会在后续里程碑补齐。写入失败时原子替换保证单个 sidecar 不会留下半文件，但调用方仍应保留文件系统备份。
+sidecar 已进入现有修订历史表，但音频标签与 sidecar 仍是两个顺序写入操作，不构成跨文件系统事务；批量编排会在后续里程碑补齐。写入失败时原子替换保证单个 sidecar 不会留下半文件，但调用方仍应保留文件系统备份。
 
 ## 验证
 

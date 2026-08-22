@@ -67,6 +67,7 @@ type Result struct {
 	Warnings        []string            `json:"warnings"`
 	BeforeTags      map[string][]string `json:"-"`
 	AfterTags       map[string][]string `json:"-"`
+	Sidecar         *SidecarResult      `json:"sidecar,omitempty"`
 }
 
 type ArtworkResult struct {
@@ -94,8 +95,11 @@ type SidecarResult struct {
 	CurrentSidecarRevision string              `json:"currentSidecarRevision,omitempty"`
 	DryRun                 bool                `json:"dryRun"`
 	Changed                bool                `json:"changed"`
+	Warnings               []string            `json:"warnings"`
 	Before                 *domain.SidecarInfo `json:"before,omitempty"`
 	After                  *domain.SidecarInfo `json:"after,omitempty"`
+	BeforeContent          string              `json:"-"`
+	AfterContent           string              `json:"-"`
 }
 
 type Writer struct {
@@ -219,12 +223,13 @@ func (w *Writer) WriteSidecar(ctx context.Context, ref library.FileRef, baseRevi
 	result := SidecarResult{
 		BaseRevision: baseRevision, CurrentRevision: currentRevision,
 		BaseSidecarRevision: baseSidecarRevision, CurrentSidecarRevision: currentSidecarRevision,
-		DryRun: dryRun, Changed: changed, Before: cloneSidecarInfo(before.Info),
+		DryRun: dryRun, Changed: changed, Warnings: []string{}, Before: cloneSidecarInfo(before.Info), BeforeContent: before.Content,
 	}
 	if !changed || dryRun {
 		if content != nil {
 			result.CurrentSidecarRevision = domain.SidecarRevision([]byte(*content))
 			result.After = &domain.SidecarInfo{Exists: true, Revision: result.CurrentSidecarRevision, SizeBytes: int64(len([]byte(*content)))}
+			result.AfterContent = *content
 		}
 		return result, nil
 	}
@@ -262,6 +267,7 @@ func (w *Writer) WriteSidecar(ctx context.Context, ref library.FileRef, baseRevi
 		result.CurrentSidecarRevision = after.Info.Revision
 	}
 	result.After = cloneSidecarInfo(after.Info)
+	result.AfterContent = after.Content
 	return result, nil
 }
 

@@ -789,7 +789,62 @@ func (s *Server) handleLyricsSidecarMutation(ctx context.Context, c *app.Request
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "sidecar 已写入，但曲目索引不可用")
 		return
 	}
+	if result.Changed && s.store != nil {
+		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
+			LibraryID: s.library.Library().ID, TrackID: updated.ID, TrackTitle: updated.Title, FileName: updated.FileName,
+			Action: sidecarAction(sidecarOperation(result)), Source: "手工编辑", BaseRevision: result.BaseRevision,
+			ResultRevision: updated.Revision, Diff: []domain.RevisionDiff{sidecarDiff(result)}, CoverTone: updated.CoverTone,
+			BeforeSidecar: sidecarAuditSnapshot(result.Before, result.BeforeContent),
+			AfterSidecar:  sidecarAuditSnapshot(result.After, result.AfterContent),
+		})
+		if historyErr != nil {
+			result.Warnings = append(result.Warnings, "sidecar 修订历史写入失败："+historyErr.Error())
+		}
+	}
 	s.writeData(c, map[string]any{"track": updated, "sidecar": result})
+}
+
+func sidecarAction(operation domain.Operation) string {
+	if operation == domain.OperationDelete {
+		return "删除歌词 sidecar"
+	}
+	return "写入歌词 sidecar"
+}
+
+func sidecarOperation(result filewrite.SidecarResult) domain.Operation {
+	if result.After != nil && result.After.Exists {
+		return domain.OperationSet
+	}
+	return domain.OperationDelete
+}
+
+func sidecarDiff(result filewrite.SidecarResult) domain.RevisionDiff {
+	return domain.RevisionDiff{
+		Field: "lyricsSidecar", Operation: sidecarOperation(result),
+		Before: sidecarAuditValue(result.Before), After: sidecarAuditValue(result.After),
+	}
+}
+
+func sidecarAuditValue(info *domain.SidecarInfo) any {
+	if info == nil || !info.Exists {
+		return nil
+	}
+	return map[string]any{
+		"exists":     info.Exists,
+		"revision":   info.Revision,
+		"sizeBytes":  info.SizeBytes,
+		"modifiedAt": info.ModifiedAt,
+	}
+}
+
+func sidecarAuditSnapshot(info *domain.SidecarInfo, content string) *domain.SidecarSnapshot {
+	if info == nil || !info.Exists {
+		return nil
+	}
+	return &domain.SidecarSnapshot{
+		Exists: info.Exists, Revision: info.Revision, SizeBytes: info.SizeBytes,
+		ModifiedAt: info.ModifiedAt, Content: content,
+	}
 }
 
 func (s *Server) handleSidecarError(c *app.RequestContext, err error) {
@@ -1037,6 +1092,15 @@ type revisionResponse struct {
 	BaseRevision    string                `json:"baseRevision"`
 	ResultRevision  string                `json:"resultRevision"`
 	CurrentRevision string                `json:"currentRevision,omitempty"`
+	BeforeSidecar   *sidecarResponse      `json:"beforeSidecar,omitempty"`
+	AfterSidecar    *sidecarResponse      `json:"afterSidecar,omitempty"`
+}
+
+type sidecarResponse struct {
+	Exists     bool   `json:"exists"`
+	Revision   string `json:"revision,omitempty"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
 }
 
 func (s *Server) handleRevisions(ctx context.Context, c *app.RequestContext) {
@@ -1080,7 +1144,15 @@ func toRevisionResponse(revision domain.Revision, currentRevision string) revisi
 		Time: revision.CreatedAt.Local().Format("2006-01-02 15:04"), Fields: revision.Fields,
 		Diff: revision.Diff, CoverTone: revision.CoverTone, BaseRevision: revision.BaseRevision,
 		ResultRevision: revision.ResultRevision, CurrentRevision: currentRevision,
+		BeforeSidecar: toSidecarResponse(revision.BeforeSidecar), AfterSidecar: toSidecarResponse(revision.AfterSidecar),
 	}
+}
+
+func toSidecarResponse(snapshot *domain.SidecarSnapshot) *sidecarResponse {
+	if snapshot == nil {
+		return nil
+	}
+	return &sidecarResponse{Exists: snapshot.Exists, Revision: snapshot.Revision, SizeBytes: snapshot.SizeBytes, ModifiedAt: snapshot.ModifiedAt}
 }
 
 func (s *Server) trackRevision(trackID string) string {
@@ -1151,14 +1223,22 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	targetTags := revision.BeforeTags
-	if request.Target == "after" {
-		targetTags = revision.AfterTags
-	}
-	result, err := s.writer.Restore(ctx, ref, request.BaseRevision, targetTags, dryRun)
-	if err != nil {
-		s.handleWriteError(c, err)
-		return
+	var result filewrite.Result
+	if hasRestorableTagFields(revision.Fields) {
+		targetTags := revision.BeforeTags
+		if request.Target == "after" {
+			targetTags = revision.AfterTags
+		}
+		result, err = s.writer.Restore(ctx, ref, request.BaseRevision, targetTags, dryRun)
+		if err != nil {
+			s.handleWriteError(c, err)
+			return
+		}
+	} else {
+		// Artwork-only and sidecar-only revisions still need the audio revision
+		// guard, but must not interpret an empty tag snapshot as “delete every
+		// tag”. The subsequent asset writer performs the real current-file check.
+		result = filewrite.Result{BaseRevision: request.BaseRevision, CurrentRevision: request.BaseRevision, DryRun: dryRun}
 	}
 	var artworkResult *filewrite.ArtworkResult
 	if targetArtwork, hasArtwork := revisionArtworkTarget(revision, request.Target); hasArtwork {
@@ -1173,6 +1253,35 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		result.Diff = append(result.Diff, artResult.Diff...)
 		result.Warnings = append(result.Warnings, artResult.Warnings...)
 		result.AfterTags = artResult.AfterTags
+	}
+	var sidecarResult *filewrite.SidecarResult
+	if targetSidecar, hasSidecar := revisionSidecarTarget(revision, request.Target); hasSidecar {
+		currentSidecar, sidecarErr := s.writer.ReadSidecar(ctx, ref)
+		if sidecarErr != nil {
+			s.handleSidecarError(c, sidecarErr)
+			return
+		}
+		baseSidecarRevision := ""
+		if currentSidecar.Info != nil {
+			baseSidecarRevision = currentSidecar.Info.Revision
+		}
+		var content *string
+		if targetSidecar != nil && targetSidecar.Exists {
+			value := targetSidecar.Content
+			content = &value
+		}
+		written, sidecarErr := s.writer.WriteSidecar(ctx, ref, result.CurrentRevision, baseSidecarRevision, content, dryRun)
+		if sidecarErr != nil {
+			s.handleWriteError(c, sidecarErr)
+			return
+		}
+		sidecarResult = &written
+		result.Sidecar = sidecarResult
+		result.Changed = result.Changed || written.Changed
+		if written.Changed {
+			result.Diff = append(result.Diff, sidecarDiff(written))
+		}
+		result.Warnings = append(result.Warnings, written.Warnings...)
 	}
 	if dryRun {
 		s.writeData(c, map[string]any{
@@ -1202,6 +1311,7 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 			ResultRevision: track.Revision, Diff: result.Diff, CoverTone: track.CoverTone,
 			BeforeTags: result.BeforeTags, AfterTags: result.AfterTags,
 			BeforeArtwork: artworkResultSnapshot(artworkResult, true), AfterArtwork: artworkResultSnapshot(artworkResult, false),
+			BeforeSidecar: sidecarResultSnapshot(sidecarResult, true), AfterSidecar: sidecarResultSnapshot(sidecarResult, false),
 		})
 		if historyErr != nil {
 			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
@@ -1225,6 +1335,36 @@ func revisionArtworkTarget(revision domain.Revision, target string) (*artwork.As
 		return nil, true
 	}
 	return &artwork.Asset{Data: append([]byte(nil), snapshot.Data...), MIME: snapshot.MIME, Format: snapshot.Format, Width: snapshot.Width, Height: snapshot.Height, Size: snapshot.Size, Hash: snapshot.Hash}, true
+}
+
+func hasRestorableTagFields(fields []string) bool {
+	for _, field := range fields {
+		switch field {
+		case "title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics":
+			return true
+		}
+	}
+	return false
+}
+
+func revisionSidecarTarget(revision domain.Revision, target string) (*domain.SidecarSnapshot, bool) {
+	if !slices.Contains(revision.Fields, "lyricsSidecar") {
+		return nil, false
+	}
+	if target == "after" {
+		return revision.AfterSidecar, true
+	}
+	return revision.BeforeSidecar, true
+}
+
+func sidecarResultSnapshot(result *filewrite.SidecarResult, before bool) *domain.SidecarSnapshot {
+	if result == nil {
+		return nil
+	}
+	if before {
+		return sidecarAuditSnapshot(result.Before, result.BeforeContent)
+	}
+	return sidecarAuditSnapshot(result.After, result.AfterContent)
 }
 
 func artworkResultSnapshot(result *filewrite.ArtworkResult, before bool) *domain.ArtworkSnapshot {

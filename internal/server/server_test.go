@@ -176,6 +176,10 @@ func TestLyricsSidecarAPIWritesReadsAndGuardsRevision(t *testing.T) {
 	if put.Code != 200 || !containsJSON(put.Body.Bytes(), `"currentSidecarRevision":"sidecar-`) {
 		t.Fatalf("sidecar put = %d %s", put.Code, put.Body.String())
 	}
+	revisions, err := s.store.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 1 || revisions[0].Action != "写入歌词 sidecar" || revisions[0].BeforeSidecar != nil || revisions[0].AfterSidecar == nil || revisions[0].AfterSidecar.Content != content {
+		t.Fatalf("sidecar revisions = %#v err=%v", revisions, err)
+	}
 	updated, err := s.library.Track(track.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +212,53 @@ func TestLyricsSidecarAPIWritesReadsAndGuardsRevision(t *testing.T) {
 		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
 	if deleted.Code != 200 || !containsJSON(deleted.Body.Bytes(), `"changed":true`) {
 		t.Fatalf("sidecar delete = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestLyricsSidecarRevisionHistoryRestoresPreviousFile(t *testing.T) {
+	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	content := "[00:02.00]可恢复歌词\n"
+	body, err := json.Marshal(map[string]any{"baseRevision": track.Revision, "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if put.Code != 200 {
+		t.Fatalf("sidecar put = %d %s", put.Code, put.Body.String())
+	}
+	revisions, err := s.store.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 1 {
+		t.Fatalf("revisions = %#v err=%v", revisions, err)
+	}
+	updated, err := s.library.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreBody, err := json.Marshal(map[string]any{"baseRevision": updated.Revision, "target": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore-preview",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+	if preview.Code != 200 || !containsJSON(preview.Body.Bytes(), `"field":"lyricsSidecar"`) {
+		t.Fatalf("sidecar restore preview = %d %s", preview.Code, preview.Body.String())
+	}
+	restore := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+	if restore.Code != 200 {
+		t.Fatalf("sidecar restore = %d %s", restore.Code, restore.Body.String())
+	}
+	read := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar", nil)
+	if read.Code != 200 || containsJSON(read.Body.Bytes(), `"exists":true`) {
+		t.Fatalf("restored sidecar still exists = %d %s", read.Code, read.Body.String())
 	}
 }
 

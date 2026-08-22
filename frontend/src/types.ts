@@ -174,6 +174,8 @@ export interface Revision {
   baseRevision?: string;
   resultRevision?: string;
   currentRevision?: string;
+  beforeSidecar?: SidecarInfo;
+  afterSidecar?: SidecarInfo;
 }
 
 export interface RevisionDiff {

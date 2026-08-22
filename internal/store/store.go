@@ -224,6 +224,14 @@ func (s *Store) CreateRevision(ctx context.Context, revision domain.Revision) (d
 	if err != nil {
 		return domain.Revision{}, err
 	}
+	beforeSidecarJSON, err := marshalSidecarSnapshot(revision.BeforeSidecar)
+	if err != nil {
+		return domain.Revision{}, err
+	}
+	afterSidecarJSON, err := marshalSidecarSnapshot(revision.AfterSidecar)
+	if err != nil {
+		return domain.Revision{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Revision{}, err
@@ -244,13 +252,13 @@ func (s *Store) CreateRevision(ctx context.Context, revision domain.Revision) (d
             id, library_id, track_id, track_title, file_name, action, source,
             base_revision, result_revision, fields_json, diff_json,
             before_tags_json, after_tags_json, cover_tone, created_at,
-            before_artwork_hash, after_artwork_hash
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            before_artwork_hash, after_artwork_hash, before_sidecar_json, after_sidecar_json
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		revision.ID, revision.LibraryID, revision.TrackID, revision.TrackTitle,
 		revision.FileName, revision.Action, revision.Source, revision.BaseRevision,
 		revision.ResultRevision, fieldsJSON, diffJSON, beforeJSON, afterJSON,
 		revision.CoverTone, revision.CreatedAt.UTC().Format(time.RFC3339Nano),
-		beforeArtworkHash, afterArtworkHash)
+		beforeArtworkHash, afterArtworkHash, beforeSidecarJSON, afterSidecarJSON)
 	if err != nil {
 		return domain.Revision{}, fmt.Errorf("insert revision: %w", err)
 	}
@@ -331,7 +339,7 @@ func (s *Store) ListRevisions(ctx context.Context, limit int) ([]domain.Revision
         SELECT id, library_id, track_id, track_title, file_name, action, source,
                base_revision, result_revision, fields_json, diff_json,
                before_tags_json, after_tags_json, cover_tone, created_at,
-               before_artwork_hash, after_artwork_hash
+               before_artwork_hash, after_artwork_hash, before_sidecar_json, after_sidecar_json
         FROM revisions ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -353,7 +361,7 @@ func (s *Store) Revision(ctx context.Context, id string) (domain.Revision, error
         SELECT id, library_id, track_id, track_title, file_name, action, source,
                base_revision, result_revision, fields_json, diff_json,
                before_tags_json, after_tags_json, cover_tone, created_at,
-               before_artwork_hash, after_artwork_hash
+               before_artwork_hash, after_artwork_hash, before_sidecar_json, after_sidecar_json
         FROM revisions WHERE id = ?`, id)
 	revision, err := scanRevision(row)
 	if err != nil {
@@ -366,7 +374,7 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanRevision(row rowScanner) (domain.Revision, error) {
 	var revision domain.Revision
-	var fieldsJSON, diffJSON, beforeJSON, afterJSON []byte
+	var fieldsJSON, diffJSON, beforeJSON, afterJSON, beforeSidecarJSON, afterSidecarJSON []byte
 	var createdAt string
 	var beforeArtworkHash, afterArtworkHash sql.NullString
 	err := row.Scan(
@@ -374,6 +382,7 @@ func scanRevision(row rowScanner) (domain.Revision, error) {
 		&revision.FileName, &revision.Action, &revision.Source, &revision.BaseRevision,
 		&revision.ResultRevision, &fieldsJSON, &diffJSON, &beforeJSON, &afterJSON,
 		&revision.CoverTone, &createdAt, &beforeArtworkHash, &afterArtworkHash,
+		&beforeSidecarJSON, &afterSidecarJSON,
 	)
 	if err != nil {
 		return domain.Revision{}, err
@@ -388,6 +397,12 @@ func scanRevision(row rowScanner) (domain.Revision, error) {
 		return domain.Revision{}, err
 	}
 	if err := json.Unmarshal(afterJSON, &revision.AfterTags); err != nil {
+		return domain.Revision{}, err
+	}
+	if err := unmarshalSidecarSnapshot(beforeSidecarJSON, &revision.BeforeSidecar); err != nil {
+		return domain.Revision{}, err
+	}
+	if err := unmarshalSidecarSnapshot(afterSidecarJSON, &revision.AfterSidecar); err != nil {
 		return domain.Revision{}, err
 	}
 	revision.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
@@ -414,6 +429,26 @@ func nonNilTags(tags map[string][]string) map[string][]string {
 		return map[string][]string{}
 	}
 	return tags
+}
+
+func marshalSidecarSnapshot(snapshot *domain.SidecarSnapshot) ([]byte, error) {
+	if snapshot == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(snapshot)
+}
+
+func unmarshalSidecarSnapshot(data []byte, target **domain.SidecarSnapshot) error {
+	if len(data) == 0 || string(data) == "{}" || string(data) == "null" {
+		*target = nil
+		return nil
+	}
+	var snapshot domain.SidecarSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return err
+	}
+	*target = &snapshot
+	return nil
 }
 
 func newRevisionID(now time.Time) string {

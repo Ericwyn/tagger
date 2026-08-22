@@ -257,6 +257,75 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	}
 }
 
+func TestSuccessfulRealSidecarWriteCreatesPersistentRevision(t *testing.T) {
+	corpus := os.Getenv("TAGGER_TEST_MUSIC_DIR")
+	if corpus == "" {
+		corpus = "/home/ericwyn/Downloads/TestMusic"
+	}
+	source := findIntegrationAudio(t, corpus, ".mp3")
+	root := t.TempDir()
+	destination := filepath.Join(root, filepath.Base(source))
+	copyIntegrationFile(t, source, destination)
+
+	engine := taglibwasm.New()
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	service, err := library.New(context.Background(), musicScanner, dataStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := filewrite.New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontend := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("Tagger")}}
+	s := New("127.0.0.1:0", service, writer, providers.NewRegistry(serverProvider{}), dataStore, fs.FS(frontend), "test", engine.Version())
+
+	track := service.ListTracks(library.TrackFilter{})[0]
+	content := "[00:03.00] real sidecar history\n"
+	body, err := json.Marshal(map[string]any{"baseRevision": track.Revision, "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if write.Code != 200 || !containsJSON(write.Body.Bytes(), `"currentSidecarRevision":"sidecar-`) {
+		t.Fatalf("sidecar write = %d %s", write.Code, write.Body.String())
+	}
+	revisions, err := dataStore.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 1 || revisions[0].Action != "写入歌词 sidecar" || revisions[0].AfterSidecar == nil || revisions[0].AfterSidecar.Content != content {
+		t.Fatalf("sidecar history = %#v err=%v", revisions, err)
+	}
+	updated, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreBody, err := json.Marshal(map[string]any{"baseRevision": updated.Revision, "target": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+	if restore.Code != 200 {
+		t.Fatalf("sidecar restore = %d %s", restore.Code, restore.Body.String())
+	}
+	read := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar", nil)
+	if read.Code != 200 || containsJSON(read.Body.Bytes(), `"exists":true`) {
+		t.Fatalf("restored real sidecar = %d %s", read.Code, read.Body.String())
+	}
+}
+
 func findIntegrationAudio(t *testing.T, root, extension string) string {
 	t.Helper()
 	var found string

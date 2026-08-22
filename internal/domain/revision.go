@@ -29,6 +29,8 @@ type Revision struct {
 	AfterArtwork      *ArtworkSnapshot    `json:"afterArtwork,omitempty"`
 	BeforeArtworkHash string              `json:"-"`
 	AfterArtworkHash  string              `json:"-"`
+	BeforeSidecar     *SidecarSnapshot    `json:"beforeSidecar,omitempty"`
+	AfterSidecar      *SidecarSnapshot    `json:"afterSidecar,omitempty"`
 }
 
 // ArtworkSnapshot is a validated embedded image captured for a revision. Data
@@ -42,4 +44,15 @@ type ArtworkSnapshot struct {
 	Size   int    `json:"size"`
 	Hash   string `json:"hash"`
 	Data   []byte `json:"-"`
+}
+
+// SidecarSnapshot is the auditable state of a same-basename lyrics file.
+// Content is retained in the local revision store for restore, but is never
+// included in API JSON responses by the server's revision projection.
+type SidecarSnapshot struct {
+	Exists     bool   `json:"exists"`
+	Revision   string `json:"revision,omitempty"`
+	SizeBytes  int64  `json:"sizeBytes,omitempty"`
+	ModifiedAt string `json:"modifiedAt,omitempty"`
+	Content    string `json:"content,omitempty"`
 }

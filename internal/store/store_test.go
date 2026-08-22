@@ -113,6 +113,27 @@ func TestScanAndRevisionSurviveReopen(t *testing.T) {
 	}
 }
 
+func TestRevisionPersistsLyricsSidecarSnapshots(t *testing.T) {
+	dataStore := openTestStore(t)
+	created, err := dataStore.CreateRevision(context.Background(), domain.Revision{
+		LibraryID: "lib-1", TrackID: "trk-1", TrackTitle: "Song", FileName: "song.mp3",
+		Action: "写入歌词 sidecar", Source: "手工编辑", BaseRevision: "audio-before", ResultRevision: "audio-after",
+		Diff:          []domain.RevisionDiff{{Field: "lyricsSidecar", Operation: domain.OperationSet, Before: nil, After: map[string]any{"exists": true}}},
+		BeforeSidecar: &domain.SidecarSnapshot{Exists: true, Revision: "sidecar-before", SizeBytes: 4, ModifiedAt: "2026-08-20 12:00", Content: "old\n"},
+		AfterSidecar:  &domain.SidecarSnapshot{Exists: true, Revision: "sidecar-after", SizeBytes: 4, ModifiedAt: "2026-08-20 12:01", Content: "new\n"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := dataStore.Revision(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.BeforeSidecar == nil || loaded.AfterSidecar == nil || loaded.BeforeSidecar.Content != "old\n" || loaded.AfterSidecar.Content != "new\n" {
+		t.Fatalf("sidecar snapshots = %#v", loaded)
+	}
+}
+
 func TestListRevisionsIsNewestFirstAndConcurrentSafe(t *testing.T) {
 	dataStore := openTestStore(t)
 	base := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)

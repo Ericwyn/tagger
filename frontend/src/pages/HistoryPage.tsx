@@ -223,7 +223,7 @@ function HistoryEmpty({symbol, title, detail}: {symbol: string; title: string; d
 const fieldLabels: Record<string, string> = {
   title: '标题', artists: '艺术家', album: '专辑', albumArtists: '专辑艺术家',
   trackNumber: '音轨号', trackTotal: '总音轨', discNumber: '光盘号', discTotal: '总光盘',
-  year: '年份', genres: '流派', lyrics: '歌词',
+  year: '年份', genres: '流派', lyrics: '歌词', lyricsSidecar: '.lrc sidecar',
 	artwork: '封面',
 };
 
