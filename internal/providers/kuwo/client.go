@@ -50,12 +50,28 @@ func New(config Config) *Client {
 		config.LyricsFileEndpoint = "https://newlyric.kuwo.cn/newlyric.lrc"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/0.1 (experimental kuwo adapter)"
+		config.UserAgent = providers.DefaultUserAgent("kuwo")
 	}
 	if config.RateInterval == 0 {
 		config.RateInterval = 180 * time.Millisecond
 	}
 	return &Client{config: config, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores the web endpoints and clears optional credentials
+// without replacing the HTTP client.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.Endpoint = "https://search.kuwo.cn/r.s"
+	c.config.LyricsEndpoint = "https://www.kuwo.cn/newh5/singles/songinfoandlrc"
+	c.config.LyricsRIDEndpoint = "https://player.kuwo.cn/webmusic/st/getNewMuiseByRid"
+	c.config.LyricsFileEndpoint = "https://newlyric.kuwo.cn/newlyric.lrc"
+	c.config.UserAgent = providers.DefaultUserAgent("kuwo")
+	c.config.Auth = ""
+	c.config.Cookie = ""
+	c.gate.SetInterval(180 * time.Millisecond)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

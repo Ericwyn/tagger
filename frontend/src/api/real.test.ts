@@ -414,6 +414,15 @@ describe('real API client', () => {
     expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({enabled: false, config: {baseUrl: 'https://lrc.example/jsonapi', auth: 'secret'}});
   });
 
+  it('resets a provider configuration through the dedicated endpoint', async () => {
+    const provider = {id: 'netease', name: '网易云音乐', health: 'degraded', enabled: false, config: []};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: provider}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.resetProvider('netease')).resolves.toEqual(provider);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/providers/netease/reset', expect.objectContaining({method: 'POST'}));
+  });
+
   it('sends a custom provider diagnostic query with artwork probing enabled', async () => {
     const provider = {id: 'netease', name: '网易云音乐', health: 'ready', enabled: true};
     const query = {title: '再回首', artists: ['姜育恒'], album: '多年以后', durationSeconds: 248};

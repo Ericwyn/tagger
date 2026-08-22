@@ -23,7 +23,7 @@ func DownloadArtwork(ctx context.Context, reference ArtworkReference, client *ht
 	if client == nil {
 		client = safeArtworkClient(reference.ProviderID)
 	}
-	body, err := GetBytesWithHeaders(ctx, client, parsed.String(), "Tagger/0.1 (+https://github.com/ericwyn/tagger)", map[string]string{
+	body, err := GetBytesWithHeaders(ctx, client, parsed.String(), ArtworkUserAgent(reference.ProviderID), map[string]string{
 		"Accept": "image/jpeg, image/png, image/webp",
 	}, artwork.MaxBytes)
 	if err != nil {

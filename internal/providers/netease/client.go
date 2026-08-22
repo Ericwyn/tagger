@@ -46,12 +46,27 @@ func New(config Config) *Client {
 		config.AlbumEndpoint = "https://music.163.com/api/album"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/0.1 (experimental netease adapter)"
+		config.UserAgent = providers.DefaultUserAgent("netease")
 	}
 	if config.RateInterval == 0 {
 		config.RateInterval = 180 * time.Millisecond
 	}
 	return &Client{config: config, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores the public web endpoint defaults and clears optional
+// credentials. The injected HTTP client remains unchanged.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.Endpoint = "https://music.163.com/api/cloudsearch/pc"
+	c.config.LyricEndpoint = "https://music.163.com/api/song/lyric"
+	c.config.AlbumEndpoint = "https://music.163.com/api/album"
+	c.config.UserAgent = providers.DefaultUserAgent("netease")
+	c.config.Auth = ""
+	c.config.Cookie = ""
+	c.gate.SetInterval(180 * time.Millisecond)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

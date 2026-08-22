@@ -234,6 +234,10 @@ export function updateProvider(provider: ProviderConfig, enabled: boolean, confi
 	: real.updateProvider(provider.id, enabled, config);
 }
 
+export function resetProvider(provider: ProviderConfig): Promise<ProviderConfig> {
+	return apiReadMode === 'mock' ? mock.resetProvider(provider) : real.resetProvider(provider.id);
+}
+
 export function readArtwork(track: Track): Promise<File> {
   if (apiReadMode === 'mock') return Promise.reject(new Error('Mock 模式没有真实封面文件'));
   return real.readArtwork(track);

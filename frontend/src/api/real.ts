@@ -445,6 +445,12 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
+	resetProvider(providerId: string): Promise<ProviderConfig> {
+		return request<ProviderConfig>(`/api/v1/providers/${encodeURIComponent(providerId)}/reset`, {
+			method: 'POST',
+		});
+	},
+
 	testProvider(providerId: string, query?: CandidateSearchQuery): Promise<ProviderTestResponse> {
 	  const init: RequestInit = {method: 'POST'};
 	  if (query) {

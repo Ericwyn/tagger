@@ -39,7 +39,7 @@ func New(config Config) *Client {
 		config.SearchURL = deriveSearchURL(config.BaseURL)
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/dev (https://github.com/ericwyn/tagger)"
+		config.UserAgent = providers.DefaultUserAgent("lrclib")
 	}
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 10 * time.Second}
@@ -48,6 +48,18 @@ func New(config Config) *Client {
 		config.RateInterval = 300 * time.Millisecond
 	}
 	return &Client{baseURL: config.BaseURL, searchURL: config.SearchURL, userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores both LRCLIB lookup endpoints and the polite default
+// request interval without replacing the configured HTTP client.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseURL = "https://lrclib.net/api/get"
+	c.searchURL = "https://lrclib.net/api/search"
+	c.userAgent = providers.DefaultUserAgent("lrclib")
+	c.gate.SetInterval(300 * time.Millisecond)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

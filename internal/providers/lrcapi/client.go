@@ -43,7 +43,7 @@ func New(config Config) *Client {
 		config.CoverURL = "https://api.lrc.cx/cover"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/0.1 (optional LrcApi adapter)"
+		config.UserAgent = providers.DefaultUserAgent("lrcapi")
 	}
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 12 * time.Second}
@@ -55,6 +55,19 @@ func New(config Config) *Client {
 		baseURL: config.BaseURL, coverURL: config.CoverURL, auth: strings.TrimSpace(config.Auth),
 		userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval),
 	}
+}
+
+// ResetConfig restores the public LrcApi defaults and clears its optional
+// authorization value while keeping the injected HTTP client.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseURL = "https://api.lrc.cx/jsonapi"
+	c.coverURL = "https://api.lrc.cx/cover"
+	c.auth = ""
+	c.userAgent = providers.DefaultUserAgent("lrcapi")
+	c.gate.SetInterval(500 * time.Millisecond)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

@@ -17,6 +17,7 @@ var ErrProviderNotFound = errors.New("provider not found")
 var ErrArtworkReferenceNotFound = errors.New("artwork reference not found")
 var ErrProviderUnavailable = errors.New("provider is unavailable")
 var ErrProviderNotConfigurable = errors.New("provider does not expose runtime configuration")
+var ErrProviderConfigResetUnsupported = errors.New("provider does not expose configuration reset")
 var ErrProviderConfigInvalid = errors.New("provider configuration is invalid")
 
 type Persistence interface {
@@ -112,8 +113,19 @@ func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) 
 		if !found {
 			continue
 		}
+		values, migrated := migrateProviderConfiguration(id, values)
+		if migrated {
+			r.settingsMu.Lock()
+			r.configs[id] = cloneStringMap(values)
+			r.settingsMu.Unlock()
+		}
 		configurable, ok := strategy.(Configurable)
 		if !ok || len(values) == 0 {
+			if migrated && r.persistence != nil {
+				if err := r.persistence.SaveProviderConfiguration(ctx, id, values); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if err := configurable.Configure(values); err != nil {
@@ -121,8 +133,53 @@ func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) 
 			r.configError[id] = err.Error()
 			r.settingsMu.Unlock()
 		}
+		if migrated && r.persistence != nil {
+			if err := r.persistence.SaveProviderConfiguration(ctx, id, values); err != nil {
+				return err
+			}
+		}
 	}
 	return persistence.DeleteExpiredProviderCache(ctx)
+}
+
+// ResetConfig restores the strategy defaults and removes its persisted
+// overrides, including masked credentials. The enabled/disabled switch is
+// intentionally left untouched.
+func (r *Registry) ResetConfig(ctx context.Context, id string) (Descriptor, error) {
+	strategy, found := r.strategies[id]
+	if !found {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderNotFound, id)
+	}
+	if _, ok := strategy.(Configurable); !ok {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderNotConfigurable, id)
+	}
+	resetter, ok := strategy.(ConfigResetter)
+	if !ok {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderConfigResetUnsupported, id)
+	}
+	if err := resetter.ResetConfig(); err != nil {
+		return Descriptor{}, fmt.Errorf("%w: %v", ErrProviderConfigInvalid, err)
+	}
+	r.settingsMu.Lock()
+	delete(r.configs, id)
+	delete(r.configError, id)
+	r.settingsMu.Unlock()
+	if r.persistence != nil {
+		if err := r.persistence.SaveProviderConfiguration(ctx, id, map[string]string{}); err != nil {
+			return Descriptor{}, err
+		}
+	}
+	return r.descriptor(id), nil
+}
+
+func migrateProviderConfiguration(id string, values map[string]string) (map[string]string, bool) {
+	result := cloneStringMap(values)
+	userAgent, ok := result["userAgent"]
+	if !ok || !IsLegacyTaggerUserAgent(userAgent) {
+		return result, false
+	}
+	result["userAgent"] = DefaultUserAgent(id)
+	return result, true
 }
 
 func (r *Registry) SetEnabled(ctx context.Context, id string, enabled bool) (Descriptor, error) {

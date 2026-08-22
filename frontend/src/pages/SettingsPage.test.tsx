@@ -6,6 +6,7 @@ import type {LibrarySummary, MatchCandidate, ProviderConfig} from '@/types';
 const api = vi.hoisted(() => ({
   listProviders: vi.fn(),
   updateProvider: vi.fn(),
+  resetProvider: vi.fn(),
   testProvider: vi.fn(),
   getLibrary: vi.fn(),
   listLibraries: vi.fn(),
@@ -51,6 +52,7 @@ describe('SettingsPage provider diagnostics', () => {
     localStorage.removeItem('tagger-provider-test-query-v1');
     api.listProviders.mockResolvedValue([provider]);
     api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
+    api.resetProvider.mockImplementation((item: ProviderConfig) => Promise.resolve({...item, config: item.config?.map((field) => ({...field, value: field.key === 'baseUrl' ? 'https://musicbrainz.org/ws/2/recording/' : field.value}))}));
     api.getLibrary.mockResolvedValue(library);
     api.listLibraries.mockResolvedValue([{...library, active: true}]);
     api.probeLibrary.mockResolvedValue({path: '/home/ericwyn/Downloads/TestMusic', name: 'TestMusic', readable: true, writable: true, audioFiles: 24, folders: 3, formats: {mp3: 9, flac: 15, wav: 0}, warnings: []});
@@ -131,6 +133,18 @@ describe('SettingsPage provider diagnostics', () => {
     await user.click(screen.getByRole('button', {name: '保存并应用'}));
     await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(provider, true, {baseUrl: 'https://mirror.example.test/recording/'}));
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('配置已保存'));
+  });
+
+  it('requires confirmation before restoring a provider configuration', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(await screen.findByRole('button', {name: '配置'}));
+    await user.click(screen.getByRole('button', {name: '恢复默认配置'}));
+    expect(screen.getByText('会清除自定义地址和鉴权')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: '确认恢复'}));
+    await waitFor(() => expect(api.resetProvider).toHaveBeenCalledWith(provider));
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('恢复默认配置'));
   });
 
   it('loads the configured library and runs a real rescan action', async () => {

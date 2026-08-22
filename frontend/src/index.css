@@ -5319,6 +5319,18 @@ button:disabled {
   padding-top: 2px;
 }
 
+.provider-config-reset-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+}
+
+.provider-config-reset-confirm small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .provider-config-error {
   display: block;
   margin-top: 7px;

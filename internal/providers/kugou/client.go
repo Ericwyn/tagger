@@ -52,12 +52,28 @@ func New(config Config) *Client {
 		config.ArtworkEndpoint = "https://wwwapi.kugou.com/yy/index.php"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/0.1 (experimental kugou adapter)"
+		config.UserAgent = providers.DefaultUserAgent("kugou")
 	}
 	if config.RateInterval == 0 {
 		config.RateInterval = 180 * time.Millisecond
 	}
 	return &Client{config: config, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores KuGou's public mobile/web endpoints and clears
+// optional credentials without replacing the HTTP client.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.config.SearchEndpoint = "https://mobilecdn.kugou.com/api/v3/search/song"
+	c.config.LyricsSearchURL = "https://krcs.kugou.com/search"
+	c.config.LyricsDownloadURL = "https://lyrics.kugou.com/download"
+	c.config.ArtworkEndpoint = "https://wwwapi.kugou.com/yy/index.php"
+	c.config.UserAgent = providers.DefaultUserAgent("kugou")
+	c.config.Auth = ""
+	c.config.Cookie = ""
+	c.gate.SetInterval(180 * time.Millisecond)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

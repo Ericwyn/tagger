@@ -110,6 +110,7 @@ func (s *Server) routes() {
 	api.DELETE("/tracks/:id/artwork/:index", s.handleDeleteArtwork)
 	api.GET("/providers", s.handleProviders)
 	api.PATCH("/providers/:id", s.handleProviderUpdate)
+	api.POST("/providers/:id/reset", s.handleProviderReset)
 	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.GET("/matches/tracks/:id/query-history", s.handleMatchQueryHistory)
@@ -2235,6 +2236,27 @@ func (s *Server) handleProviderUpdate(ctx context.Context, c *app.RequestContext
 		return
 	}
 	if errors.Is(err, providers.ErrProviderNotConfigurable) || errors.Is(err, providers.ErrProviderConfigInvalid) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "provider_config_invalid", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "provider_settings_failed", err.Error())
+		return
+	}
+	s.writeData(c, descriptor)
+}
+
+func (s *Server) handleProviderReset(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器尚未初始化")
+		return
+	}
+	descriptor, err := s.providers.ResetConfig(ctx, c.Param("id"))
+	if errors.Is(err, providers.ErrProviderNotFound) {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
+		return
+	}
+	if errors.Is(err, providers.ErrProviderNotConfigurable) || errors.Is(err, providers.ErrProviderConfigResetUnsupported) || errors.Is(err, providers.ErrProviderConfigInvalid) {
 		s.writeError(c, consts.StatusUnprocessableEntity, "provider_config_invalid", err.Error())
 		return
 	}

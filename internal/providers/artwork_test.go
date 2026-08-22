@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -65,7 +64,7 @@ func TestDownloadArtworkValidatesResponseBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &http.Client{Transport: artworkRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Header.Get("Accept") == "" || !strings.Contains(request.Header.Get("User-Agent"), "Tagger") {
+		if request.Header.Get("Accept") == "" || request.Header.Get("User-Agent") != BrowserUserAgent {
 			t.Fatalf("headers = %#v", request.Header)
 		}
 		return &http.Response{

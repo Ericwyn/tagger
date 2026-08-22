@@ -32,6 +32,10 @@ type configurableStrategy struct {
 	config map[string]string
 }
 
+type resettableConfigStrategy struct {
+	config map[string]string
+}
+
 func (strategy *configurableStrategy) Descriptor() Descriptor {
 	return Descriptor{ID: "configurable", Name: "Configurable", Enabled: true, Health: HealthReady}
 }
@@ -50,6 +54,40 @@ func (strategy *configurableStrategy) Configure(values map[string]string) error 
 	}
 	for key, value := range values {
 		strategy.config[key] = value
+	}
+	return nil
+}
+
+func (strategy *resettableConfigStrategy) Descriptor() Descriptor {
+	return Descriptor{ID: "resettable", Name: "Resettable", Enabled: true, Health: HealthReady}
+}
+
+func (strategy *resettableConfigStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
+	return nil, nil
+}
+
+func (strategy *resettableConfigStrategy) ConfigFields() []ConfigField {
+	return []ConfigField{
+		{Key: "baseUrl", Label: "Base URL", Type: "url", Value: strategy.config["baseUrl"]},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: strategy.config["userAgent"]},
+		{Key: "auth", Label: "Auth", Type: "password", Value: strategy.config["auth"], Secret: true},
+	}
+}
+
+func (strategy *resettableConfigStrategy) Configure(values map[string]string) error {
+	if strategy.config == nil {
+		strategy.config = make(map[string]string)
+	}
+	for key, value := range values {
+		strategy.config[key] = value
+	}
+	return nil
+}
+
+func (strategy *resettableConfigStrategy) ResetConfig() error {
+	strategy.config = map[string]string{
+		"baseUrl":   "https://reset.example.test",
+		"userAgent": BrowserUserAgent,
 	}
 	return nil
 }
@@ -236,3 +274,67 @@ func TestRegistryAppliesAndMasksProviderConfiguration(t *testing.T) {
 		t.Fatalf("strategy config = %#v", strategy.config)
 	}
 }
+
+func TestRegistryResetsProviderConfigurationAndPersistsDefaultUA(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tagger.db")
+	repository, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	strategy := &resettableConfigStrategy{config: map[string]string{"baseUrl": "https://initial.example.test", "userAgent": "Mozilla/5.0", "auth": "secret"}}
+	registry := NewRegistry(strategy)
+	if err := registry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.SetConfig(context.Background(), "resettable", map[string]string{"baseUrl": "https://custom.example.test", "userAgent": "Tagger/legacy", "auth": "secret"}); err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := registry.ResetConfig(context.Background(), "resettable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.Config[0].Value != "https://reset.example.test" || descriptor.Config[1].Value != BrowserUserAgent || descriptor.Config[2].Configured {
+		t.Fatalf("reset descriptor = %#v", descriptor.Config)
+	}
+	configurations, err := repository.LoadProviderConfigurations(context.Background())
+	if err != nil || len(configurations["resettable"]) != 0 {
+		t.Fatalf("persisted reset configuration = %#v err=%v", configurations, err)
+	}
+}
+
+func TestRegistryMigratesLegacyBuiltInUserAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tagger.db")
+	repository, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	if err := repository.SaveProviderConfiguration(context.Background(), "lrclib", map[string]string{"userAgent": "Tagger/dev (https://github.com/ericwyn/tagger)", "baseUrl": "https://custom.example.test"}); err != nil {
+		t.Fatal(err)
+	}
+	strategy := &resettableConfigStrategy{config: map[string]string{}}
+	// The fake deliberately uses the built-in ID so the registry migration
+	// exercises the same persisted key used by the real LRCLIB strategy.
+	strategyDescriptor := strategy.Descriptor()
+	strategyDescriptor.ID = "lrclib"
+	strategyDescriptor.Name = "LRCLIB"
+	registry := NewRegistry(&configurableAliasStrategy{resettableConfigStrategy: strategy, descriptor: strategyDescriptor})
+	if err := registry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	if got := strategy.config["userAgent"]; got != BrowserUserAgent {
+		t.Fatalf("migrated user-agent = %q, want %q", got, BrowserUserAgent)
+	}
+	configurations, err := repository.LoadProviderConfigurations(context.Background())
+	if err != nil || configurations["lrclib"]["userAgent"] != BrowserUserAgent {
+		t.Fatalf("migrated persisted configuration = %#v err=%v", configurations, err)
+	}
+}
+
+type configurableAliasStrategy struct {
+	*resettableConfigStrategy
+	descriptor Descriptor
+}
+
+func (strategy *configurableAliasStrategy) Descriptor() Descriptor { return strategy.descriptor }

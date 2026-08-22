@@ -36,7 +36,7 @@ func New(config Config) *Client {
 		config.Country = "CN"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/dev (https://github.com/ericwyn/tagger)"
+		config.UserAgent = providers.DefaultUserAgent("apple")
 	}
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 10 * time.Second}
@@ -45,6 +45,18 @@ func New(config Config) *Client {
 		config.RateInterval = 3 * time.Second
 	}
 	return &Client{baseURL: config.BaseURL, country: config.Country, userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores the public iTunes Search defaults while preserving the
+// HTTP client supplied by the application or tests.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseURL = "https://itunes.apple.com/search"
+	c.country = "CN"
+	c.userAgent = providers.DefaultUserAgent("apple")
+	c.gate.SetInterval(3 * time.Second)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

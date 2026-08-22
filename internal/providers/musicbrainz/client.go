@@ -33,7 +33,7 @@ func New(config Config) *Client {
 		config.BaseURL = "https://musicbrainz.org/ws/2/recording/"
 	}
 	if config.UserAgent == "" {
-		config.UserAgent = "Tagger/dev (https://github.com/ericwyn/tagger)"
+		config.UserAgent = providers.DefaultUserAgent("musicbrainz")
 	}
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 10 * time.Second}
@@ -42,6 +42,17 @@ func New(config Config) *Client {
 		config.RateInterval = time.Second
 	}
 	return &Client{baseURL: config.BaseURL, userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+}
+
+// ResetConfig restores the provider's built-in endpoints and transport
+// defaults while keeping the injected HTTP client intact.
+func (c *Client) ResetConfig() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.baseURL = "https://musicbrainz.org/ws/2/recording/"
+	c.userAgent = providers.DefaultUserAgent("musicbrainz")
+	c.gate.SetInterval(time.Second)
+	return nil
 }
 
 func (c *Client) Descriptor() providers.Descriptor {

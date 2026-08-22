@@ -40,6 +40,8 @@ func (serverProvider) ConfigFields() []providers.ConfigField {
 
 func (serverProvider) Configure(map[string]string) error { return nil }
 
+func (serverProvider) ResetConfig() error { return nil }
+
 func (failingServerProvider) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "failing-provider", Name: "Failing Provider", Enabled: true, Health: providers.HealthReady}
 }
@@ -715,6 +717,10 @@ func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 		&ut.Body{Body: bytes.NewReader(configBody), Len: len(configBody)}, ut.Header{Key: "content-type", Value: "application/json"})
 	if configured.Code != 200 || !containsJSON(configured.Body.Bytes(), `"key":"baseUrl"`) {
 		t.Fatalf("provider config = %d %s", configured.Code, configured.Body.String())
+	}
+	reset := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/reset", nil)
+	if reset.Code != 200 || !containsJSON(reset.Body.Bytes(), `"id":"test-provider"`) {
+		t.Fatalf("provider reset = %d %s", reset.Code, reset.Body.String())
 	}
 	customBody := []byte(`{"query":{"title":"自定义测试","artists":["测试歌手"],"album":"测试专辑","durationSeconds":201},"limit":3,"probeArtwork":false}`)
 	custom := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", &ut.Body{Body: bytes.NewReader(customBody), Len: len(customBody)},

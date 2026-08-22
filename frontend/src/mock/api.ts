@@ -176,6 +176,12 @@ export async function listProviders(): Promise<ProviderConfig[]> {
   return structuredClone(providerConfigs);
 }
 
+export async function resetProvider(provider: ProviderConfig): Promise<ProviderConfig> {
+  await wait(120);
+  const defaults = providerConfigs.find((item) => item.id === provider.id) ?? provider;
+  return structuredClone(defaults);
+}
+
 export async function listJobs(): Promise<Job[]> {
   await wait();
   return structuredClone(jobs);

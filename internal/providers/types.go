@@ -58,6 +58,15 @@ type Configurable interface {
 	Configure(map[string]string) error
 }
 
+// ConfigResetter is implemented by built-in providers that can restore their
+// constructor defaults at runtime. It is intentionally separate from
+// Configurable so third-party strategies written against the older interface
+// remain loadable; the UI simply disables reset for strategies that do not
+// expose this optional capability.
+type ConfigResetter interface {
+	ResetConfig() error
+}
+
 type Descriptor struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`

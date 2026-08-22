@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
@@ -101,6 +101,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [configProviderId, setConfigProviderId] = useState<string>();
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
   const [configSaving, setConfigSaving] = useState(false);
+  const [configResetting, setConfigResetting] = useState(false);
+  const [configResetPending, setConfigResetPending] = useState(false);
   const [configError, setConfigError] = useState('');
   const [library, setLibrary] = useState<LibrarySummary>();
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
@@ -279,7 +281,26 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const openProviderConfig = (provider: ProviderConfig) => {
     setConfigProviderId(provider.id);
     setConfigError('');
+    setConfigResetPending(false);
     setConfigValues(Object.fromEntries((provider.config ?? []).map((field) => [field.key, field.secret ? '' : field.value ?? ''])));
+  };
+
+  const resetProviderConfig = async () => {
+    const provider = providers.find((item) => item.id === configProviderId);
+    if (!provider || configResetting) return;
+    setConfigResetting(true);
+    setConfigError('');
+    try {
+      const updated = await resetProvider(provider);
+      setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setConfigValues(Object.fromEntries((updated.config ?? []).map((field) => [field.key, field.secret ? '' : field.value ?? ''])));
+      setConfigResetPending(false);
+      onNotice(`${provider.name} 已恢复默认配置`);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : '恢复默认配置失败');
+    } finally {
+      setConfigResetting(false);
+    }
   };
 
   const saveProviderConfig = async (event: FormEvent) => {
@@ -445,8 +466,17 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             ))}
             {configError && <div className="provider-test-error"><CircleAlert size={14} /> {configError}</div>}
             <div className="provider-config-actions">
-              <button className="secondary-button" type="button" onClick={() => setConfigProviderId(undefined)}>取消</button>
-              <button className="primary-button" type="submit" disabled={configSaving}>
+              {!configResetPending ? (
+                <button className="danger-quiet" type="button" onClick={() => setConfigResetPending(true)} disabled={configSaving || configResetting}>恢复默认配置</button>
+              ) : (
+                <span className="provider-config-reset-confirm">
+                  <small>会清除自定义地址和鉴权</small>
+                  <button className="danger-quiet" type="button" onClick={() => void resetProviderConfig()} disabled={configSaving || configResetting}>{configResetting ? '恢复中…' : '确认恢复'}</button>
+                  <button className="secondary-button" type="button" onClick={() => setConfigResetPending(false)} disabled={configResetting}>保留当前</button>
+                </span>
+              )}
+              <button className="secondary-button" type="button" onClick={() => setConfigProviderId(undefined)} disabled={configSaving || configResetting}>取消</button>
+              <button className="primary-button" type="submit" disabled={configSaving || configResetting}>
                 {configSaving ? <LoaderCircle size={14} className="spin" /> : <Save size={14} />}
                 {configSaving ? '保存中…' : '保存并应用'}
               </button>
