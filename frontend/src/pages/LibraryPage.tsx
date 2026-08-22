@@ -114,6 +114,11 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       setLibraries(nextLibraries.map((item) => ({...item, active: item.id === nextLibrary.id})));
       setLibrary({...nextLibrary, active: true});
       setTracks(nextTracks);
+      setActiveFolder((current) => preserveSelection && current && nextLibrary.folders.some((folder) => folder.id === current) ? current : null);
+      if (!preserveSelection) {
+        setActiveFilter('all');
+        setSelectedIds(new Set());
+      }
       setActiveTrackId((current) => preserveSelection && nextTracks.some((track) => track.id === current)
         ? current
         : nextTracks[0]?.id);
