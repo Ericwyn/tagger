@@ -280,6 +280,16 @@ describe('real API client', () => {
     });
   });
 
+  it('persists an individual review decision with the selected candidate', async () => {
+    const item = {id: 'item-1', jobId: 'job-1', trackId: 'trk-1', state: 'accepted', candidates: [], selectedCandidateId: 'cand-1'};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: item}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.updateMatchItem('job/1', 'trk/1', 'accepted', 'cand-1')).resolves.toEqual(item);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/jobs/job%2F1/items/trk%2F1');
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({state: 'accepted', selectedCandidateId: 'cand-1'});
+  });
+
   it('persists provider enablement and runs connection tests', async () => {
 	const provider = {id: 'apple', name: 'Apple', health: 'disabled', enabled: false};
 	const testResult = {provider: {...provider, health: 'ready', enabled: true}, result: {status: 'ok', count: 1, latencyMs: 20, cached: true}};

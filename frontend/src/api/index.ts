@@ -64,9 +64,19 @@ export async function createMatchJob(trackIds: string[]): Promise<Job | null> {
   return real.createMatchJob(trackIds);
 }
 
+export async function getJob(jobId: string): Promise<Job | null> {
+  if (apiReadMode === 'mock') return null;
+  return real.getJob(jobId);
+}
+
 export async function listMatchItems(jobId: string): Promise<MatchItem[]> {
   if (apiReadMode === 'mock') return [];
   return real.listMatchItems(jobId);
+}
+
+export async function updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string): Promise<MatchItem | null> {
+  if (apiReadMode === 'mock') return null;
+  return real.updateMatchItem(jobId, trackId, state, selectedCandidateId);
 }
 
 export async function createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job | null> {

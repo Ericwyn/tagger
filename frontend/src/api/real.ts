@@ -155,6 +155,14 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
 	},
 
+	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string): Promise<MatchItem> {
+	  return request<MatchItem>(`/api/v1/matches/jobs/${encodeURIComponent(jobId)}/items/${encodeURIComponent(trackId)}`, {
+		method: 'PATCH',
+		headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({state, selectedCandidateId}),
+	  });
+	},
+
 	createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job> {
 	  return request<Job>(`/api/v1/matches/jobs/${encodeURIComponent(matchJobId)}/write`, {
 		method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({items}),

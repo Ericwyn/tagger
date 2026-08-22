@@ -95,6 +95,7 @@ func (s *Server) routes() {
 	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.POST("/matches/tracks/batch", s.handleMatchBatch)
+	api.PATCH("/matches/jobs/:id/items/:trackId", s.handleMatchReviewUpdate)
 	api.POST("/matches/jobs/:id/write", s.handleMatchWrite)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/jobs", s.handleJobs)
@@ -474,6 +475,80 @@ func (s *Server) handleJobMatches(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, items)
+}
+
+type matchReviewUpdateRequest struct {
+	State               string `json:"state"`
+	SelectedCandidateID string `json:"selectedCandidateId,omitempty"`
+}
+
+func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil || s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "审核状态服务尚未启用")
+		return
+	}
+	job, err := s.jobs.Get(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "匹配任务不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	if job.Kind != domain.JobMatch || (job.State != domain.JobReview && job.State != domain.JobPartial) {
+		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务当前不允许修改审核状态")
+		return
+	}
+	var request matchReviewUpdateRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	if request.State != "review" && request.State != "accepted" && request.State != "skipped" {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "state 必须是 review、accepted 或 skipped")
+		return
+	}
+	item, err := s.store.MatchItem(ctx, job.ID, c.Param("trackId"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "match_item_not_found", "审核曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
+		return
+	}
+	if request.State == "accepted" && request.SelectedCandidateID == "" {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "接受候选时必须提供 candidateId")
+		return
+	}
+	if request.SelectedCandidateID != "" {
+		var candidates []providers.MatchCandidate
+		if err := json.Unmarshal(item.Candidates, &candidates); err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "match_state_failed", "候选数据损坏")
+			return
+		}
+		found := false
+		for _, candidate := range candidates {
+			if candidate.ID == request.SelectedCandidateID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "candidateId 不属于该曲目的候选")
+			return
+		}
+	}
+	item.State = request.State
+	if request.SelectedCandidateID != "" {
+		item.SelectedCandidateID = request.SelectedCandidateID
+	}
+	if err := s.store.UpsertMatchItem(ctx, item); err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]any{"data": item})
 }
 
 func (s *Server) handleBatchEditItems(ctx context.Context, c *app.RequestContext) {

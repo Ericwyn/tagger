@@ -13,6 +13,7 @@ import type {PageID, Track} from '@/types';
 export function App() {
   const [page, setPage] = useState<PageID>('library');
   const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [reviewJobId, setReviewJobId] = useState<string>();
   const [dark, setDark] = useState(() => localStorage.getItem('tagger-theme') === 'dark');
   const [notice, setNotice] = useState<string | null>(null);
   const [playerTrack, setPlayerTrack] = useState<Track | null>(null);
@@ -36,6 +37,13 @@ export function App() {
 
   const openReview = (ids: string[]) => {
     setBatchIds(ids);
+    setReviewJobId(undefined);
+    setPage('review');
+  };
+
+  const openReviewJob = (jobId: string) => {
+    setBatchIds([]);
+    setReviewJobId(jobId);
     setPage('review');
   };
 
@@ -62,6 +70,7 @@ export function App() {
             {page === 'review' && (
               <ReviewPage
                 trackIds={batchIds}
+                matchJobId={reviewJobId}
                 showGeneratedCovers={showGeneratedCovers}
                 onBack={() => setPage('library')}
                 onComplete={() => {
@@ -70,7 +79,7 @@ export function App() {
                 }}
               />
             )}
-            {page === 'jobs' && <JobsPage onOpenReview={() => setPage('review')} />}
+            {page === 'jobs' && <JobsPage onOpenReview={openReviewJob} />}
             {page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
             {page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} />}
           </motion.div>

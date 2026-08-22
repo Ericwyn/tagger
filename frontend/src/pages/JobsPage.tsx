@@ -17,7 +17,7 @@ import {apiReadMode, cancelJob, listBatchEditItems, listJobs, listTracks, retryJ
 import type {BatchEditItem, Job} from '@/types';
 
 interface JobsPageProps {
-  onOpenReview: () => void;
+  onOpenReview: (jobId: string) => void;
 }
 
 const stateMeta: Record<Job['state'], {label: string; icon: typeof Check}> = {
@@ -224,7 +224,7 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 			  </section>
 			)}
             {active.state === 'review' && (
-              <button className="primary-button full-button" onClick={onOpenReview}>
+              <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
                 <Sparkles size={15} /> 打开审核页
               </button>
             )}

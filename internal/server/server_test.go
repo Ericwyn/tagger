@@ -593,6 +593,46 @@ func TestMatchWriteAPIMarksAcceptedItemsWritePending(t *testing.T) {
 	}
 }
 
+func TestMatchReviewStateAPIUpdatesPersistedDecision(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-review-state", Kind: domain.JobMatch, LibraryID: s.library.Library().ID,
+		Title: "Match", Detail: "review", State: domain.JobReview, Total: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, _ := json.Marshal([]providers.MatchCandidate{{ID: "candidate-review", ProviderID: "test-provider", Title: providers.Field[string]{Value: "Song", Source: "Test"}}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: track.ID, State: "review", Candidates: candidates}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"state":"accepted","selectedCandidateId":"candidate-review"}`)
+	accepted := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if accepted.Code != 200 || !containsJSON(accepted.Body.Bytes(), `"state":"accepted"`) || !containsJSON(accepted.Body.Bytes(), `"selectedCandidateId":"candidate-review"`) {
+		t.Fatalf("accepted review state = %d %s", accepted.Code, accepted.Body.String())
+	}
+	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
+	if err != nil || item.State != "accepted" || item.SelectedCandidateID != "candidate-review" {
+		t.Fatalf("accepted item = %#v err=%v", item, err)
+	}
+	skippedBody := []byte(`{"state":"skipped"}`)
+	skipped := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
+		&ut.Body{Body: bytes.NewReader(skippedBody), Len: len(skippedBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if skipped.Code != 200 || !containsJSON(skipped.Body.Bytes(), `"state":"skipped"`) {
+		t.Fatalf("skipped review state = %d %s", skipped.Code, skipped.Body.String())
+	}
+	invalidBody := []byte(`{"state":"accepted","selectedCandidateId":"missing"}`)
+	invalid := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
+		&ut.Body{Body: bytes.NewReader(invalidBody), Len: len(invalidBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `candidateId`) {
+		t.Fatalf("invalid candidate review state = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestRevisionHistoryAPI(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]
