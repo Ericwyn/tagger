@@ -371,22 +371,26 @@ func patchFromBatchEdit(track domain.Track, operations []domain.BatchEditOperati
 	patch := domain.TagPatch{}
 	for _, operation := range operations {
 		switch operation.Field {
+		case "title":
+			patch.Title = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.Title, operation.Value, operation.Find)}
+		case "artists":
+			patch.Artists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Artists, operation.Value, operation.Find)}
 		case "album":
-			patch.Album = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+			patch.Album = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.Album, operation.Value, operation.Find)}
 		case "albumArtists":
-			patch.AlbumArtists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.AlbumArtists, operation.Value)}
+			patch.AlbumArtists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.AlbumArtists, operation.Value, operation.Find)}
 		case "genres":
-			patch.Genres = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Genres, operation.Value)}
+			patch.Genres = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Genres, operation.Value, operation.Find)}
 		case "comment":
-			patch.Comment = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+			patch.Comment = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.Comment, operation.Value, operation.Find)}
 		case "composers":
-			patch.Composers = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Composers, operation.Value)}
+			patch.Composers = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Composers, operation.Value, operation.Find)}
 		case "conductor":
-			patch.Conductor = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+			patch.Conductor = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.Conductor, operation.Value, operation.Find)}
 		case "lyricists":
-			patch.Lyricists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Lyricists, operation.Value)}
+			patch.Lyricists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Lyricists, operation.Value, operation.Find)}
 		case "copyright":
-			patch.Copyright = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+			patch.Copyright = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.Copyright, operation.Value, operation.Find)}
 		case "bpm":
 			if operation.Mode == domain.BatchEditDelete {
 				patch.BPM = &domain.IntFieldPatch{Op: domain.OperationDelete}
@@ -394,7 +398,7 @@ func patchFromBatchEdit(track domain.Track, operations []domain.BatchEditOperati
 				patch.BPM = &domain.IntFieldPatch{Op: domain.OperationSet, Value: bpm}
 			}
 		case "isrc":
-			patch.ISRC = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+			patch.ISRC = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: batchStringValue(operation.Mode, track.ISRC, operation.Value, operation.Find)}
 		case "year":
 			if operation.Mode == domain.BatchEditDelete {
 				patch.Year = &domain.IntFieldPatch{Op: domain.OperationDelete}
@@ -419,6 +423,16 @@ func batchStringOperation(mode domain.BatchEditMode) domain.Operation {
 	return domain.OperationSet
 }
 
+func batchStringValue(mode domain.BatchEditMode, current, value, find string) string {
+	if mode == domain.BatchEditDelete {
+		return ""
+	}
+	if mode == domain.BatchEditReplace {
+		return strings.ReplaceAll(current, find, value)
+	}
+	return strings.TrimSpace(value)
+}
+
 func batchStringsOperation(mode domain.BatchEditMode) domain.Operation {
 	if mode == domain.BatchEditDelete {
 		return domain.OperationDelete
@@ -426,9 +440,19 @@ func batchStringsOperation(mode domain.BatchEditMode) domain.Operation {
 	return domain.OperationSet
 }
 
-func batchListValue(mode domain.BatchEditMode, current []string, value string) []string {
+func batchListValue(mode domain.BatchEditMode, current []string, value, find string) []string {
 	if mode == domain.BatchEditDelete {
 		return nil
+	}
+	if mode == domain.BatchEditReplace {
+		result := make([]string, 0, len(current))
+		for _, item := range current {
+			item = strings.TrimSpace(strings.ReplaceAll(item, find, value))
+			if item != "" && !slices.Contains(result, item) {
+				result = append(result, item)
+			}
+		}
+		return result
 	}
 	next := splitBatchValues(value)
 	if mode != domain.BatchEditAppend {

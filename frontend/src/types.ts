@@ -177,12 +177,13 @@ export interface WriteSelection {
   artwork?: boolean;
 }
 
-export type BatchEditMode = 'set' | 'append' | 'delete';
+export type BatchEditMode = 'set' | 'append' | 'delete' | 'replace';
 
 export interface BatchEditOperation {
-  field: 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
+  field: 'title' | 'artists' | 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
   mode: BatchEditMode;
   value: string;
+  find?: string;
 }
 
 export interface BatchEditSelection {

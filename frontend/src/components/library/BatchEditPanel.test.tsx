@@ -32,6 +32,18 @@ describe('BatchEditPanel', () => {
     expect(extended.bpm).toBe(128);
   });
 
+  it('applies text and list find-replace operations without introducing duplicates', () => {
+    const replaceTitle = buildBatchPatch({...track, title: '[Live] 再回首'}, [
+      {field: 'title', mode: 'replace', find: '[Live] ', value: ''},
+    ]);
+    expect(replaceTitle.title).toBe('再回首');
+
+    const replaceArtists = buildBatchPatch({...track, artists: ['歌手 (原唱)', '歌手 (原唱)']}, [
+      {field: 'artists', mode: 'replace', find: ' (原唱)', value: ''},
+    ]);
+    expect(replaceArtists.artists).toEqual(['歌手']);
+  });
+
   it('shows a preview and submits selected operations', async () => {
     const user = userEvent.setup();
     const onApply = vi.fn().mockResolvedValue(undefined);
@@ -43,6 +55,27 @@ describe('BatchEditPanel', () => {
 
     await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
     expect(onApply).toHaveBeenCalledWith([{field: 'album', mode: 'set', value: '现场精选'}], false);
+  });
+
+  it('shows separate find and replacement inputs and submits the operation', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    render(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+
+    await user.selectOptions(screen.getByLabelText('标题操作'), 'replace');
+    await user.type(screen.getByLabelText('标题查找'), '再');
+    await user.type(screen.getByLabelText('标题值'), '再（修复）');
+    expect(screen.getByText('再（修复）回首')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
+    expect(onApply).toHaveBeenCalledWith([{field: 'title', mode: 'replace', value: '再（修复）', find: '再'}], false);
+  });
+
+  it('requires find text before enabling a replacement batch write', async () => {
+    const user = userEvent.setup();
+    render(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={vi.fn().mockResolvedValue(undefined)} />);
+    await user.selectOptions(screen.getByLabelText('标题操作'), 'replace');
+    expect(screen.getByRole('button', {name: /应用到 1 首/})).toBeDisabled();
+    expect(screen.getByText(/查找替换必须填写查找内容/)).toBeInTheDocument();
   });
 
   it('exposes extended fields as safe batch operations', async () => {

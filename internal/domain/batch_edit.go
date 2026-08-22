@@ -3,15 +3,17 @@ package domain
 type BatchEditMode string
 
 const (
-	BatchEditSet    BatchEditMode = "set"
-	BatchEditAppend BatchEditMode = "append"
-	BatchEditDelete BatchEditMode = "delete"
+	BatchEditSet     BatchEditMode = "set"
+	BatchEditAppend  BatchEditMode = "append"
+	BatchEditDelete  BatchEditMode = "delete"
+	BatchEditReplace BatchEditMode = "replace"
 )
 
 type BatchEditOperation struct {
 	Field string        `json:"field"`
 	Mode  BatchEditMode `json:"mode"`
 	Value string        `json:"value,omitempty"`
+	Find  string        `json:"find,omitempty"`
 }
 
 type BatchEditItem struct {

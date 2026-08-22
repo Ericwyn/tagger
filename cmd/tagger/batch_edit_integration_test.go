@@ -55,9 +55,13 @@ func TestBatchEditWorkerWithCopiedTestMusic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close()
+	replacedTitle := track.Title + " · 清理"
 	payload := domain.BatchEditPayload{
-		Items:          []domain.BatchEditItem{{TrackID: track.ID, BaseRevision: track.Revision}},
-		Operations:     []domain.BatchEditOperation{{Field: "genres", Mode: domain.BatchEditAppend, Value: "Live"}},
+		Items: []domain.BatchEditItem{{TrackID: track.ID, BaseRevision: track.Revision}},
+		Operations: []domain.BatchEditOperation{
+			{Field: "genres", Mode: domain.BatchEditAppend, Value: "Live"},
+			{Field: "title", Mode: domain.BatchEditReplace, Find: track.Title, Value: replacedTitle},
+		},
 		SequenceTracks: true,
 	}
 	payloadJSON, err := json.Marshal(payload)
@@ -80,7 +84,7 @@ func TestBatchEditWorkerWithCopiedTestMusic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || !slices.Contains(updated.Genres, "Live") {
+	if updated.Title != replacedTitle || updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || !slices.Contains(updated.Genres, "Live") {
 		t.Fatalf("updated track = %#v", updated)
 	}
 	revisions, err := dataStore.ListRevisions(context.Background(), 10)

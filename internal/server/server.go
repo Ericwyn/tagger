@@ -784,23 +784,30 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 		return fmt.Errorf("至少选择一个字段操作或音轨序号操作")
 	}
 	allowed := map[string]bool{
-		"album": true, "albumArtists": true, "year": true, "genres": true,
+		"title": true, "artists": true, "album": true, "albumArtists": true, "year": true, "genres": true,
 		"comment": true, "composers": true, "conductor": true, "lyricists": true,
 		"copyright": true, "bpm": true, "isrc": true,
 	}
-	noAppend := map[string]bool{"album": true, "year": true, "comment": true, "conductor": true, "copyright": true, "bpm": true, "isrc": true}
+	noAppend := map[string]bool{"title": true, "album": true, "year": true, "comment": true, "conductor": true, "copyright": true, "bpm": true, "isrc": true}
+	noReplace := map[string]bool{"year": true, "bpm": true}
 	seenOperations := make(map[string]struct{}, len(payload.Operations))
 	for _, operation := range payload.Operations {
 		if !allowed[operation.Field] {
 			return fmt.Errorf("不支持的批量字段：%s", operation.Field)
 		}
-		if operation.Mode != domain.BatchEditSet && operation.Mode != domain.BatchEditAppend && operation.Mode != domain.BatchEditDelete {
+		if operation.Mode != domain.BatchEditSet && operation.Mode != domain.BatchEditAppend && operation.Mode != domain.BatchEditDelete && operation.Mode != domain.BatchEditReplace {
 			return fmt.Errorf("不支持的批量操作：%s", operation.Mode)
 		}
 		if noAppend[operation.Field] && operation.Mode == domain.BatchEditAppend {
 			return fmt.Errorf("字段 %s 不支持追加操作", operation.Field)
 		}
-		if operation.Mode != domain.BatchEditDelete && strings.TrimSpace(operation.Value) == "" {
+		if noReplace[operation.Field] && operation.Mode == domain.BatchEditReplace {
+			return fmt.Errorf("字段 %s 不支持查找替换", operation.Field)
+		}
+		if operation.Mode == domain.BatchEditReplace && strings.TrimSpace(operation.Find) == "" {
+			return fmt.Errorf("字段 %s 的查找内容不能为空", operation.Field)
+		}
+		if operation.Mode != domain.BatchEditDelete && operation.Mode != domain.BatchEditReplace && strings.TrimSpace(operation.Value) == "" {
 			return fmt.Errorf("字段 %s 的设置值不能为空", operation.Field)
 		}
 		if operation.Field == "year" && operation.Mode != domain.BatchEditDelete {

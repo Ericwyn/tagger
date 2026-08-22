@@ -89,7 +89,7 @@ func TestPrepareCandidateArtworkUsesRegistryReference(t *testing.T) {
 }
 
 func TestPatchFromBatchEditBuildsExplicitOperations(t *testing.T) {
-	track := domain.Track{Album: "旧专辑", AlbumArtists: []string{"原艺人"}, Genres: []string{"Pop"}, Year: ptr(2020)}
+	track := domain.Track{Title: "[Live] 旧标题", Artists: []string{"原艺人 (原唱)", "原艺人 (原唱)"}, Album: "旧专辑", AlbumArtists: []string{"原艺人"}, Genres: []string{"Pop"}, Year: ptr(2020), ISRC: "US-OLD-001"}
 	patch := patchFromBatchEdit(track, []domain.BatchEditOperation{
 		{Field: "album", Mode: domain.BatchEditSet, Value: "新专辑"},
 		{Field: "albumArtists", Mode: domain.BatchEditAppend, Value: "制作人"},
@@ -113,6 +113,14 @@ func TestPatchFromBatchEditBuildsExplicitOperations(t *testing.T) {
 	}, false, 0, 1)
 	if extended.Comment == nil || extended.Comment.Value != "liner note" || extended.Composers == nil || len(extended.Composers.Value) != 2 || extended.BPM == nil || extended.BPM.Value != 128 {
 		t.Fatalf("extended batch patch = %#v", extended)
+	}
+	replaced := patchFromBatchEdit(track, []domain.BatchEditOperation{
+		{Field: "title", Mode: domain.BatchEditReplace, Find: "[Live] ", Value: ""},
+		{Field: "artists", Mode: domain.BatchEditReplace, Find: " (原唱)", Value: ""},
+		{Field: "isrc", Mode: domain.BatchEditReplace, Find: "OLD", Value: "NEW"},
+	}, false, 0, 1)
+	if replaced.Title == nil || replaced.Title.Value != "旧标题" || replaced.Artists == nil || len(replaced.Artists.Value) != 1 || replaced.Artists.Value[0] != "原艺人" || replaced.ISRC == nil || replaced.ISRC.Value != "US-NEW-001" {
+		t.Fatalf("replace batch patch = %#v", replaced)
 	}
 }
 

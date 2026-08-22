@@ -460,6 +460,24 @@ func TestBatchEditAPIQueuesRevisionGuardedJob(t *testing.T) {
 	if invalidAppend.Code != 400 || !containsJSON(invalidAppend.Body.Bytes(), `不支持追加操作`) {
 		t.Fatalf("invalid extended append = %d %s", invalidAppend.Code, invalidAppend.Body.String())
 	}
+	replaceBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"title","mode":"replace","find":"[Live] ","value":""}],"sequenceTracks":false}`)
+	replace := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(replaceBody), Len: len(replaceBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if replace.Code != 202 || !containsJSON(replace.Body.Bytes(), `"kind":"batch_edit"`) {
+		t.Fatalf("replace batch edit = %d %s", replace.Code, replace.Body.String())
+	}
+	missingFindBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"title","mode":"replace","value":""}],"sequenceTracks":false}`)
+	missingFind := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(missingFindBody), Len: len(missingFindBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if missingFind.Code != 400 || !containsJSON(missingFind.Body.Bytes(), `查找内容不能为空`) {
+		t.Fatalf("missing replace find = %d %s", missingFind.Code, missingFind.Body.String())
+	}
+	numericReplaceBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"year","mode":"replace","find":"2020","value":"2021"}],"sequenceTracks":false}`)
+	numericReplace := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(numericReplaceBody), Len: len(numericReplaceBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if numericReplace.Code != 400 || !containsJSON(numericReplace.Body.Bytes(), `不支持查找替换`) {
+		t.Fatalf("numeric replace = %d %s", numericReplace.Code, numericReplace.Body.String())
+	}
 }
 
 func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {

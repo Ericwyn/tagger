@@ -3,13 +3,14 @@ import {Check, ChevronDown, LoaderCircle, Wand2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import type {BatchEditOperation, Track, TrackPatch} from '@/types';
 
-type EditableField = 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
-type OperationMode = '' | 'set' | 'append' | 'delete';
+type EditableField = 'title' | 'artists' | 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
+type OperationMode = '' | 'set' | 'append' | 'delete' | 'replace';
 
 export type BatchOperation = BatchEditOperation;
 
 interface OperationState {
   mode: OperationMode;
+  find: string;
   value: string;
 }
 
@@ -50,6 +51,8 @@ interface BatchEditPanelProps {
 }
 
 const fields: Array<{id: EditableField; label: string; kind: 'text' | 'list' | 'number'; allowAppend?: boolean}> = [
+  {id: 'title', label: '标题', kind: 'text', allowAppend: false},
+  {id: 'artists', label: '艺术家', kind: 'list'},
   {id: 'album', label: '专辑', kind: 'text', allowAppend: false},
   {id: 'albumArtists', label: '专辑艺术家', kind: 'list'},
   {id: 'year', label: '年份', kind: 'number'},
@@ -64,17 +67,19 @@ const fields: Array<{id: EditableField; label: string; kind: 'text' | 'list' | '
 ];
 
 const emptyOperations = (): Record<EditableField, OperationState> => ({
-  album: {mode: '', value: ''},
-  albumArtists: {mode: '', value: ''},
-  year: {mode: '', value: ''},
-  genres: {mode: '', value: ''},
-  comment: {mode: '', value: ''},
-  composers: {mode: '', value: ''},
-  conductor: {mode: '', value: ''},
-  lyricists: {mode: '', value: ''},
-  copyright: {mode: '', value: ''},
-  bpm: {mode: '', value: ''},
-  isrc: {mode: '', value: ''},
+  title: {mode: '', find: '', value: ''},
+  artists: {mode: '', find: '', value: ''},
+  album: {mode: '', find: '', value: ''},
+  albumArtists: {mode: '', find: '', value: ''},
+  year: {mode: '', find: '', value: ''},
+  genres: {mode: '', find: '', value: ''},
+  comment: {mode: '', find: '', value: ''},
+  composers: {mode: '', find: '', value: ''},
+  conductor: {mode: '', find: '', value: ''},
+  lyricists: {mode: '', find: '', value: ''},
+  copyright: {mode: '', find: '', value: ''},
+  bpm: {mode: '', find: '', value: ''},
+  isrc: {mode: '', find: '', value: ''},
 });
 
 export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEditPanelProps) {
@@ -99,7 +104,10 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
   const operations = useMemo(
     () => fields.flatMap(({id}) => {
       const operation = operationState[id];
-      return operation.mode ? [{field: id, mode: operation.mode, value: operation.value}] : [];
+      if (!operation.mode) return [];
+      const result: BatchOperation = {field: id, mode: operation.mode, value: operation.value};
+      if (operation.mode === 'replace') result.find = operation.find;
+      return [result];
     }),
     [operationState],
   );
@@ -110,7 +118,7 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
     if (!template) return;
     const next = emptyOperations();
     template.operations.forEach((operation) => {
-      if (operation.field in next) next[operation.field as EditableField] = {mode: operation.mode, value: operation.value};
+      if (operation.field in next) next[operation.field as EditableField] = {mode: operation.mode, find: operation.find ?? '', value: operation.value};
     });
     setOperationState(next);
     setSequenceTracks(template.sequenceTracks);
@@ -169,7 +177,8 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
 
   const writableCount = tracks.filter((track) => track.writable).length;
   const readOnlyCount = tracks.length - writableCount;
-  const canApply = !saving && (operations.length > 0 || sequenceTracks) && writableCount > 0;
+  const invalidReplace = operations.some((operation) => operation.mode === 'replace' && !operation.find?.trim());
+  const canApply = !saving && !invalidReplace && (operations.length > 0 || sequenceTracks) && writableCount > 0;
 
   return (
     <div className="candidate-layer batch-edit-layer">
@@ -219,16 +228,26 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
                         <option value="">保持不变</option>
                         <option value="set">设置为</option>
                         {field.kind !== 'number' && field.allowAppend !== false && <option value="append">追加</option>}
+                        {field.kind !== 'number' && <option value="replace">查找替换</option>}
                         <option value="delete">删除</option>
                       </select>
                       <ChevronDown size={13} />
                     </label>
+                    {state.mode === 'replace' && (
+                      <input
+                        type="text"
+                        aria-label={`${field.label}查找`}
+                        value={state.find}
+                        placeholder="查找内容"
+                        onChange={(event) => setOperationState((current) => ({...current, [field.id]: {...current[field.id], find: event.target.value}}))}
+                      />
+                    )}
                     <input
                       type={field.kind === 'number' ? 'number' : 'text'}
                       aria-label={`${field.label}值`}
                       value={state.value}
                       disabled={!state.mode || state.mode === 'delete'}
-                      placeholder={mixed}
+                      placeholder={state.mode === 'replace' ? '替换为（可为空）' : mixed}
                       onChange={(event) => setOperationState((current) => ({...current, [field.id]: {...current[field.id], value: event.target.value}}))}
                     />
                   </div>
@@ -259,6 +278,7 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
               </div>
             )}
           </section>
+		  {invalidReplace && <p className="batch-edit-empty">查找替换必须填写查找内容；替换为空可以用于删除匹配文本。</p>}
         </div>
 
         <footer className="batch-edit-footer">
@@ -300,15 +320,17 @@ export function buildBatchPatch(track: Track, operations: BatchOperation[], sequ
     acoustidFingerprint: track.acoustidFingerprint,
   };
   operations.forEach((operation) => {
-    if (operation.field === 'album') patch.album = applyText(operation.mode, track.album, operation.value);
-    if (operation.field === 'albumArtists') patch.albumArtists = applyList(operation.mode, track.albumArtists, operation.value);
-    if (operation.field === 'genres') patch.genres = applyList(operation.mode, track.genres, operation.value);
+    if (operation.field === 'title') patch.title = applyText(operation.mode, track.title, operation.value, operation.find);
+    if (operation.field === 'artists') patch.artists = applyList(operation.mode, track.artists, operation.value, operation.find);
+    if (operation.field === 'album') patch.album = applyText(operation.mode, track.album, operation.value, operation.find);
+    if (operation.field === 'albumArtists') patch.albumArtists = applyList(operation.mode, track.albumArtists, operation.value, operation.find);
+    if (operation.field === 'genres') patch.genres = applyList(operation.mode, track.genres, operation.value, operation.find);
     if (operation.field === 'year') patch.year = applyYear(operation.mode, track.year, operation.value);
-    if (operation.field === 'comment') patch.comment = applyText(operation.mode, track.comment, operation.value);
-    if (operation.field === 'composers') patch.composers = applyList(operation.mode, track.composers, operation.value);
-    if (operation.field === 'conductor') patch.conductor = applyText(operation.mode, track.conductor, operation.value);
-    if (operation.field === 'lyricists') patch.lyricists = applyList(operation.mode, track.lyricists, operation.value);
-    if (operation.field === 'copyright') patch.copyright = applyText(operation.mode, track.copyright, operation.value);
+    if (operation.field === 'comment') patch.comment = applyText(operation.mode, track.comment, operation.value, operation.find);
+    if (operation.field === 'composers') patch.composers = applyList(operation.mode, track.composers, operation.value, operation.find);
+    if (operation.field === 'conductor') patch.conductor = applyText(operation.mode, track.conductor, operation.value, operation.find);
+    if (operation.field === 'lyricists') patch.lyricists = applyList(operation.mode, track.lyricists, operation.value, operation.find);
+    if (operation.field === 'copyright') patch.copyright = applyText(operation.mode, track.copyright, operation.value, operation.find);
     if (operation.field === 'bpm') patch.bpm = applyYear(operation.mode, track.bpm, operation.value);
     if (operation.field === 'isrc') patch.isrc = applyText(operation.mode, track.isrc, operation.value);
   });
@@ -319,14 +341,19 @@ export function buildBatchPatch(track: Track, operations: BatchOperation[], sequ
   return patch;
 }
 
-function applyText(mode: Exclude<OperationMode, ''>, current: string, value: string): string {
+function applyText(mode: Exclude<OperationMode, ''>, current: string, value: string, find = ''): string {
   if (mode === 'delete') return '';
+  if (mode === 'replace') return find ? current.split(find).join(value) : current;
   if (mode === 'append') return current ? `${current} ${value.trim()}`.trim() : value.trim();
   return value.trim();
 }
 
-function applyList(mode: Exclude<OperationMode, ''>, current: string[], value: string): string[] {
+function applyList(mode: Exclude<OperationMode, ''>, current: string[], value: string, find = ''): string[] {
   if (mode === 'delete') return [];
+  if (mode === 'replace') {
+    if (!find) return [...current];
+    return Array.from(new Set(current.map((item) => item.split(find).join(value).trim()).filter(Boolean)));
+  }
   const next = splitList(value);
   if (mode === 'append') return [...current, ...next.filter((item) => !current.includes(item))];
   return next;
@@ -350,6 +377,8 @@ function mixedValue(tracks: Track[], field: EditableField): string {
 }
 
 function displayValue(track: Track | TrackPatch, field: EditableField): string {
+  if (field === 'title') return track.title || '';
+  if (field === 'artists') return track.artists.join(' / ');
   if (field === 'album') return track.album || '';
   if (field === 'albumArtists') return track.albumArtists.join(' / ');
   if (field === 'genres') return track.genres.join(' / ');
