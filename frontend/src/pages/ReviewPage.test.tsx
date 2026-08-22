@@ -35,7 +35,11 @@ describe('ReviewPage field selection', () => {
     expect(screen.getByRole('heading', {name: '再回首'})).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: /更换候选/}));
+    expect(screen.getByRole('dialog', {name: '候选列表'})).toBeInTheDocument();
     expect(screen.getByRole('listbox', {name: '候选列表'})).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', {name: '候选列表'})).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: /更换候选/}));
     await user.click(screen.getByRole('option', {name: /Apple Music.*apple-182911/}));
     expect(screen.getByText(/Apple Music \/ apple-182911/)).toBeInTheDocument();
 

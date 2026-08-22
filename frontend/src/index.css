@@ -4137,10 +4137,57 @@ button:disabled {
   font-size: 11px;
 }
 
-.candidate-picker-wrap {
-  margin: -7px 0 15px;
-  border: 1px solid var(--line);
+.candidate-picker-overlay {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(24, 25, 22, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.candidate-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: default;
+}
+
+.candidate-picker-modal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(680px, 100%);
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
   background: var(--paper-2);
+  box-shadow: var(--shadow);
+}
+
+.candidate-picker-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 17px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.candidate-picker-modal-head h3 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: 21px;
+}
+
+.candidate-picker-modal-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .candidate-picker-option > span {
@@ -4164,7 +4211,8 @@ button:disabled {
 .candidate-picker {
   display: grid;
   gap: 5px;
-  padding: 0 7px 7px;
+  overflow-y: auto;
+  padding: 10px;
   border-top: 1px solid var(--line);
 }
 
@@ -4174,7 +4222,8 @@ button:disabled {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 7px;
+  min-height: 58px;
+  padding: 8px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--ink);

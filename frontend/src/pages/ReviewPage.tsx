@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {
   ArrowLeft,
   Check,
@@ -281,6 +282,15 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 	  setCandidatePickerOpen(false);
 	}, [active?.track.id]);
 
+	useEffect(() => {
+	  if (!candidatePickerOpen) return;
+	  const onKeyDown = (event: KeyboardEvent) => {
+	    if (event.key === 'Escape') setCandidatePickerOpen(false);
+	  };
+	  window.addEventListener('keydown', onKeyDown);
+	  return () => window.removeEventListener('keydown', onKeyDown);
+	}, [candidatePickerOpen]);
+
   const setItemState = (trackId: string, state: ReviewState) => {
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, state} : item));
   };
@@ -522,26 +532,6 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
             </div>
 			{rematchError && <div className="review-rematch-error">{rematchError}</div>}
 
-			{active.candidates.length > 1 && candidatePickerOpen && (
-			  <div className="candidate-picker-wrap">
-				<div className="candidate-picker" role="listbox" aria-label="候选列表">
-					{active.candidates.map((candidate) => (
-					  <button
-						key={candidate.id}
-						role="option"
-						aria-selected={candidate.id === active.candidate?.id}
-						className={cn('candidate-picker-option', candidate.id === active.candidate?.id && 'is-selected')}
-						onClick={() => selectCandidate(active.track.id, candidate)}
-					  >
-						<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
-						<span><strong>{candidate.title.value}</strong><small>{candidate.providerName} · {candidate.externalId}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
-						{candidate.id === active.candidate?.id && <Check size={15} />}
-					  </button>
-					))}
-				</div>
-			  </div>
-			)}
-
             <div className="review-diff-table">
               <div className="review-diff-head"><span>采用</span><span>字段</span><span>当前值</span><span>候选值</span><span>来源</span></div>
               <ReviewDiff field="title" label="标题" current={active.track.title} next={active.candidate.title.value} source={active.candidate.providerName} checked={active.fields.includes('title')} onToggle={() => toggleField(active.track.id, 'title')} />
@@ -622,7 +612,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
             </div>
           </section>
         )}
-        {active && !active.candidate && (
+		{active && !active.candidate && (
           <section className="review-detail">
             <div className="empty-state">
               <span>∅</span>
@@ -635,8 +625,40 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               {rematchError && <small className="review-rematch-error">{rematchError}</small>}
             </div>
           </section>
-        )}
-      </div>
+		)}
+	      </div>
+
+	      {active && active.candidate && active.candidates.length > 1 && candidatePickerOpen && typeof document !== 'undefined' && createPortal(
+		  <div className="candidate-picker-overlay">
+			<button className="candidate-picker-backdrop" type="button" aria-label="关闭候选列表" onClick={() => setCandidatePickerOpen(false)} />
+			<section className="candidate-picker-modal" role="dialog" aria-modal="true" aria-label="候选列表">
+			  <header className="candidate-picker-modal-head">
+				<div>
+				  <span className="eyebrow">CHOOSE A MATCH</span>
+				  <h3>选择候选来源</h3>
+				  <p>{active.track.title} · {active.track.artists.join(' / ') || '未知歌手'}</p>
+				</div>
+				<button className="icon-button" type="button" title="关闭候选列表" aria-label="关闭候选列表" onClick={() => setCandidatePickerOpen(false)}><X size={17} /></button>
+			  </header>
+			  <div className="candidate-picker" role="listbox" aria-label="候选列表">
+				{active.candidates.map((candidate) => (
+				  <button
+					key={candidate.id}
+					role="option"
+					aria-selected={candidate.id === active.candidate?.id}
+					className={cn('candidate-picker-option', candidate.id === active.candidate?.id && 'is-selected')}
+					onClick={() => selectCandidate(active.track.id, candidate)}
+				  >
+					<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
+					<span><strong>{candidate.title.value}</strong><small>{candidate.providerName} · {candidate.externalId}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
+					{candidate.id === active.candidate?.id && <Check size={15} />}
+				  </button>
+				))}
+			  </div>
+			</section>
+		  </div>,
+		  document.body,
+		)}
 
       <footer className="review-footer">
         <div>
