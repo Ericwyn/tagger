@@ -54,6 +54,17 @@ func (s *Store) SetLibraryRoot(ctx context.Context, root string) error {
 	return nil
 }
 
+// ClearLibraryRoot removes the active-root pointer while keeping previously
+// indexed library summaries available for inspection and re-selection. It is
+// used when a persisted root is no longer present on disk and the process
+// must start in the explicit "no active library" state.
+func (s *Store) ClearLibraryRoot(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM system_settings WHERE key=?`, libraryRootSetting); err != nil {
+		return fmt.Errorf("clear library root: %w", err)
+	}
+	return nil
+}
+
 var supportedHistoryRetention = map[int]struct{}{3: {}, 5: {}, 10: {}, 20: {}}
 
 func validateHistoryRetention(value int) error {

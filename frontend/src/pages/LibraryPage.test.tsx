@@ -53,4 +53,15 @@ describe('LibraryPage active library boundary', () => {
     expect(screen.getByRole('button', {name: /Archive 1 首/})).toBeInTheDocument();
     expect(onNotice).toHaveBeenCalledWith('已切换到曲库：Archive');
   });
+
+  it('shows the add-library empty state when the backend has no active root', async () => {
+    api.listLibraries.mockResolvedValue([]);
+    api.listTracks.mockResolvedValue([]);
+    const onOpenSettings = vi.fn();
+    render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={onOpenSettings} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+
+    expect(await screen.findByText('尚未配置音乐曲库')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', {name: '打开设置添加曲库'}));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
 });

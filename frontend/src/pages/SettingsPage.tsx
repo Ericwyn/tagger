@@ -137,7 +137,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     try {
       const items = await listLibraries();
       setLibraries(items);
-      setLibrary(items.find((item) => item.active) ?? items[0]);
+      setLibrary(items.find((item) => item.active));
     } catch (error) {
       setLibraries([]);
       setLibrary(undefined);

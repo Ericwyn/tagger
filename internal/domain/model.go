@@ -99,7 +99,7 @@ type LibrarySummary struct {
 	Name          string       `json:"name"`
 	RootLabel     string       `json:"rootLabel"`
 	RootPath      string       `json:"rootPath,omitempty"`
-	Active        bool         `json:"active,omitempty"`
+	Active        bool         `json:"active"`
 	TrackCount    int          `json:"trackCount"`
 	FolderCount   int          `json:"folderCount"`
 	Writable      bool         `json:"writable"`

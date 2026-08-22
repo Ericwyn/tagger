@@ -321,6 +321,13 @@ func TestLibraryRootSettingPersistsAcrossReopen(t *testing.T) {
 	if err != nil || !found || loaded != root {
 		t.Fatalf("reopened root=%q found=%v err=%v", loaded, found, err)
 	}
+	if err := reopened.ClearLibraryRoot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err = reopened.LibraryRoot(context.Background())
+	if err != nil || found || loaded != "" {
+		t.Fatalf("cleared root=%q found=%v err=%v", loaded, found, err)
+	}
 }
 
 func TestMatchQueryHistoryPersistsNewestQueriesFirst(t *testing.T) {

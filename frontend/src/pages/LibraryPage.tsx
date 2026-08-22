@@ -109,7 +109,10 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     setLoadError('');
     try {
       const [nextLibraries, nextTracks] = await Promise.all([listLibraries(), listTracks()]);
-      const nextLibrary = nextLibraries.find((item) => item.active) ?? nextLibraries[0];
+      // An explicit false/absent active flag means the process is waiting for
+      // the user to choose a root. Do not silently display an unrelated
+      // previously indexed library as the active empty page.
+      const nextLibrary = nextLibraries.find((item) => item.active);
       if (!nextLibrary) throw new Error('尚未配置音乐曲库');
       setLibraries(nextLibraries.map((item) => ({...item, active: item.id === nextLibrary.id})));
       setLibrary({...nextLibrary, active: true});

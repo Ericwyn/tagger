@@ -180,6 +180,12 @@ export function CandidateDrawer({
     [candidates, selectedId],
   );
 
+  const availableFieldIDs = useMemo(
+    () => selected ? fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id) : [],
+    [selected],
+  );
+  const allAvailableFieldsSelected = availableFieldIDs.length > 0 && availableFieldIDs.every((field) => fields.has(field));
+
   useEffect(() => {
     if (!selected) return;
     setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
@@ -383,9 +389,17 @@ export function CandidateDrawer({
                 <div className="field-policy">
                   <div>
                     <strong>选择要采用的字段</strong>
-                    <button onClick={() => setFields(new Set(
-                      fieldOptions.filter((item) => candidateHasField(selected, item.id)).map((item) => item.id),
-                    ))}>全选</button>
+                    <button
+                      type="button"
+                      aria-label={allAvailableFieldsSelected ? '取消全选字段' : '全选可用字段'}
+                      disabled={availableFieldIDs.length === 0}
+                      onClick={() => setFields((current) => {
+                        const next = new Set(current);
+                        if (allAvailableFieldsSelected) availableFieldIDs.forEach((field) => next.delete(field));
+                        else availableFieldIDs.forEach((field) => next.add(field));
+                        return next;
+                      })}
+                    >{allAvailableFieldsSelected ? '全不选' : '全选'}</button>
                   </div>
                   <div className="field-chips">
                     {fieldOptions.map((field) => {

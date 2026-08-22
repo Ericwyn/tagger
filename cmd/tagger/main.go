@@ -88,6 +88,14 @@ func main() {
 			}
 		}
 		if musicDir == "" {
+			// Do not leave a stale setting pointing at an unavailable directory:
+			// the old indexed summary remains selectable, but no library is
+			// active until the user chooses a valid root in Settings.
+			if err := dataStore.ClearLibraryRoot(ctx); err != nil {
+				cancel()
+				logger.Error("clear unavailable library root", "error", err)
+				os.Exit(1)
+			}
 			// Keep scanner and writer valid while the UI shows the empty state.
 			// This private root is removed from the registry after the no-op scan.
 			emptyRoot := filepath.Join(cfg.DataDir, ".tagger-empty-library")

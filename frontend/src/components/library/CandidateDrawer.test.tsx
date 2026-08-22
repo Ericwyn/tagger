@@ -98,6 +98,28 @@ it('passes an explicit artwork choice without exposing the remote URL', async ()
   expect(onApply.mock.calls[0][2]).toEqual({artwork: true, artworkMaxSize: 500});
 });
 
+it('toggles all available metadata fields off when the select-all control is clicked again', async () => {
+  const user = userEvent.setup();
+  render(
+    <CandidateDrawer
+      open
+      track={track}
+      candidates={[candidate]}
+      loading={false}
+      onClose={() => undefined}
+      onApply={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  const selectAll = screen.getByRole('button', {name: '取消全选字段'});
+  expect(screen.getByText(/采用 2 组字段/)).toBeInTheDocument();
+  await user.click(selectAll);
+  expect(screen.getByText(/采用 0 组字段/)).toBeInTheDocument();
+  expect(screen.getByRole('button', {name: '全选可用字段'})).toBeInTheDocument();
+  await user.click(screen.getByRole('button', {name: '全选可用字段'}));
+  expect(screen.getByText(/采用 2 组字段/)).toBeInTheDocument();
+});
+
 it('focuses the lyrics asset when opened from the lyrics inspector tab', () => {
   render(
     <CandidateDrawer
