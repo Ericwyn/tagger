@@ -274,6 +274,7 @@ func main() {
 	defer jobManager.Close()
 
 	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, dataStore, web.Dist(), version.Version, engine.Version())
+	srv.SetAuthToken(cfg.AuthToken)
 	srv.SetJobManager(jobManager)
 	logger.Info("tagger started",
 		"listen", cfg.Listen,

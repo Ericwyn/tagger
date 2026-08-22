@@ -53,6 +53,9 @@ export interface Track {
   acoustidFingerprint: string;
   lyricsSidecar?: SidecarInfo;
   artworkCount: number;
+  artworkWidth?: number;
+  artworkHeight?: number;
+  artworkSizeBytes?: number;
   coverTone: CoverTone;
   health: TrackHealth;
   properties: TrackProperties;

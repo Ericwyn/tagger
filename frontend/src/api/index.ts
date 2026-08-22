@@ -1,5 +1,5 @@
 import * as mock from '@/mock/api';
-import {createRealAPI} from '@/api/real';
+import {APIError, createRealAPI} from '@/api/real';
 import type {
   Job,
   LibrarySummary,
@@ -23,6 +23,8 @@ import type {
 	MatchQueryHistory,
 } from '@/types';
 
+export {APIError};
+
 const configuredMode = import.meta.env.VITE_API_MODE;
 export const apiReadMode: 'mock' | 'real' = configuredMode === 'mock' || import.meta.env.MODE === 'test'
   ? 'mock'
@@ -33,6 +35,14 @@ let realTrackCache = new Map<string, Track>();
 
 export async function getLibrary(): Promise<LibrarySummary> {
   return apiReadMode === 'mock' ? mock.getLibrary() : real.getLibrary();
+}
+
+export function getSystem(): Promise<{version: string; tag_engine: string}> {
+  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock'}) : real.getSystem();
+}
+
+export function setAuthToken(token: string): void {
+  localStorage.setItem('tagger-auth-token', token.trim());
 }
 
 export async function listTracks(): Promise<Track[]> {
@@ -217,20 +227,20 @@ export function audioURL(track: Track): string | undefined {
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/audio?revision=${encodeURIComponent(track.revision)}`;
 }
 
-export async function updateArtwork(trackId: string, file: File | null): Promise<Track> {
+export async function updateArtwork(trackId: string, file: File | null, maxSize = 0): Promise<Track> {
   if (apiReadMode === 'mock') return mock.updateArtwork(trackId, file);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
-  const result = file ? await real.writeArtwork(current, file) : await real.deleteArtwork(current);
+  const result = file ? await real.writeArtwork(current, file, maxSize) : await real.deleteArtwork(current);
   realTrackCache.set(trackId, result.track);
   return result.track;
 }
 
-export async function applyCandidateArtwork(trackId: string, candidateId: string): Promise<Track> {
+export async function applyCandidateArtwork(trackId: string, candidateId: string, maxSize = 0): Promise<Track> {
   if (apiReadMode === 'mock') return mock.updateArtwork(trackId, new File([], 'provider-cover.jpg', {type: 'image/jpeg'}));
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
-  const result = await real.applyCandidateArtwork(current, candidateId);
+  const result = await real.applyCandidateArtwork(current, candidateId, maxSize);
   realTrackCache.set(trackId, result.track);
   return result.track;
 }

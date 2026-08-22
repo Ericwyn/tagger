@@ -12,6 +12,9 @@ describe('Tagger app prototype', () => {
     expect(await screen.findByRole('heading', {name: '全部音乐'})).toBeInTheDocument();
     expect(await screen.findByRole('heading', {name: '再回首'})).toBeInTheDocument();
     expect(screen.getByText('24 首曲目 · 15 首无损音频')).toBeInTheDocument();
+    expect(screen.queryByTitle('全局搜索快捷键')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('查看通知')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('账户与系统信息')).not.toBeInTheDocument();
   });
 
   it('navigates between jobs, history and provider settings', async () => {

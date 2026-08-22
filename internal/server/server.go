@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,8 +42,11 @@ type Server struct {
 	frontend        fs.FS
 	version         string
 	tagEngineInfo   string
+	authToken       string
 	downloadArtwork func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
 }
+
+const authCookieName = "tagger_auth_token"
 
 func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, dataStore *store.Store, frontend fs.FS, version, tagEngineInfo string) *Server {
 	h := hserver.Default(
@@ -71,11 +76,16 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.h.Shutdown(ctx) 
 
 func (s *Server) SetJobManager(manager *jobs.Manager) { s.jobs = manager }
 
+// SetAuthToken enables optional single-user bearer-token protection for API
+// routes. An empty token deliberately keeps local development unauthenticated.
+func (s *Server) SetAuthToken(token string) { s.authToken = strings.TrimSpace(token) }
+
 func (s *Server) routes() {
 	s.h.GET("/healthz", s.handleHealth)
 	s.h.GET("/readyz", s.handleHealth)
 
 	api := s.h.Group("/api/v1")
+	api.Use(s.requireAuth)
 	api.GET("/system", s.handleSystem)
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries/:id/scans", s.handleRescan)
@@ -117,6 +127,42 @@ func (s *Server) routes() {
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
 	s.h.NoRoute(s.handleSPAFallback)
+}
+
+func (s *Server) requireAuth(ctx context.Context, c *app.RequestContext) {
+	if s.authToken == "" {
+		c.Next(ctx)
+		return
+	}
+	authorization := strings.TrimSpace(string(c.Request.Header.Peek("Authorization")))
+	token := ""
+	fromHeader := false
+	if fields := strings.Fields(authorization); len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		token = fields[1]
+		fromHeader = true
+	}
+	if token == "" {
+		token = strings.TrimSpace(string(c.Request.Header.Peek("X-Tagger-Token")))
+		fromHeader = token != ""
+	}
+	if token == "" {
+		encoded := strings.TrimSpace(string(c.Request.Header.Cookie(authCookieName)))
+		if decoded, decodeErr := base64.RawURLEncoding.DecodeString(encoded); decodeErr == nil {
+			token = string(decoded)
+		}
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(s.authToken)) != 1 {
+		c.Header("WWW-Authenticate", `Bearer realm="tagger"`)
+		c.AbortWithStatusJSON(consts.StatusUnauthorized, map[string]any{"error": map[string]string{
+			"code": "auth_required", "message": "需要提供有效的 Tagger 访问令牌",
+		}})
+		return
+	}
+	if fromHeader {
+		encoded := base64.RawURLEncoding.EncodeToString([]byte(token))
+		c.Header("Set-Cookie", authCookieName+"="+encoded+"; Path=/; HttpOnly; SameSite=Strict")
+	}
+	c.Next(ctx)
 }
 
 func (s *Server) handleHealth(_ context.Context, c *app.RequestContext) {
@@ -1675,7 +1721,32 @@ func (s *Server) handleWriteArtwork(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_artwork", err.Error())
 		return
 	}
+	if maxSize, resizeErr := artworkResizeQuery(c); resizeErr != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", resizeErr.Error())
+		return
+	} else if maxSize > 0 {
+		asset, err = artwork.ResizeSquare(asset, maxSize)
+		if err != nil {
+			s.writeError(c, consts.StatusUnprocessableEntity, "invalid_artwork_resize", err.Error())
+			return
+		}
+	}
 	s.handleArtworkMutation(ctx, c, &asset)
+}
+
+func artworkResizeQuery(c *app.RequestContext) (int, error) {
+	value := strings.TrimSpace(string(c.Query("max_size")))
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("max_size must be 500 or 1000")
+	}
+	if parsed != 500 && parsed != 1000 {
+		return 0, fmt.Errorf("max_size must be 500 or 1000")
+	}
+	return parsed, nil
 }
 
 func (s *Server) handleDeleteArtwork(ctx context.Context, c *app.RequestContext) {
@@ -1763,6 +1834,7 @@ func artworkSnapshot(asset *artwork.Asset) *domain.ArtworkSnapshot {
 type matchArtworkRequest struct {
 	CandidateID  string `json:"candidateId"`
 	BaseRevision string `json:"baseRevision"`
+	MaxSize      int    `json:"maxSize"`
 	DryRun       bool   `json:"dryRun"`
 }
 
@@ -1782,6 +1854,10 @@ func (s *Server) handleMatchArtwork(ctx context.Context, c *app.RequestContext) 
 	}
 	if request.CandidateID == "" || request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "candidateId、baseRevision 与一致的 If-Match 不能为空")
+		return
+	}
+	if request.MaxSize != 0 && request.MaxSize != 500 && request.MaxSize != 1000 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", "maxSize 必须为 500 或 1000")
 		return
 	}
 	reference, err := s.providers.ArtworkReference(request.CandidateID)
@@ -1806,6 +1882,13 @@ func (s *Server) handleMatchArtwork(ctx context.Context, c *app.RequestContext) 
 	if err != nil {
 		s.writeError(c, consts.StatusBadGateway, "provider_artwork_failed", err.Error())
 		return
+	}
+	if request.MaxSize > 0 {
+		asset, err = artwork.ResizeSquare(asset, request.MaxSize)
+		if err != nil {
+			s.writeError(c, consts.StatusUnprocessableEntity, "invalid_artwork_resize", err.Error())
+			return
+		}
 	}
 	ref, err := s.library.FileRef(c.Param("id"))
 	if errors.Is(err, library.ErrTrackNotFound) {

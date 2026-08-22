@@ -45,7 +45,7 @@
 | HTTP | code | 场景 |
 |---:|---|---|
 | 400 | `invalid_request` | DTO 或字段规则错误 |
-| 401 | `unauthenticated` | 未登录 |
+| 401 | `auth_required` | 未提供有效的单用户访问令牌 |
 | 403 | `forbidden` / `library_read_only` | 无权限或曲库只读 |
 | 404 | `file_not_found` / `provider_not_found` | 资源不存在 |
 | 409 | `revision_conflict` / `job_state_conflict` | 乐观并发冲突 |
@@ -56,6 +56,11 @@
 | 503 | `provider_unavailable` / `not_ready` | 依赖暂不可用 |
 
 ## 3. 曲库 API
+
+### 3.0 可选单用户鉴权
+
+部署时可通过 `--auth-token` 或 `TAGGER_AUTH_TOKEN` 设置一个实例级访问令牌。令牌为空时不启用鉴权；设置后 `/api/v1/*` 要求
+`Authorization: Bearer <token>`（同时兼容 `X-Tagger-Token`）。`/healthz`、`/readyz` 和嵌入式静态资源保持公开，便于探活和加载令牌输入页。
 
 ### 3.1 管理曲库
 

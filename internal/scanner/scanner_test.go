@@ -1,8 +1,12 @@
 package scanner
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +21,19 @@ import (
 type fakeEngine struct {
 	snapshots map[string]tags.Snapshot
 	errors    map[string]error
+}
+
+type artworkFakeEngine struct {
+	fakeEngine
+	artwork map[string][]byte
+}
+
+func (f artworkFakeEngine) ReadArtwork(_ context.Context, path string, _ int) ([]byte, error) {
+	return f.artwork[filepath.Base(path)], nil
+}
+
+func (f artworkFakeEngine) WriteArtwork(context.Context, string, int, []byte, string) error {
+	return nil
 }
 
 func (f fakeEngine) Read(_ context.Context, path string) (tags.Snapshot, error) {
@@ -136,6 +153,36 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	}
 	if wav.Health != domain.HealthParseError || wav.ParseError == "" {
 		t.Fatalf("parse error = %#v", wav)
+	}
+}
+
+func TestScanRecordsEmbeddedArtworkDimensions(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "cover.flac")
+	mustWriteFile(t, path, nil)
+	var imageData bytes.Buffer
+	imageToEncode := image.NewRGBA(image.Rect(0, 0, 8, 4))
+	imageToEncode.Set(0, 0, color.RGBA{R: 255, A: 255})
+	if err := png.Encode(&imageData, imageToEncode); err != nil {
+		t.Fatal(err)
+	}
+	engine := artworkFakeEngine{
+		fakeEngine: fakeEngine{snapshots: map[string]tags.Snapshot{
+			"cover.flac": {Raw: map[string][]string{"TITLE": {"Cover"}}, ArtworkCount: 1},
+		}},
+		artwork: map[string][]byte{"cover.flac": imageData.Bytes()},
+	}
+	musicScanner, err := New(engine, Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := musicScanner.Scan(context.Background())
+	if err != nil || len(result.Tracks) != 1 {
+		t.Fatalf("scan = %#v err=%v", result, err)
+	}
+	track := result.Tracks[0]
+	if track.ArtworkWidth != 8 || track.ArtworkHeight != 4 || track.ArtworkSizeBytes != int64(len(imageData.Bytes())) {
+		t.Fatalf("artwork dimensions = %dx%d %d, want 8x4 %d", track.ArtworkWidth, track.ArtworkHeight, track.ArtworkSizeBytes, imageData.Len())
 	}
 }
 

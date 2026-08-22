@@ -12,13 +12,13 @@ func TestParseUsesEnvironmentAndFlags(t *testing.T) {
 		"TAGGER_DATA_DIR":     "/var/lib/tagger",
 		"TAGGER_SCAN_WORKERS": "3",
 	}
-	cfg, err := Parse([]string{"--music-dir", "/music/from-flag", "--library-name", "Archive"}, func(key string) string {
+	cfg, err := Parse([]string{"--music-dir", "/music/from-flag", "--library-name", "Archive", "--auth-token", "secret"}, func(key string) string {
 		return environment[key]
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != "0.0.0.0:9000" || cfg.MusicDir != "/music/from-flag" || cfg.DataDir != "/var/lib/tagger" || cfg.LibraryName != "Archive" || cfg.ScanWorkers != 3 {
+	if cfg.Listen != "0.0.0.0:9000" || cfg.MusicDir != "/music/from-flag" || cfg.DataDir != "/var/lib/tagger" || cfg.LibraryName != "Archive" || cfg.AuthToken != "secret" || cfg.ScanWorkers != 3 {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }

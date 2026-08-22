@@ -92,9 +92,10 @@ it('passes an explicit artwork choice without exposing the remote URL', async ()
   );
 
   await user.click(screen.getByRole('checkbox', {name: /封面/}));
+  await user.selectOptions(screen.getByRole('combobox', {name: '封面写入尺寸'}), '500');
   await user.click(screen.getByRole('button', {name: '采用所选资料'}));
   await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
-  expect(onApply.mock.calls[0][2]).toEqual({artwork: true});
+  expect(onApply.mock.calls[0][2]).toEqual({artwork: true, artworkMaxSize: 500});
 });
 
 it('focuses the lyrics asset when opened from the lyrics inspector tab', () => {

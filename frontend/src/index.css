@@ -515,6 +515,85 @@ button:disabled {
   letter-spacing: 0.08em;
 }
 
+.auth-gate {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100dvh;
+  padding: 24px;
+  background: var(--paper-2);
+}
+
+.auth-gate-card {
+  width: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.auth-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 18px;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.auth-gate-card h1 {
+  margin: 7px 0 0;
+  font-family: var(--display);
+  font-size: 26px;
+}
+
+.auth-gate-card p {
+  margin: 8px 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-gate-card form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-gate-card label {
+  display: grid;
+  gap: 5px;
+}
+
+.auth-gate-card label span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auth-gate-card input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-2);
+  color: var(--ink);
+  font: inherit;
+}
+
+.auth-gate-status,
+.auth-gate-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.auth-gate-error {
+  margin-top: 12px;
+  color: var(--danger);
+}
+
 /* Generated cover art */
 .cover-art {
   position: relative;
@@ -2921,8 +3000,10 @@ button:disabled {
 }
 
 .score-ring {
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
   width: 46px;
   height: 46px;
   border: 2px solid var(--success);
@@ -2934,8 +3015,7 @@ button:disabled {
 }
 
 .score-ring small {
-  margin-top: -14px;
-  margin-left: 22px;
+  margin: 0;
   font-family: var(--sans);
   font-size: 11px;
 }
@@ -2953,6 +3033,22 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 15px;
+}
+
+.candidate-cover-stack {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.cover-dimension,
+.artwork-size-meta {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
 }
 
 .candidate-summary h3 {
@@ -3228,6 +3324,37 @@ button:disabled {
 
 .asset-options small {
   margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.artwork-size-control {
+  display: grid;
+  grid-template-columns: auto minmax(150px, 1fr);
+  align-items: center;
+  gap: 6px 9px;
+  margin-top: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.artwork-size-control > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.artwork-size-control select {
+  min-height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.artwork-size-control small {
+  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 11px;
 }
@@ -4377,7 +4504,9 @@ button:disabled {
 
 .provider-card {
   position: relative;
-  min-height: 195px;
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
   padding: 15px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--paper-3) 45%, transparent);
@@ -4477,22 +4606,23 @@ button:disabled {
 }
 
 .provider-foot {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  left: 14px;
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  margin-top: auto;
   padding-top: 9px;
   border-top: 1px solid var(--line);
 }
 
 .provider-foot small {
   flex: 1;
+  min-width: 0;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .provider-foot button {
@@ -4655,6 +4785,15 @@ button:disabled {
   padding: 7px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--paper-3) 55%, transparent);
+}
+
+.provider-test-candidate > .cover-art {
+  flex: 0 0 62px;
+  width: 62px;
+  min-width: 62px;
+  height: 62px;
+  min-height: 62px;
+  aspect-ratio: 1 / 1;
 }
 
 .provider-test-candidate > div {
@@ -4933,6 +5072,12 @@ button:disabled {
 .system-settings p {
   margin: 3px 0 0;
   color: var(--muted);
+  font-size: 11px;
+}
+
+.system-value {
+  color: var(--muted);
+  font-family: var(--mono);
   font-size: 11px;
 }
 

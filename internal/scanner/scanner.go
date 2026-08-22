@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/tags"
 )
@@ -226,6 +227,17 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 		return track, readErr
 	}
 	applySnapshot(&track, snapshot)
+	if snapshot.ArtworkCount > 0 {
+		if artworkEngine, ok := s.engine.(tags.ArtworkEngine); ok {
+			if data, artworkErr := artworkEngine.ReadArtwork(ctx, path, 0); artworkErr == nil {
+				if asset, describeErr := artwork.Describe(data); describeErr == nil {
+					track.ArtworkWidth = asset.Width
+					track.ArtworkHeight = asset.Height
+					track.ArtworkSizeBytes = int64(asset.Size)
+				}
+			}
+		}
+	}
 	sidecarLyrics, sidecarInfo := readSidecar(path)
 	if track.Lyrics == "" {
 		track.Lyrics = sidecarLyrics

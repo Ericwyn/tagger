@@ -65,3 +65,39 @@ func TestValidateRejectsMIMEConfusionAndInvalidData(t *testing.T) {
 		t.Fatalf("oversized image error = %v", err)
 	}
 }
+
+func TestResizeSquareCenterCropsAndScales(t *testing.T) {
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 8, 4))); err != nil {
+		t.Fatal(err)
+	}
+	original, err := Validate(data.Bytes(), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resized, err := ResizeSquare(original, 3)
+	if !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("invalid size error = %v", err)
+	}
+	if resized.Width != 0 || resized.Height != 0 {
+		t.Fatalf("invalid resize returned asset = %#v", resized)
+	}
+	resized, err = ResizeSquare(original, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resized.Width != 4 || resized.Height != 4 || resized.MIME != "image/png" {
+		t.Fatalf("square crop = %#v", resized)
+	}
+	resized, err = ResizeSquare(original, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resized.Width != 4 || resized.Height != 4 {
+		t.Fatalf("small image should not upscale = %#v", resized)
+	}
+	unchanged, err := ResizeSquare(original, 0)
+	if err != nil || unchanged.Hash != original.Hash || unchanged.Width != original.Width || unchanged.Height != original.Height {
+		t.Fatalf("original = %#v err=%v", unchanged, err)
+	}
+}

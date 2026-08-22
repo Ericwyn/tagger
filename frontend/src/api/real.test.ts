@@ -16,6 +16,19 @@ const library: LibrarySummary = {
 const track = {id: 'trk-1', title: 'Song'} as Track;
 
 describe('real API client', () => {
+  it('probes system and forwards the optional single-user token', async () => {
+    localStorage.setItem('tagger-auth-token', 'secret-token');
+    try {
+      const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {version: 'dev', tag_engine: 'taglib'}}), {status: 200}));
+      const api = createRealAPI(fetcher);
+
+      await expect(api.getSystem()).resolves.toEqual({version: 'dev', tag_engine: 'taglib'});
+      expect((fetcher.mock.calls[0][1] as RequestInit).headers).toEqual(expect.objectContaining({Authorization: 'Bearer secret-token'}));
+    } finally {
+      localStorage.removeItem('tagger-auth-token');
+    }
+  });
+
   it('unwraps library and track responses', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({data: [library]}), {status: 200}))
@@ -386,10 +399,10 @@ describe('real API client', () => {
 	const api = createRealAPI(fetcher);
 	const file = new File([new Uint8Array([137, 80, 78, 71])], 'cover.png', {type: 'image/png'});
 
-	await expect(api.writeArtwork(fullTrack, file)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(uploadedTrack)}));
+	await expect(api.writeArtwork(fullTrack, file, 1000)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(uploadedTrack)}));
 	await expect(api.deleteArtwork(uploadedTrack)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(deletedTrack)}));
 	const uploadInit = fetcher.mock.calls[0][1] as RequestInit;
-	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/artwork/0');
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/artwork/0?max_size=1000');
 	expect(uploadInit).toEqual(expect.objectContaining({method: 'PUT', body: file}));
 	expect(uploadInit.headers).toEqual(expect.objectContaining({'Content-Type': 'image/png', 'If-Match': '"art-rev-1"'}));
 	const deleteInit = fetcher.mock.calls[1][1] as RequestInit;
@@ -405,12 +418,12 @@ describe('real API client', () => {
 	}), {status: 200}));
 	const api = createRealAPI(fetcher);
 
-	await expect(api.applyCandidateArtwork(fullTrack, 'cand/apple')).resolves.toEqual(expect.objectContaining({track: normalizeTrack(updated)}));
+	await expect(api.applyCandidateArtwork(fullTrack, 'cand/apple', 500)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(updated)}));
 	const [path, init] = fetcher.mock.calls[0] as [string, RequestInit];
 	expect(path).toBe('/api/v1/matches/tracks/trk-1/artwork');
 	expect(init.headers).toEqual(expect.objectContaining({'If-Match': '"provider-art-rev"'}));
 	expect(JSON.parse(String(init.body))).toEqual({
-	  candidateId: 'cand/apple', baseRevision: 'provider-art-rev', dryRun: false,
+		candidateId: 'cand/apple', baseRevision: 'provider-art-rev', maxSize: 500, dryRun: false,
 	});
   });
 });

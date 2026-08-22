@@ -49,6 +49,11 @@ export interface ScanResult {
   report: ScanReport;
 }
 
+export interface SystemInfo {
+  version: string;
+  tag_engine: string;
+}
+
 interface FieldOperation<T> {
   op: 'set' | 'delete';
   value?: T;
@@ -74,6 +79,13 @@ export class APIError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+const authTokenKey = 'tagger-auth-token';
+
+function storedAuthToken(): string {
+  if (typeof localStorage === 'undefined') return '';
+  return localStorage.getItem(authTokenKey)?.trim() ?? '';
 }
 
 function stringArray(value: unknown): string[] {
@@ -119,10 +131,12 @@ function normalizeTrackResult<T extends {track: Track}>(result: T): T {
 
 export function createRealAPI(fetcher: typeof fetch = fetch) {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
+    const token = storedAuthToken();
     const response = await fetcher(path, {
       ...init,
       headers: {
         Accept: 'application/json',
+        ...(token ? {Authorization: `Bearer ${token}`} : {}),
         ...init?.headers,
       },
     });
@@ -138,6 +152,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
   }
 
   return {
+    getSystem(): Promise<SystemInfo> {
+      return request<SystemInfo>('/api/v1/system');
+    },
+
     async getLibrary(): Promise<LibrarySummary> {
       const libraries = await request<LibrarySummary[]>('/api/v1/libraries');
       if (!libraries[0]) throw new APIError(404, 'library_not_found', '尚未配置音乐曲库');
@@ -170,6 +188,8 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	},
 
 	subscribeJobEvents(jobId: string, onJob: (job: Job) => void): () => void {
+	  // The backend exchanges the header token for an HttpOnly same-origin
+	  // cookie, so native EventSource can authenticate without custom headers.
 	  if (typeof EventSource === 'undefined') return () => undefined;
 	  const source = new EventSource(`/api/v1/jobs/${encodeURIComponent(jobId)}/events`);
 	  const handler = (event: Event) => {
@@ -337,8 +357,9 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       }).then(normalizeTrackResult);
     },
 
-    writeArtwork(track: Track, file: File): Promise<ArtworkWriteResult> {
-	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0`, {
+    writeArtwork(track: Track, file: File, maxSize = 0): Promise<ArtworkWriteResult> {
+	  const query = maxSize > 0 ? `?max_size=${maxSize}` : '';
+	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0${query}`, {
 		method: 'PUT',
 		headers: {'Content-Type': file.type || 'application/octet-stream', 'If-Match': `"${track.revision}"`},
 		body: file,
@@ -367,11 +388,11 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  }).then(normalizeTrackResult);
 	},
 
-	applyCandidateArtwork(track: Track, candidateId: string): Promise<ArtworkWriteResult> {
+	applyCandidateArtwork(track: Track, candidateId: string, maxSize = 0): Promise<ArtworkWriteResult> {
 	  return request<ArtworkWriteResult>(`/api/v1/matches/tracks/${encodeURIComponent(track.id)}/artwork`, {
 		method: 'POST',
 		headers: {'Content-Type': 'application/json', 'If-Match': `"${track.revision}"`},
-		body: JSON.stringify({candidateId, baseRevision: track.revision, dryRun: false}),
+		body: JSON.stringify({candidateId, baseRevision: track.revision, maxSize, dryRun: false}),
 	  }).then(normalizeTrackResult);
 	},
   };

@@ -7,11 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
+	"image/jpeg"
+	"image/png"
 	"net/http"
 	"strings"
 
+	xdraw "golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
 
@@ -21,6 +22,7 @@ const (
 )
 
 var ErrInvalid = errors.New("invalid artwork")
+var ErrInvalidResize = errors.New("invalid artwork resize")
 
 type Asset struct {
 	Data   []byte `json:"-"`
@@ -78,4 +80,66 @@ func normalizeMIME(value string) string {
 
 func Describe(data []byte) (Asset, error) {
 	return Validate(data, "")
+}
+
+// ResizeSquare center-crops an artwork to a square and scales it down to the
+// requested maximum edge. A zero maxDimension keeps the original bytes. The
+// output is always revalidated so the existing byte, pixel and MIME limits
+// remain in force after transformation.
+func ResizeSquare(asset Asset, maxDimension int) (Asset, error) {
+	if maxDimension == 0 {
+		return Asset{Data: append([]byte(nil), asset.Data...), MIME: asset.MIME, Format: asset.Format, Width: asset.Width, Height: asset.Height, Size: asset.Size, Hash: asset.Hash}, nil
+	}
+	if maxDimension != 500 && maxDimension != 1000 {
+		return Asset{}, fmt.Errorf("%w: supported sizes are 500 or 1000", ErrInvalidResize)
+	}
+	source, _, err := image.Decode(bytes.NewReader(asset.Data))
+	if err != nil {
+		return Asset{}, fmt.Errorf("%w: decode image: %v", ErrInvalidResize, err)
+	}
+	bounds := source.Bounds()
+	side := bounds.Dx()
+	if bounds.Dy() < side {
+		side = bounds.Dy()
+	}
+	if side <= 0 {
+		return Asset{}, fmt.Errorf("%w: image has no pixels", ErrInvalidResize)
+	}
+	crop := image.Rect(
+		bounds.Min.X+(bounds.Dx()-side)/2,
+		bounds.Min.Y+(bounds.Dy()-side)/2,
+		bounds.Min.X+(bounds.Dx()-side)/2+side,
+		bounds.Min.Y+(bounds.Dy()-side)/2+side,
+	)
+	targetSide := side
+	if targetSide > maxDimension {
+		targetSide = maxDimension
+	}
+	destination := image.NewRGBA(image.Rect(0, 0, targetSide, targetSide))
+	xdraw.CatmullRom.Scale(destination, destination.Bounds(), source, crop, xdraw.Over, nil)
+
+	var output bytes.Buffer
+	mimeType := asset.MIME
+	switch mimeType {
+	case "image/png":
+		if err := png.Encode(&output, destination); err != nil {
+			return Asset{}, fmt.Errorf("%w: encode PNG: %v", ErrInvalidResize, err)
+		}
+	case "image/jpeg":
+		if err := jpeg.Encode(&output, destination, &jpeg.Options{Quality: 92}); err != nil {
+			return Asset{}, fmt.Errorf("%w: encode JPEG: %v", ErrInvalidResize, err)
+		}
+	default:
+		// Go has no WebP encoder in the standard/x-image packages; a validated
+		// WebP input is safely converted to JPEG for the resized output.
+		mimeType = "image/jpeg"
+		if err := jpeg.Encode(&output, destination, &jpeg.Options{Quality: 92}); err != nil {
+			return Asset{}, fmt.Errorf("%w: encode JPEG: %v", ErrInvalidResize, err)
+		}
+	}
+	resized, err := Validate(output.Bytes(), mimeType)
+	if err != nil {
+		return Asset{}, fmt.Errorf("%w: validate resized image: %v", ErrInvalidResize, err)
+	}
+	return resized, nil
 }

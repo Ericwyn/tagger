@@ -12,9 +12,10 @@ interface CoverArtProps {
   imageUrl?: string;
   blankOnImageError?: boolean;
   className?: string;
+  onImageInfo?: (info: {width: number; height: number}) => void;
 }
 
-export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, blankOnImageError = false, className}: CoverArtProps) {
+export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, blankOnImageError = false, className, onImageInfo}: CoverArtProps) {
 	const [imageFailed, setImageFailed] = useState(false);
 
 	useEffect(() => setImageFailed(false), [imageUrl]);
@@ -29,7 +30,7 @@ export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, b
 
   return (
     <div className={cn('cover-art', `cover-${tone}`, `cover-${size}`, className)} aria-label={`${title} 封面`}>
-	  {imageUrl && !imageFailed && <img className="cover-image" src={imageUrl} alt="" onError={() => setImageFailed(true)} />}
+      {imageUrl && !imageFailed && <img className="cover-image" src={imageUrl} alt="" onError={() => setImageFailed(true)} onLoad={(event) => onImageInfo?.({width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight})} />}
       <span className="cover-index">{initials(artist || title)}</span>
       <span className="cover-title">{title}</span>
       <span className="cover-rule" />

@@ -358,8 +358,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 </section>
                 <section>
                   <div className="system-icon"><KeyRound size={19} /></div>
-                  <div><strong>管理员会话</strong><p>HttpOnly session · Origin 检查 · CSRF 防护</p></div>
-                  <button className="secondary-button">修改密码</button>
+                  <div><strong>访问鉴权令牌</strong><p>单用户 Bearer token；通过 --auth-token 或 TAGGER_AUTH_TOKEN 启用，未配置时不鉴权。</p></div>
+                  <span className="system-value">启动参数配置</span>
                 </section>
                 <section>
                   <div className="system-icon"><ShieldCheck size={19} /></div>

@@ -25,7 +25,7 @@ interface CandidateDrawerProps {
   showGeneratedCovers?: boolean;
   onSearchQuery?: (query: CandidateSearchQuery) => Promise<void>;
   onClose: () => void;
-  onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean}) => Promise<void>;
+  onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean; artworkMaxSize?: number}) => Promise<void>;
 }
 
 const fieldOptions = [
@@ -112,7 +112,9 @@ export function CandidateDrawer({
   const [applying, setApplying] = useState(false);
   const [includeLyrics, setIncludeLyrics] = useState(false);
   const [lyricsDraft, setLyricsDraft] = useState('');
+  const [selectedArtworkInfo, setSelectedArtworkInfo] = useState<{width: number; height: number}>();
   const [includeArtwork, setIncludeArtwork] = useState(false);
+  const [artworkMaxSize, setArtworkMaxSize] = useState(0);
   const [queryEditing, setQueryEditing] = useState(false);
   const [queryDraft, setQueryDraft] = useState<CandidateSearchQuery>({title: '', artists: [], album: '', durationSeconds: 0});
   const [queryArtistsDraft, setQueryArtistsDraft] = useState('');
@@ -124,7 +126,9 @@ export function CandidateDrawer({
     const first = candidates[0];
     setIncludeLyrics(focus === 'lyrics' && Boolean(first?.hasLyrics && first.lyrics?.value));
     setLyricsDraft(first?.lyrics?.value ?? '');
+    setSelectedArtworkInfo(undefined);
     setIncludeArtwork(false);
+    setArtworkMaxSize(0);
   }, [candidates, focus]);
 
   useEffect(() => {
@@ -181,7 +185,9 @@ export function CandidateDrawer({
     setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
     setIncludeLyrics(focus === 'lyrics' && Boolean(selected.hasLyrics && selected.lyrics?.value));
     setLyricsDraft(selected.lyrics?.value ?? '');
+    setSelectedArtworkInfo(undefined);
     setIncludeArtwork(false);
+    setArtworkMaxSize(0);
   }, [focus, selected]);
 
   if (!open || !track) return null;
@@ -342,15 +348,23 @@ export function CandidateDrawer({
             {selected && (
               <section className="candidate-detail-pane">
                 <div className="candidate-summary">
-                  <CoverArt
-                    title={selected.title.value}
-                    artist={selected.artists.value[0]}
-                    tone={selected.coverTone}
-                    missing={!showGeneratedCovers && !candidateArtworkURL(selected)}
-                    imageUrl={candidateArtworkURL(selected)}
-                    blankOnImageError={!showGeneratedCovers}
-                    size="md"
-                  />
+                  <div className="candidate-cover-stack">
+                    <CoverArt
+                      title={selected.title.value}
+                      artist={selected.artists.value[0]}
+                      tone={selected.coverTone}
+                      missing={!showGeneratedCovers && !candidateArtworkURL(selected)}
+                      imageUrl={candidateArtworkURL(selected)}
+                      blankOnImageError={!showGeneratedCovers}
+                      size="md"
+                      onImageInfo={setSelectedArtworkInfo}
+                    />
+                    <small className="cover-dimension">
+                      {selectedArtworkInfo
+                        ? `候选封面 · ${selectedArtworkInfo.width}×${selectedArtworkInfo.height}`
+                        : selected.hasArtwork ? '候选封面 · 加载后显示尺寸' : '候选未提供封面'}
+                    </small>
+                  </div>
                   <div>
                     <span className={cn('confidence-badge', selected.score < 0.8 && 'is-warning')}>
                       {selected.score < 0.8 ? <CircleAlert size={13} /> : <Check size={13} />}
@@ -461,6 +475,15 @@ export function CandidateDrawer({
                     <span><strong>同时写入歌词</strong><small>{selected.hasLyrics ? '勾选后把上方编辑后的歌词写入音频标签；不勾选则保留现有歌词' : '当前来源不提供歌词'}</small></span>
                   </label>
                 </div>
+                <label className="artwork-size-control">
+                  <span>封面写入尺寸</span>
+                  <select aria-label="封面写入尺寸" value={artworkMaxSize} disabled={!includeArtwork} onChange={(event) => setArtworkMaxSize(Number(event.target.value))}>
+                    <option value={0}>保留原图</option>
+                    <option value={1000}>居中裁剪至 1000×1000</option>
+                    <option value={500}>居中裁剪至 500×500</option>
+                  </select>
+                  <small>只在勾选写入封面时生效，原图不会被修改。</small>
+                </label>
               </section>
             )}
           </div>
@@ -477,7 +500,7 @@ export function CandidateDrawer({
                 if (!selected) return;
                 setApplying(true);
                 try {
-				  await onApply(buildPatch(), selected, {artwork: includeArtwork});
+                  await onApply(buildPatch(), selected, {artwork: includeArtwork, ...(includeArtwork && artworkMaxSize > 0 ? {artworkMaxSize} : {})});
                   onClose();
                 } finally {
                   setApplying(false);

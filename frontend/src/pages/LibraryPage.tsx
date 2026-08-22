@@ -203,7 +203,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     }
   };
 
-	const applyCandidate = async (patch: TrackPatch, candidate: MatchCandidate, includeArtwork: boolean) => {
+	const applyCandidate = async (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean; artworkMaxSize?: number}) => {
 	  if (!activeTrack) return;
 	  setSaving(true);
 	  let tagsApplied = false;
@@ -211,14 +211,14 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
 		let updated = await updateTrack(activeTrack.id, patch, {providerId: candidate.providerId});
 		tagsApplied = true;
 		setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
-		if (includeArtwork) {
-		  updated = await applyCandidateArtwork(updated.id, candidate.id);
+		if (options.artwork) {
+		  updated = await applyCandidateArtwork(updated.id, candidate.id, options.artworkMaxSize ?? 0);
 		  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
 		}
-		onNotice(`已采用 ${candidate.providerName} 候选并安全写入${includeArtwork ? '标签与封面' : '音乐标签'}`);
+		onNotice(`已采用 ${candidate.providerName} 候选并安全写入${options.artwork ? '标签与封面' : '音乐标签'}`);
 	  } catch (error) {
 		const message = error instanceof Error ? error.message : '候选资料应用失败';
-		onNotice(tagsApplied && includeArtwork ? `标签已写入，但候选封面应用失败：${message}` : message);
+		onNotice(tagsApplied && options.artwork ? `标签已写入，但候选封面应用失败：${message}` : message);
 	  } finally {
 		setSaving(false);
 	  }
@@ -244,19 +244,19 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     }
   };
 
-  const changeArtwork = async (file: File | null) => {
-	if (!activeTrack) return;
-	setSaving(true);
-	try {
-	  const updated = await updateArtwork(activeTrack.id, file);
-	  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
-	  onNotice(file ? '封面已验证并安全写入音乐文件' : '当前封面已安全删除并记录历史');
-	} catch (error) {
-	  onNotice(error instanceof Error ? error.message : '封面操作失败');
-	} finally {
-	  setSaving(false);
-	}
-  };
+	const changeArtwork = async (file: File | null, maxSize = 0) => {
+	  if (!activeTrack) return;
+	  setSaving(true);
+	  try {
+		const updated = await updateArtwork(activeTrack.id, file, maxSize);
+		setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+		onNotice(file ? '封面已验证并安全写入音乐文件' : '当前封面已安全删除并记录历史');
+	  } catch (error) {
+		onNotice(error instanceof Error ? error.message : '封面操作失败');
+	  } finally {
+		setSaving(false);
+	  }
+	};
 
   const toggleTrack = (id: string) => {
     setSelectedIds((current) => {
@@ -541,8 +541,8 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
         focus={candidateFocus}
 		showGeneratedCovers={showGeneratedCovers}
 		onSearchQuery={(query) => openCandidateSearch(candidateFocus, query)}
-        onClose={() => setCandidateOpen(false)}
-		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options.artwork)}
+		onClose={() => setCandidateOpen(false)}
+		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options)}
       />
 
       <BatchEditPanel

@@ -1,6 +1,4 @@
 import {
-  Bell,
-  Command,
   History,
   LibraryBig,
   ListTodo,
@@ -49,24 +47,14 @@ export function TopBar({page, onNavigate, dark, onToggleTheme}: TopBarProps) {
           >
             <Icon size={16} aria-hidden="true" />
             <span>{label}</span>
-            {id === 'jobs' && <em>1</em>}
           </button>
         ))}
       </nav>
 
       <div className="top-actions">
-        <div className="command-hint" title="全局搜索快捷键">
-          <Command size={13} />
-          <span>K</span>
-        </div>
         <button className="icon-button" title={dark ? '切换浅色主题' : '切换深色主题'} onClick={onToggleTheme}>
           {dark ? <SunMedium size={18} /> : <MoonStar size={18} />}
         </button>
-        <button className="icon-button notification-button" title="查看通知">
-          <Bell size={18} />
-          <span />
-        </button>
-        <button className="avatar-button" title="账户与系统信息">EW</button>
       </div>
     </header>
   );

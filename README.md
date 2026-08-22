@@ -20,6 +20,7 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 每次成功标签写入都会记录字段 diff、写入前后标签快照和 revision，历史页已经接通真实 API。
 - 历史页支持先预览、再确认恢复到某次修改前；恢复使用相同的 revision 冲突检查、原子替换与写后验证，并生成新的审计修订。
 - 可读取并真实展示嵌入封面；支持 JPEG/PNG/WebP 上传、二次确认删除、10 MiB/40MP 安全校验、原子写入和封面操作审计，MP3/FLAC/WAV 均已验证。
+- 曲目检查器和匹配详情展示封面像素尺寸/字节数；上传或采用远程封面前可选择保留原图，或居中裁剪缩小到 1000×1000 / 500×500。
 - 候选抽屉可采用 MusicBrainz/Apple 封面；远程 URL 只保留在后端短期引用中，并经过 HTTPS、来源域名、重定向、DNS 公网地址、大小和解码校验。
 - 快速扫描使用 SQLite 持久化任务队列，HTTP 立即返回任务 ID；worker 原子领取，重启恢复等待任务，任务中心展示真实进度和结果。
 - Provider 搜索结果按规范化查询写入 SQLite TTL 缓存，重启后仍可命中；设置页的数据源启停状态实时持久化，并提供真实连接测试。
@@ -40,6 +41,7 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 曲库试听已提升为跨页面全局播放器；切换任务、历史或设置页面时保持播放状态。
 - 任务中心状态 Tab、审核接受/跳过/更换候选状态持久化、候选封面安全预览已接通真实 API；远程封面预览失败时默认保持空白。
 - 内嵌元数据已扩展到注释、作曲家、指挥、作词家、版权、BPM、ISRC、MusicBrainz 和 AcoustID 标识；Inspector、候选审核和批量编辑均按字段策略处理。
+- 支持可选单用户访问令牌；配置 `--auth-token` 或 `TAGGER_AUTH_TOKEN` 后 API 使用 Bearer 令牌保护，未配置时不启用鉴权。
 
 正在实现：
 
@@ -47,7 +49,7 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 网易云/酷我实验性接口的长期兼容和正式授权接入。
 - Provider 密钥等敏感配置的加密存储与缓存管理界面。
 - 音频标签与 sidecar 的批量编排，以及更细粒度的跨文件部分失败恢复。
-- 目录导入/导出标签快照、CSV/JSON 变更预览，以及管理员认证和敏感 Provider 配置加密存储。
+- 目录导入/导出标签快照、CSV/JSON 变更预览，以及敏感 Provider 配置加密存储。
 
 写标签会直接修改曲库中的音乐文件。首次使用前请确认音乐目录有独立备份；revision 冲突和写后验证不能代替文件系统备份。
 
@@ -73,6 +75,16 @@ make build
 ```bash
 TAGGER_MUSIC_DIR=/path/to/music TAGGER_DATA_DIR=/path/to/tagger-data TAGGER_LISTEN=0.0.0.0:8080 ./dist/tagger
 ```
+
+如果需要单用户访问保护，可以在启动时配置令牌；不配置时不会要求鉴权：
+
+```bash
+./dist/tagger --music-dir /path/to/music --auth-token 'replace-with-a-long-random-token'
+# 或：TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' ./dist/tagger --music-dir /path/to/music
+```
+
+配置令牌后，浏览器会在首次打开时显示令牌输入页；API 客户端使用
+`Authorization: Bearer <token>`（也兼容 `X-Tagger-Token`）。浏览器成功验证后会获得同源 HttpOnly cookie，因此封面、音频和任务 SSE 也能正常加载。健康检查和嵌入式静态资源保持公开。
 
 `TAGGER_DATA_DIR` 默认是当前工作目录下的 `./data`，其中保存 `tagger.db`、WAL 和后续缓存。音乐文件仍是标签事实源；SQLite 是可重建的索引与标签级历史，不是音频文件备份。外部程序修改文件后需要在界面执行重新扫描。
 

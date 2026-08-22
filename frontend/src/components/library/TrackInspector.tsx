@@ -32,7 +32,7 @@ interface TrackInspectorProps {
   onCloseMobile: () => void;
   onSearch: (focus?: 'metadata' | 'lyrics') => void;
   onSave: (patch: TrackPatch, options?: TrackSaveOptions) => Promise<void>;
-  onArtworkChange: (file: File | null) => Promise<void>;
+  onArtworkChange: (file: File | null, maxSize?: number) => Promise<void>;
   playerTrackId?: string;
   playerPlaying?: boolean;
   onPlayTrack?: (track: Track) => void;
@@ -134,6 +134,7 @@ export function TrackInspector({
   const [showPreview, setShowPreview] = useState(false);
   const [fallbackPlaying, setFallbackPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
+  const [artworkMaxSize, setArtworkMaxSize] = useState(0);
   const [writeTag, setWriteTag] = useState(true);
   const [extendedOpen, setExtendedOpen] = useState(false);
   const [rawTags, setRawTags] = useState<Record<string, string[]> | null>(null);
@@ -147,6 +148,7 @@ export function TrackInspector({
     setShowPreview(false);
 	setFallbackPlaying(false);
 	setDeleteArtworkArmed(false);
+	setArtworkMaxSize(0);
 	setWriteTag(true);
 	setExtendedOpen(false);
 	setRawTags(null);
@@ -482,12 +484,28 @@ export function TrackInspector({
               />
               <span className="artwork-index">01 / {Math.max(track.artworkCount, 1)}</span>
             </div>
+            <div className="artwork-size-meta">
+              {track.artworkCount > 0
+                ? track.artworkWidth && track.artworkHeight
+                  ? `${track.artworkWidth}×${track.artworkHeight}${track.artworkSizeBytes ? ` · ${formatBytes(track.artworkSizeBytes)}` : ''}`
+                  : '封面已嵌入，尺寸将在重新扫描后显示'
+                : '没有嵌入封面'}
+            </div>
             <dl className="meta-list">
               <div><dt>类型</dt><dd>Front Cover</dd></div>
 			  <div><dt>规格</dt><dd>{track.artworkCount ? '从文件实时读取' : '—'}</dd></div>
 			  <div><dt>数量</dt><dd>{track.artworkCount} 张嵌入图片</dd></div>
 			  <div><dt>描述</dt><dd>{track.artworkCount ? 'Front Cover' : '尚未嵌入封面'}</dd></div>
             </dl>
+            <label className="artwork-size-control">
+              <span>封面写入尺寸</span>
+              <select aria-label="封面写入尺寸" value={artworkMaxSize} onChange={(event) => setArtworkMaxSize(Number(event.target.value))}>
+                <option value={0}>保留原图</option>
+                <option value={1000}>居中裁剪至 1000×1000</option>
+                <option value={500}>居中裁剪至 500×500</option>
+              </select>
+              <small>上传或在线采用封面时生效，原图不会被修改。</small>
+            </label>
             <div className="button-pair">
 			  <input
 				ref={artworkInput}
@@ -496,7 +514,10 @@ export function TrackInspector({
 				accept="image/jpeg,image/png,image/webp"
 				onChange={async (event) => {
 				  const file = event.target.files?.[0];
-				  if (file) await onArtworkChange(file);
+				  if (file) {
+					if (artworkMaxSize > 0) await onArtworkChange(file, artworkMaxSize);
+					else await onArtworkChange(file);
+				  }
 				  event.target.value = '';
 				}}
 			  />

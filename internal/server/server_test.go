@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -109,6 +110,40 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	unknownAPI := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/unknown", nil, ut.Header{Key: "Accept", Value: "text/html"})
 	if unknownAPI.Code != 404 || !containsJSON(unknownAPI.Body.Bytes(), `"code":"not_found"`) {
 		t.Fatalf("unknown api = %d %s", unknownAPI.Code, unknownAPI.Body.String())
+	}
+}
+
+func TestOptionalBearerTokenProtection(t *testing.T) {
+	s := newTestServer(t)
+	s.SetAuthToken("secret-token")
+
+	health := ut.PerformRequest(s.h.Engine, "GET", "/healthz", nil)
+	if health.Code != 200 {
+		t.Fatalf("health should remain public: %d %s", health.Code, health.Body.String())
+	}
+	unauthorized := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil)
+	if unauthorized.Code != 401 || !containsJSON(unauthorized.Body.Bytes(), `"code":"auth_required"`) {
+		t.Fatalf("unauthorized = %d %s", unauthorized.Code, unauthorized.Body.String())
+	}
+	wrong := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil, ut.Header{Key: "Authorization", Value: "Bearer wrong"})
+	if wrong.Code != 401 {
+		t.Fatalf("wrong token = %d %s", wrong.Code, wrong.Body.String())
+	}
+	malformed := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil, ut.Header{Key: "Authorization", Value: "Bearersecret-token"})
+	if malformed.Code != 401 {
+		t.Fatalf("malformed authorization = %d %s", malformed.Code, malformed.Body.String())
+	}
+	authorized := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil, ut.Header{Key: "Authorization", Value: "Bearer secret-token"})
+	if authorized.Code != 200 || !containsJSON(authorized.Body.Bytes(), `"trackCount":2`) || !strings.Contains(authorized.Result().Header.Get("Set-Cookie"), "tagger_auth_token=c2VjcmV0LXRva2Vu") {
+		t.Fatalf("authorized = %d %s", authorized.Code, authorized.Body.String())
+	}
+	cookie := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil, ut.Header{Key: "Cookie", Value: "tagger_auth_token=c2VjcmV0LXRva2Vu"})
+	if cookie.Code != 200 {
+		t.Fatalf("cookie token = %d %s", cookie.Code, cookie.Body.String())
+	}
+	headerToken := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil, ut.Header{Key: "X-Tagger-Token", Value: "secret-token"})
+	if headerToken.Code != 200 {
+		t.Fatalf("header token = %d %s", headerToken.Code, headerToken.Body.String())
 	}
 }
 

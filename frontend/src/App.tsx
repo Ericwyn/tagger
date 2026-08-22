@@ -1,8 +1,9 @@
 import {useEffect, useState} from 'react';
 import {AnimatePresence, motion} from 'motion/react';
-import {CheckCircle2, X} from 'lucide-react';
+import {CheckCircle2, KeyRound, LoaderCircle, X} from 'lucide-react';
 import {TopBar} from '@/components/TopBar';
 import {GlobalPlayer} from '@/components/GlobalPlayer';
+import {APIError, apiReadMode, getSystem, setAuthToken} from '@/api';
 import {HistoryPage} from '@/pages/HistoryPage';
 import {JobsPage} from '@/pages/JobsPage';
 import {LibraryPage} from '@/pages/LibraryPage';
@@ -19,6 +20,8 @@ export function App() {
   const [playerTrack, setPlayerTrack] = useState<Track | null>(null);
   const [playerPlaying, setPlayerPlaying] = useState(false);
   const [showGeneratedCovers, setShowGeneratedCovers] = useState(() => localStorage.getItem('tagger-generated-covers') === 'true');
+  const [authState, setAuthState] = useState<'checking' | 'ready' | 'required'>(apiReadMode === 'mock' ? 'ready' : 'checking');
+  const [authError, setAuthError] = useState('');
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -28,6 +31,14 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('tagger-generated-covers', String(showGeneratedCovers));
   }, [showGeneratedCovers]);
+
+  useEffect(() => {
+    if (apiReadMode === 'mock') return;
+    void getSystem().then(() => setAuthState('ready')).catch((error) => {
+      setAuthError(error instanceof APIError && error.status === 401 ? '当前服务已启用访问令牌保护' : (error instanceof Error ? error.message : '后台连接失败'));
+      setAuthState('required');
+    });
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -51,6 +62,28 @@ export function App() {
     setPlayerTrack(track);
     setPlayerPlaying(true);
   };
+
+  const authenticate = async (token: string) => {
+    const normalized = token.trim();
+    if (!normalized) {
+      setAuthError('请输入访问令牌');
+      return;
+    }
+    setAuthError('正在验证访问令牌…');
+    setAuthToken(normalized);
+    try {
+      await getSystem();
+      setAuthError('');
+      setAuthState('ready');
+    } catch (error) {
+      setAuthError(error instanceof APIError && error.status === 401 ? '访问令牌不正确' : (error instanceof Error ? error.message : '令牌验证失败'));
+      setAuthState('required');
+    }
+  };
+
+  if (authState !== 'ready') {
+    return <AuthGate checking={authState === 'checking'} error={authError} onSubmit={authenticate} />;
+  }
 
   return (
     <div className={`app-shell${playerTrack ? ' has-player' : ''}`}>
@@ -101,5 +134,28 @@ export function App() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+function AuthGate({checking, error, onSubmit}: {checking: boolean; error: string; onSubmit: (token: string) => Promise<void>}) {
+  const [token, setToken] = useState('');
+  return (
+    <main className="auth-gate">
+      <section className="auth-gate-card">
+        <div className="auth-gate-icon"><KeyRound size={23} /></div>
+        <div className="eyebrow">SINGLE USER ACCESS</div>
+        <h1>输入访问令牌</h1>
+        <p>此 Tagger 实例启用了单用户鉴权。未配置令牌时服务不会要求登录。</p>
+        {checking ? (
+          <div className="auth-gate-status"><LoaderCircle className="spin" size={16} /> 正在连接后台…</div>
+        ) : (
+          <form onSubmit={(event) => { event.preventDefault(); void onSubmit(token); }}>
+            <label><span>访问令牌</span><input aria-label="访问令牌" type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder="TAGGER_AUTH_TOKEN" autoFocus /></label>
+            <button className="primary-button" type="submit">验证并进入</button>
+          </form>
+        )}
+        {error && <small className="auth-gate-error">{error}</small>}
+      </section>
+    </main>
   );
 }

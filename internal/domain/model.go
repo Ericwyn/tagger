@@ -74,6 +74,9 @@ type Track struct {
 	AcoustIDFingerprint  string          `json:"acoustidFingerprint"`
 	LyricsSidecar        *SidecarInfo    `json:"lyricsSidecar,omitempty"`
 	ArtworkCount         int             `json:"artworkCount"`
+	ArtworkWidth         int             `json:"artworkWidth,omitempty"`
+	ArtworkHeight        int             `json:"artworkHeight,omitempty"`
+	ArtworkSizeBytes     int64           `json:"artworkSizeBytes,omitempty"`
 	CoverTone            CoverTone       `json:"coverTone"`
 	Health               TrackHealth     `json:"health"`
 	Properties           TrackProperties `json:"properties"`
