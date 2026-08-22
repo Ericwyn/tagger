@@ -75,6 +75,9 @@ func (s *Store) LoadArtworkReferences(ctx context.Context) ([]byte, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
 	return json.Marshal(result)
 }
 
@@ -128,30 +131,53 @@ func (s *Store) LoadProviderConfigurations(ctx context.Context) (map[string]map[
 	}
 	defer rows.Close()
 	result := make(map[string]map[string]string)
+	legacy := make([]string, 0)
 	for rows.Next() {
 		var id string
 		var payload []byte
 		if err := rows.Scan(&id, &payload); err != nil {
 			return nil, err
 		}
+		plain, encrypted, err := s.secretBox.open(payload)
+		if err != nil {
+			return nil, fmt.Errorf("open provider configuration %s: %w", id, err)
+		}
 		values := make(map[string]string)
-		if len(payload) > 0 && string(payload) != "{}" {
-			if err := json.Unmarshal(payload, &values); err != nil {
+		if len(plain) > 0 && string(plain) != "{}" {
+			if err := json.Unmarshal(plain, &values); err != nil {
 				return nil, fmt.Errorf("decode provider configuration %s: %w", id, err)
 			}
 		}
+		if !encrypted {
+			legacy = append(legacy, id)
+		}
 		result[id] = values
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Upgrade legacy plaintext rows after the read cursor is closed. This is
+	// best-effort at the row level but returns an error so the caller can show a
+	// clear startup/storage failure rather than silently losing protection.
+	for _, id := range legacy {
+		if err := s.SaveProviderConfiguration(ctx, id, result[id]); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
 func (s *Store) SaveProviderConfiguration(ctx context.Context, providerID string, values map[string]string) error {
 	if values == nil {
 		values = map[string]string{}
 	}
-	payload, err := json.Marshal(values)
+	plain, err := json.Marshal(values)
 	if err != nil {
 		return fmt.Errorf("encode provider configuration: %w", err)
+	}
+	payload, err := s.secretBox.seal(plain)
+	if err != nil {
+		return fmt.Errorf("encrypt provider configuration: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO provider_settings(provider_id, enabled, config_json, updated_at)

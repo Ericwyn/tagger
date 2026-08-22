@@ -33,6 +33,7 @@ type Store struct {
 	path             string
 	now              func() time.Time
 	historyRetention atomic.Int64
+	secretBox        *secretBox
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -63,7 +64,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	store := &Store{db: db, path: path, now: time.Now}
+	box, err := openSecretBox(filepath.Dir(path))
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	store := &Store{db: db, path: path, now: time.Now, secretBox: box}
 	retention, err := store.loadHistoryRetention(ctx)
 	if err != nil {
 		_ = db.Close()
