@@ -1,6 +1,13 @@
 # Frontend dependencies and generated output
 frontend/node_modules/
 frontend/dist/
+web/dist/*
+!web/dist/.gitkeep
+
+# Go build output
+/dist/
+tagger
+tagger.exe
 
 # Local tooling and editor state
 .DS_Store

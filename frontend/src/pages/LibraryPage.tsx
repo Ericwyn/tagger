@@ -16,7 +16,7 @@ import {CandidateDrawer} from '@/components/library/CandidateDrawer';
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
-import {getLibrary, listTracks, searchCandidates, updateTrack} from '@/mock/api';
+import {apiReadMode, getLibrary, listTracks, rescanLibrary, searchCandidates, updateTrack} from '@/api';
 import type {LibrarySummary, MatchCandidate, Track, TrackPatch} from '@/types';
 
 interface LibraryPageProps {
@@ -37,6 +37,8 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [scanning, setScanning] = useState(false);
   const [activeTrackId, setActiveTrackId] = useState<string>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
@@ -49,19 +51,42 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [mobileInspector, setMobileInspector] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([getLibrary(), listTracks()]).then(([nextLibrary, nextTracks]) => {
-      if (cancelled) return;
+  const loadData = async (preserveSelection = false) => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [nextLibrary, nextTracks] = await Promise.all([getLibrary(), listTracks()]);
       setLibrary(nextLibrary);
       setTracks(nextTracks);
-      setActiveTrackId(nextTracks[0]?.id);
+      setActiveTrackId((current) => preserveSelection && nextTracks.some((track) => track.id === current)
+        ? current
+        : nextTracks[0]?.id);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : '曲库加载失败');
+    } finally {
       setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
   }, []);
+
+  const runRescan = async () => {
+    if (!library || scanning) return;
+    setScanning(true);
+    try {
+      const result = await rescanLibrary(library.id);
+      await loadData(true);
+      onNotice(result
+        ? `扫描完成：解析 ${result.report.parsed} 首，失败 ${result.report.failed} 首`
+        : 'Mock 扫描已完成');
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '扫描失败');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? null;
 
@@ -96,7 +121,10 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     });
   }, [activeFilter, activeFolder, search, tracks]);
 
-  const saveTrack = async (patch: TrackPatch, notice = '标签草稿已写入 Mock 数据层') => {
+  const saveTrack = async (
+    patch: TrackPatch,
+    notice = apiReadMode === 'real' ? '修改已保存为浏览器草稿，尚未写入音乐文件' : '标签草稿已写入 Mock 数据层',
+  ) => {
     if (!activeTrack) return;
     setSaving(true);
     try {
@@ -141,11 +169,21 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     });
   };
 
-  if (loading || !library) {
+  if (loading) {
     return (
       <div className="app-loading">
         <LoaderCircle className="spin" size={22} />
         <span>正在装载音乐档案…</span>
+      </div>
+    );
+  }
+
+  if (loadError || !library) {
+    return (
+      <div className="app-loading app-error-state">
+        <strong>无法装载音乐档案</strong>
+        <span>{loadError || '尚未配置音乐曲库'}</span>
+        <button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={15} /> 重试</button>
       </div>
     );
   }
@@ -161,15 +199,19 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         activeFolder={activeFolder}
         activeFilter={activeFilter}
         counts={counts}
+        sourceLabel={apiReadMode === 'real' ? '真实索引' : 'Mock 模式'}
+        indexedSizeBytes={tracks.reduce((total, track) => total + track.sizeBytes, 0)}
         mobileOpen={mobileSidebar}
         onCloseMobile={() => setMobileSidebar(false)}
         onSelectFolder={(id) => {
           setActiveFolder(id);
           setActiveFilter('all');
+          setActiveTrackId((id ? tracks.find((track) => track.folderId === id) : tracks[0])?.id);
           setMobileSidebar(false);
         }}
         onSelectFilter={(filter) => {
           setActiveFilter(filter);
+          setActiveTrackId((filter === 'all' ? tracks[0] : tracks.find((track) => track.health === filter))?.id);
           setMobileSidebar(false);
         }}
       />
@@ -181,7 +223,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
           </button>
           <div>
             <div className="breadcrumb">
-              <span>TESTMUSIC</span>
+              <span>{library.name.toLocaleUpperCase()}</span>
               <i>/</i>
               <strong>{currentLabel}</strong>
             </div>
@@ -189,8 +231,8 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
             <p>{visibleTracks.length} 首曲目 · {visibleTracks.filter((track) => track.format === 'flac').length} 首无损音频</p>
           </div>
           <div className="workspace-actions">
-            <button className="secondary-button" onClick={() => onNotice('快速扫描任务已加入队列')}>
-              <RefreshCw size={15} /> 快速扫描
+            <button className="secondary-button" disabled={scanning} onClick={() => void runRescan()}>
+              <RefreshCw size={15} className={scanning ? 'spin' : undefined} /> {scanning ? '扫描中…' : '快速扫描'}
             </button>
             <button className="primary-button" onClick={() => onOpenReview(visibleTracks.map((track) => track.id))}>
               <Sparkles size={15} /> 批量补全
@@ -232,7 +274,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         <div className="workspace-foot">
           <span>显示 {visibleTracks.length} / {tracks.length} 首</span>
           <span><i className="status-dot healthy" /> 索引健康</span>
-          <span>Mock API · rev 0.1</span>
+          <span>{apiReadMode === 'real' ? 'Go API · 只读索引' : 'Mock API · rev 0.1'}</span>
         </div>
       </section>
 
@@ -266,7 +308,12 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         candidates={candidates}
         loading={candidateLoading}
         onClose={() => setCandidateOpen(false)}
-        onApply={(patch, candidate) => saveTrack(patch, `已采用 ${candidate.providerName} 候选，Mock 修订已更新`)}
+        onApply={(patch, candidate) => saveTrack(
+          patch,
+          apiReadMode === 'real'
+            ? `已采用 ${candidate.providerName} 候选并保存为浏览器草稿`
+            : `已采用 ${candidate.providerName} 候选，Mock 修订已更新`,
+        )}
       />
     </div>
   );

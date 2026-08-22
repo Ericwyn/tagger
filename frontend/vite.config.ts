@@ -21,6 +21,21 @@ export default defineConfig({
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
+      '/readyz': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-motion': ['motion'],
+          'vendor-list': ['react-virtuoso'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
     },
   },
   test: {

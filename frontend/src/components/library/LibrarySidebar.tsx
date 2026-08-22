@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {cn, formatBytes} from '@/lib/utils';
 import type {LibrarySummary, TrackHealth} from '@/types';
 
 export type SidebarFilter = 'all' | TrackHealth;
@@ -22,6 +22,8 @@ interface LibrarySidebarProps {
   activeFolder: string | null;
   activeFilter: SidebarFilter;
   counts: Record<SidebarFilter, number>;
+  sourceLabel: string;
+  indexedSizeBytes: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
   onSelectFolder: (id: string | null) => void;
@@ -42,6 +44,8 @@ export function LibrarySidebar({
   activeFolder,
   activeFilter,
   counts,
+  sourceLabel,
+  indexedSizeBytes,
   mobileOpen,
   onCloseMobile,
   onSelectFolder,
@@ -80,7 +84,7 @@ export function LibrarySidebar({
           }}
         >
           <FolderOpen size={16} />
-          <span>TestMusic</span>
+          <span>{library.rootLabel}</span>
           <em>{library.trackCount}</em>
         </button>
         <div className="tree-children">
@@ -119,10 +123,10 @@ export function LibrarySidebar({
       <section className="storage-note">
         <div>
           <span>已索引容量</span>
-          <strong>612.4 MB</strong>
+          <strong>{formatBytes(indexedSizeBytes)}</strong>
         </div>
         <div className="storage-track"><span style={{width: '34%'}} /></div>
-        <p>音乐目录可写 · Mock 模式</p>
+        <p>{library.writable ? '音乐目录可写' : '音乐目录只读'} · {sourceLabel}</p>
       </section>
     </aside>
   );

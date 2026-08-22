@@ -17,7 +17,7 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {listProviders} from '@/mock/api';
+import {listProviders} from '@/api';
 import type {ProviderConfig} from '@/types';
 
 interface SettingsPageProps {

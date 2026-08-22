@@ -317,7 +317,7 @@ export function TrackInspector({
               <label><input type="checkbox" defaultChecked /> 写入音频标签</label>
               <label><input type="checkbox" defaultChecked /> 同时保存 .lrc</label>
             </div>
-            <p className="format-note">同步歌词将在 Mock 模式下保存为草稿；真实后端会使用临时文件和写后校验。</p>
+            <p className="format-note">当前改动会先保存为草稿；文件写入接通后将使用临时副本和写后校验。</p>
           </div>
         )}
 

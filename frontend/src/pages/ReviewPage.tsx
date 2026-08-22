@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {listTracks} from '@/mock/api';
+import {listTracks} from '@/api';
 import type {MatchCandidate, Track} from '@/types';
 
 interface ReviewPageProps {

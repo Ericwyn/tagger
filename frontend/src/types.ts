@@ -39,6 +39,8 @@ export interface Track {
   writable: boolean;
   revision: string;
   modifiedAt: string;
+  parseError?: string;
+  syncState?: 'indexed' | 'draft';
 }
 
 export interface FolderNode {

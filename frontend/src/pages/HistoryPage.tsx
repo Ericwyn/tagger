@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {listRevisions} from '@/mock/api';
+import {listRevisions} from '@/api';
 import type {Revision} from '@/types';
 
 interface HistoryPageProps {

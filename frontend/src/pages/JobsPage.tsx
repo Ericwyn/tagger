@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {listJobs} from '@/mock/api';
+import {listJobs} from '@/api';
 import type {Job} from '@/types';
 
 interface JobsPageProps {

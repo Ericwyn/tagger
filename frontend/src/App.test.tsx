@@ -40,4 +40,12 @@ describe('Tagger app prototype', () => {
     expect(await screen.findByText('找到 3 个候选', {}, {timeout: 2000})).toBeInTheDocument();
     expect(screen.getAllByText('MusicBrainz').length).toBeGreaterThan(0);
   });
+
+  it('keeps the inspector aligned with the selected folder', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', {name: '许嵩 · 青年晚报 9'}));
+    expect(await screen.findByRole('heading', {name: '奇谈'})).toBeInTheDocument();
+  });
 });
