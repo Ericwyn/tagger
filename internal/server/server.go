@@ -81,6 +81,7 @@ func (s *Server) routes() {
 	api.GET("/tracks", s.handleTracks)
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
+	api.GET("/tracks/:id/raw-tags", s.handleRawTags)
 	api.GET("/tracks/:id/audio", s.handleAudio)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 	api.GET("/tracks/:id/artwork/:index", s.handleReadArtwork)
@@ -645,6 +646,42 @@ func (s *Server) handleTrack(_ context.Context, c *app.RequestContext) {
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, track)
+}
+
+func (s *Server) handleRawTags(ctx context.Context, c *app.RequestContext) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "raw_tags_unavailable", "原始标签读取服务尚未启用")
+		return
+	}
+	track, err := s.library.Track(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ref, err := s.library.FileRef(track.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	raw, err := s.writer.ReadRawTags(ctx, ref)
+	if errors.Is(err, filewrite.ErrPathOutsideRoot) {
+		s.writeError(c, consts.StatusForbidden, "forbidden", "文件路径不在曲库安全边界内")
+		return
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		s.writeError(c, consts.StatusNotFound, "track_file_not_found", "音频文件不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "tag_read_failed", err.Error())
+		return
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, map[string]any{"trackId": track.ID, "revision": track.Revision, "tags": raw})
 }
 
 func (s *Server) handleAudio(_ context.Context, c *app.RequestContext) {

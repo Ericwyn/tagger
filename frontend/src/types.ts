@@ -204,6 +204,12 @@ export interface TrackPatch {
   lyrics: string;
 }
 
+export interface RawTagsResponse {
+  trackId: string;
+  revision: string;
+  tags: Record<string, string[]>;
+}
+
 export interface UpdateProvenance {
   providerId: string;
 }

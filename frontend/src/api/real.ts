@@ -7,8 +7,9 @@ import type {
   ProviderConfig,
   RestorePreview,
   RestoreResult,
-  Revision,
-  Track,
+	Revision,
+	RawTagsResponse,
+	Track,
 	TrackPatch,
 	WriteSelection,
 	BatchEditItem,
@@ -166,6 +167,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
 	listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {
 	  return request<BatchEditItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/batch-edit-items`);
+	},
+
+	getRawTags(trackId: string): Promise<RawTagsResponse> {
+	  return request<RawTagsResponse>(`/api/v1/tracks/${encodeURIComponent(trackId)}/raw-tags`);
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {

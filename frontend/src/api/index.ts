@@ -8,8 +8,9 @@ import type {
   ProviderConfig,
   RestorePreview,
   RestoreResult,
-  Revision,
-  Track,
+	Revision,
+	RawTagsResponse,
+	Track,
   TrackPatch,
 	UpdateProvenance,
 	WriteSelection,
@@ -78,6 +79,10 @@ export async function createBatchEditJob(items: BatchEditSelection[], operations
 
 export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {
   return apiReadMode === 'mock' ? Promise.resolve([]) : real.listBatchEditItems(jobId);
+}
+
+export function getRawTags(trackId: string): Promise<RawTagsResponse | null> {
+  return apiReadMode === 'mock' ? Promise.resolve(null) : real.getRawTags(trackId);
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {

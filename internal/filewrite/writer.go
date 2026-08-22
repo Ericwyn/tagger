@@ -104,6 +104,21 @@ func (w *Writer) OpenRead(ref library.FileRef) (*os.File, error) {
 	return os.Open(path)
 }
 
+// ReadRawTags reads the lossless TagLib property map for an indexed file
+// without exposing the absolute path to callers. The returned map is owned by
+// the caller and can be safely modified.
+func (w *Writer) ReadRawTags(ctx context.Context, ref library.FileRef) (map[string][]string, error) {
+	path, err := w.containedPath(ref)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := w.engine.Read(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	return cloneRawTags(snapshot.Raw), nil
+}
+
 func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision string, patch domain.TagPatch, dryRun bool) (Result, error) {
 	return w.mutate(ctx, ref, baseRevision, dryRun, func(raw map[string][]string) (map[string][]string, []FieldDiff, error) {
 		return compilePatch(raw, patch)

@@ -147,6 +147,18 @@ func TestAudioAPIProvidesRangeStreamAndETag(t *testing.T) {
 	}
 }
 
+func TestRawTagsAPIReadsLosslessPropertyMap(t *testing.T) {
+	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	response := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/raw-tags", nil)
+	if response.Code != 200 || response.Result().Header.Get("ETag") != `"`+track.Revision+`"` ||
+		!containsJSON(response.Body.Bytes(), `"trackId":"`+track.ID+`"`) ||
+		!containsJSON(response.Body.Bytes(), `"TITLE":["`+track.Title+`"]`) ||
+		!containsJSON(response.Body.Bytes(), `"ARTIST":["歌手"]`) {
+		t.Fatalf("raw tags = %d etag=%q body=%s", response.Code, response.Result().Header.Get("ETag"), response.Body.String())
+	}
+}
+
 func TestRescanRejectsUnknownLibrary(t *testing.T) {
 	s := newTestServer(t)
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/unknown/scans", nil)

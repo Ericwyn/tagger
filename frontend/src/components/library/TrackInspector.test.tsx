@@ -78,4 +78,24 @@ describe('TrackInspector', () => {
     await user.click(screen.getByTitle('暂停试听'));
     expect(screen.getByTitle('试听')).toBeInTheDocument();
   });
+
+  it('opens the raw tag panel in mock mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', {name: '查看原始标签'}));
+    expect(await screen.findByText('TagLib PropertyMap')).toBeInTheDocument();
+    expect(screen.getByText('TITLE')).toBeInTheDocument();
+    expect(screen.getAllByText('再回首').length).toBeGreaterThanOrEqual(1);
+  });
 });

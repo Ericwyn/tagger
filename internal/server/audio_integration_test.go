@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -82,6 +83,15 @@ func TestAudioAPIWithCopiedTestMusic(t *testing.T) {
 				!bytes.Equal(response.Body.Bytes(), payload[:end+1]) {
 				t.Fatalf("audio response = %d contentRange=%q contentType=%q body=%d bytes", response.Code,
 					response.Result().Header.Get("Content-Range"), response.Result().Header.Get("Content-Type"), response.Body.Len())
+			}
+			rawResponse := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/raw-tags", nil)
+			var rawEnvelope struct {
+				Data struct {
+					Tags map[string][]string `json:"tags"`
+				} `json:"data"`
+			}
+			if rawResponse.Code != 200 || json.Unmarshal(rawResponse.Body.Bytes(), &rawEnvelope) != nil || len(rawEnvelope.Data.Tags) == 0 {
+				t.Fatalf("raw tag response = %d body=%s", rawResponse.Code, rawResponse.Body.String())
 			}
 		})
 	}

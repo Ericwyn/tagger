@@ -128,6 +128,15 @@ describe('real API client', () => {
 	expect(fetcher).toHaveBeenCalledWith('/api/v1/jobs/job%2Fedit/batch-edit-items', expect.any(Object));
   });
 
+  it('reads raw tags for a track with its normalized response envelope', async () => {
+    const raw = {trackId: 'trk/1', revision: 'rev-1', tags: {TITLE: ['Song'], ARTIST: ['Artist']}};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: raw}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.getRawTags('trk/1')).resolves.toEqual(raw);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/tracks/trk%2F1/raw-tags', expect.any(Object));
+  });
+
   it('writes an explicit patch guarded by the indexed revision', async () => {
     const fullTrack = {
       ...track,

@@ -20,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
-import {artworkURL, audioURL} from '@/api';
+import {artworkURL, audioURL, getRawTags} from '@/api';
 import {cn, formatBytes, formatDuration} from '@/lib/utils';
 import type {InspectorTab, Track, TrackPatch} from '@/types';
 
@@ -66,6 +66,21 @@ function parseList(value: string): string[] {
   return value.split(/[,，/]/).map((item) => item.trim()).filter(Boolean);
 }
 
+function mockRawTags(track: Track): Record<string, string[]> {
+  const tags: Record<string, string[]> = {
+    TITLE: track.title ? [track.title] : [],
+    ARTIST: [...track.artists],
+    ALBUM: track.album ? [track.album] : [],
+    ALBUMARTIST: [...track.albumArtists],
+    TRACKNUMBER: track.trackNumber ? [track.trackTotal ? `${track.trackNumber}/${track.trackTotal}` : String(track.trackNumber)] : [],
+    DISCNUMBER: track.discNumber ? [track.discTotal ? `${track.discNumber}/${track.discTotal}` : String(track.discNumber)] : [],
+    DATE: track.year ? [String(track.year)] : [],
+    GENRE: [...track.genres],
+    LYRICS: track.lyrics ? [track.lyrics] : [],
+  };
+  return Object.fromEntries(Object.entries(tags).filter(([, values]) => values.length));
+}
+
 export function TrackInspector({
   track,
   saving,
@@ -80,6 +95,10 @@ export function TrackInspector({
   const [showPreview, setShowPreview] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
+  const [rawTags, setRawTags] = useState<Record<string, string[]> | null>(null);
+  const [rawTagsOpen, setRawTagsOpen] = useState(false);
+  const [rawTagsLoading, setRawTagsLoading] = useState(false);
+  const [rawTagsError, setRawTagsError] = useState('');
   const audioRef = useRef<HTMLAudioElement>(null);
   const artworkInput = useRef<HTMLInputElement>(null);
   const playbackURL = track ? audioURL(track) : undefined;
@@ -89,6 +108,9 @@ export function TrackInspector({
     setShowPreview(false);
     setPlaying(false);
 	setDeleteArtworkArmed(false);
+	setRawTags(null);
+	setRawTagsOpen(false);
+	setRawTagsError('');
 	if (audioRef.current) {
 	  audioRef.current.pause();
 	  audioRef.current.currentTime = 0;
@@ -148,6 +170,22 @@ export function TrackInspector({
       void audioRef.current.play().catch(() => setPlaying(false));
     } else {
       audioRef.current.pause();
+    }
+  };
+
+  const showRawTags = async () => {
+    setRawTagsOpen((value) => !value);
+    if (rawTags) return;
+    setRawTagsLoading(true);
+    setRawTagsError('');
+    try {
+      const response = await getRawTags(track.id);
+      setRawTags(response?.tags ?? mockRawTags(track));
+    } catch (error) {
+      setRawTagsError(error instanceof Error ? error.message : '原始标签读取失败');
+      setRawTags({});
+    } finally {
+      setRawTagsLoading(false);
     }
   };
 
@@ -301,11 +339,32 @@ export function TrackInspector({
               </label>
             </div>
 
-            <button className="raw-tag-link">
+            <button className="raw-tag-link" onClick={() => void showRawTags()}>
               <FileAudio2 size={15} />
-              查看 14 个原始标签
-              <ChevronRight size={14} />
+              {rawTagsOpen ? '收起原始标签' : rawTags ? `查看 ${Object.keys(rawTags).length} 个原始标签` : '查看原始标签'}
+              {rawTagsLoading ? <LoaderCircle size={14} className="spin" /> : <ChevronRight size={14} />}
             </button>
+            {rawTagsOpen && (
+              <section className="raw-tags-panel">
+                <div className="raw-tags-head">
+                  <span>TagLib PropertyMap</span>
+                  <small>{rawTags ? `${Object.keys(rawTags).length} 个键` : '读取中…'}</small>
+                </div>
+                {rawTagsError && <p className="raw-tags-error">{rawTagsError}</p>}
+                {rawTagsLoading ? (
+                  <div className="raw-tags-empty"><LoaderCircle size={14} className="spin" /> 正在从文件读取原始标签…</div>
+                ) : rawTags && Object.keys(rawTags).length > 0 ? (
+                  <div className="raw-tags-list">
+                    {Object.entries(rawTags).sort(([left], [right]) => left.localeCompare(right)).map(([key, values]) => (
+                      <div className="raw-tag-row" key={key}>
+                        <code>{key}</code>
+                        <span>{values.length ? values.join(' · ') : '空'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="raw-tags-empty">没有读取到原始标签。</div>}
+              </section>
+            )}
           </div>
         )}
 
