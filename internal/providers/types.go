@@ -163,12 +163,13 @@ type MatchCandidate struct {
 }
 
 type ProviderResult struct {
-	Status    string `json:"status"`
-	Count     int    `json:"count"`
-	LatencyMS int64  `json:"latencyMs"`
-	Retryable bool   `json:"retryable,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Cached    bool   `json:"cached,omitempty"`
+	Status       string `json:"status"`
+	Count        int    `json:"count"`
+	LatencyMS    int64  `json:"latencyMs"`
+	Retryable    bool   `json:"retryable,omitempty"`
+	RetryAfterMS int64  `json:"retryAfterMs,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Cached       bool   `json:"cached,omitempty"`
 }
 
 type SearchResult struct {
@@ -181,5 +182,10 @@ type searchOutcome struct {
 	candidates []Candidate
 	err        error
 	duration   time.Duration
+	cached     bool
+}
+
+type providerSearchPayload struct {
+	candidates []Candidate
 	cached     bool
 }

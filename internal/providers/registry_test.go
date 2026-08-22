@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ericwyn/tagger/internal/store"
 )
@@ -18,6 +20,12 @@ type fakeStrategy struct {
 type countingStrategy struct {
 	descriptor Descriptor
 	calls      int
+}
+
+type concurrentCountingStrategy struct {
+	descriptor Descriptor
+	calls      atomic.Int32
+	delay      time.Duration
 }
 
 type configurableStrategy struct {
@@ -50,6 +58,13 @@ func (strategy *countingStrategy) Descriptor() Descriptor { return strategy.desc
 func (strategy *countingStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
 	strategy.calls++
 	return []Candidate{{ExternalID: "1", Title: "Song", Artists: []string{"Artist"}, ArtworkURL: "https://is1-ssl.mzstatic.com/cover.jpg"}}, nil
+}
+
+func (strategy *concurrentCountingStrategy) Descriptor() Descriptor { return strategy.descriptor }
+func (strategy *concurrentCountingStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
+	strategy.calls.Add(1)
+	time.Sleep(strategy.delay)
+	return []Candidate{{ExternalID: "1", Title: "Song", Artists: []string{"Artist"}}}, nil
 }
 
 func (f fakeStrategy) Descriptor() Descriptor { return f.descriptor }
@@ -169,6 +184,33 @@ func TestRegistryCacheAndSettingsSurviveReopen(t *testing.T) {
 	}
 	if _, err := secondRegistry.ArtworkReference(result.Candidates[0].ID); err != nil {
 		t.Fatalf("cached artwork reference: %v", err)
+	}
+}
+
+func TestRegistryCoalescesConcurrentColdSearches(t *testing.T) {
+	strategy := &concurrentCountingStrategy{descriptor: Descriptor{ID: "concurrent", Name: "Concurrent", Enabled: true, Health: HealthReady}, delay: 80 * time.Millisecond}
+	registry := NewRegistry(strategy)
+	query := Query{Title: "Song", Artists: []string{"Artist"}}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			result, err := registry.Search(context.Background(), query, []string{"concurrent"}, 5)
+			if err == nil && len(result.Candidates) != 1 {
+				err = errors.New("missing coalesced candidate")
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls := strategy.calls.Load(); calls != 1 {
+		t.Fatalf("strategy calls=%d, want one cold request", calls)
 	}
 }
 

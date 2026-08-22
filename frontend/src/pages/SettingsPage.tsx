@@ -341,6 +341,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <span>{testResponse.result.count} 个候选</span>
                 <span>{testResponse.result.latencyMs} ms</span>
                 {testResponse.result.cached && <span>缓存命中</span>}
+                {testResponse.result.retryable && <span>可重试</span>}
+                {(testResponse.result.retryAfterMs ?? 0) > 0 && <span>建议等待 {Math.ceil((testResponse.result.retryAfterMs ?? 0) / 1000)} 秒</span>}
               </div>
               {candidates.length > 0 ? (
                 <div className="provider-test-candidates">

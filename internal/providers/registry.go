@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 var ErrProviderNotFound = errors.New("provider not found")
@@ -47,6 +49,7 @@ type Registry struct {
 	enabled     map[string]bool
 	configs     map[string]map[string]string
 	configError map[string]string
+	searchGroup singleflight.Group
 }
 
 func NewRegistry(strategies ...Strategy) *Registry {
@@ -324,22 +327,31 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			started := time.Now()
 			descriptor := r.descriptor(strategy.Descriptor().ID)
 			cacheKey := providerCacheKey(descriptor.ID, query, limit)
-			if r.persistence != nil {
-				if payload, found, cacheErr := r.persistence.LoadProviderCache(ctx, cacheKey); cacheErr == nil && found {
-					var candidates []Candidate
-					if json.Unmarshal(payload, &candidates) == nil {
-						outcomes <- searchOutcome{descriptor: descriptor, candidates: candidates, duration: time.Since(started), cached: true}
-						return
+			value, err, _ := r.searchGroup.Do(cacheKey, func() (any, error) {
+				if r.persistence != nil {
+					if payload, found, cacheErr := r.persistence.LoadProviderCache(ctx, cacheKey); cacheErr == nil && found {
+						var candidates []Candidate
+						if json.Unmarshal(payload, &candidates) == nil {
+							return providerSearchPayload{candidates: candidates, cached: true}, nil
+						}
 					}
 				}
-			}
-			candidates, err := strategy.Search(ctx, query, limit)
-			if err == nil && r.persistence != nil {
-				if payload, marshalErr := json.Marshal(candidates); marshalErr == nil {
-					_ = r.persistence.SaveProviderCache(ctx, cacheKey, descriptor.ID, payload, providerCacheTTL(descriptor.ID))
+				candidates, searchErr := strategy.Search(ctx, query, limit)
+				if searchErr != nil {
+					return nil, searchErr
 				}
+				if r.persistence != nil {
+					if payload, marshalErr := json.Marshal(candidates); marshalErr == nil {
+						_ = r.persistence.SaveProviderCache(ctx, cacheKey, descriptor.ID, payload, providerCacheTTL(descriptor.ID))
+					}
+				}
+				return providerSearchPayload{candidates: candidates}, nil
+			})
+			payload, ok := value.(providerSearchPayload)
+			if !ok && err == nil {
+				err = fmt.Errorf("provider %s returned an invalid search result", descriptor.ID)
 			}
-			outcomes <- searchOutcome{descriptor: descriptor, candidates: candidates, err: err, duration: time.Since(started)}
+			outcomes <- searchOutcome{descriptor: descriptor, candidates: payload.candidates, err: err, duration: time.Since(started), cached: payload.cached}
 		}(strategy)
 	}
 	wait.Wait()
@@ -352,6 +364,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			providerResult.Status = "error"
 			providerResult.Error = outcome.err.Error()
 			providerResult.Retryable = isRetryable(outcome.err)
+			providerResult.RetryAfterMS = retryAfterMilliseconds(outcome.err)
 		} else {
 			for _, candidate := range outcome.candidates {
 				view := toView(query, outcome.descriptor, candidate)
@@ -392,7 +405,23 @@ func providerCacheTTL(providerID string) time.Duration {
 
 func isRetryable(err error) bool {
 	var httpError *HTTPError
-	return errors.As(err, &httpError) && (httpError.Status == 429 || httpError.Status >= 500)
+	if errors.As(err, &httpError) {
+		return httpError.Status == 408 || httpError.Status == 429 || httpError.Status >= 500
+	}
+	var transportError *TransportError
+	return errors.As(err, &transportError)
+}
+
+// IsRetryable exposes the registry's error classification to diagnostics
+// endpoints without requiring handlers to depend on concrete error types.
+func IsRetryable(err error) bool { return isRetryable(err) }
+
+func retryAfterMilliseconds(err error) int64 {
+	var httpError *HTTPError
+	if errors.As(err, &httpError) && httpError.RetryAfter > 0 {
+		return httpError.RetryAfter.Milliseconds()
+	}
+	return 0
 }
 
 type Placeholder struct{ descriptor Descriptor }

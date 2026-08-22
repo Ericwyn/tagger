@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -248,35 +247,17 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 }
 
 func (c *Client) getBody(ctx context.Context, endpoint string, headers map[string]string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+	requestHeaders := map[string]string{
+		"Referer": "https://www.kuwo.cn/",
+		"Origin":  "https://www.kuwo.cn",
 	}
-	request.Header.Set("User-Agent", c.config.UserAgent)
-	request.Header.Set("Referer", "https://www.kuwo.cn/")
-	request.Header.Set("Origin", "https://www.kuwo.cn")
 	if strings.TrimSpace(c.config.Auth) != "" {
-		request.Header.Set("Authorization", strings.TrimSpace(c.config.Auth))
+		requestHeaders["Authorization"] = strings.TrimSpace(c.config.Auth)
 	}
 	for name, value := range headers {
-		request.Header.Set(name, value)
+		requestHeaders[name] = value
 	}
-	response, err := c.http.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > 2<<20 {
-		return nil, fmt.Errorf("kuwo lyrics response exceeds 2 MiB")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("kuwo lyrics HTTP %d", response.StatusCode)
-	}
-	return body, nil
+	return providers.GetBytesWithHeaders(ctx, c.http, endpoint, c.config.UserAgent, requestHeaders, 2<<20)
 }
 
 func firstLyrics(values ...string) string {

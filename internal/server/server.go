@@ -2211,12 +2211,33 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 	}})
 	result, err := s.providers.Search(ctx, query, []string{descriptor.ID}, limit)
 	if err != nil {
-		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", err.Error())
+		logs = append(logs, providerTestLog{Level: "error", Stage: "search", Message: "数据源搜索失败", Details: map[string]any{
+			"error": err.Error(), "retryable": providers.IsRetryable(err),
+		}})
+		s.writeData(c, map[string]any{
+			"provider": descriptor,
+			"result":   providers.ProviderResult{Status: "error", Error: err.Error(), Retryable: providers.IsRetryable(err)},
+			"query": map[string]any{
+				"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds,
+			},
+			"candidates": []providers.MatchCandidate{},
+			"logs":       logs,
+		})
 		return
 	}
 	outcome := result.Providers[descriptor.ID]
 	if outcome.Status != "ok" {
-		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", outcome.Error)
+		logs = append(logs, providerTestLog{Level: "error", Stage: "search", Message: "数据源搜索失败", Details: map[string]any{
+			"error": outcome.Error, "retryable": outcome.Retryable, "retryAfterMs": outcome.RetryAfterMS,
+		}})
+		s.writeData(c, map[string]any{
+			"provider": descriptor, "result": outcome,
+			"query": map[string]any{
+				"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds,
+			},
+			"candidates": []providers.MatchCandidate{},
+			"logs":       logs,
+		})
 		return
 	}
 	logs = append(logs, providerTestLog{Level: "success", Stage: "search", Message: "数据源搜索完成", Details: map[string]any{

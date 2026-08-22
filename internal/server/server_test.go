@@ -28,6 +28,8 @@ type serverEngine struct{}
 
 type serverProvider struct{}
 
+type failingServerProvider struct{}
+
 func (serverProvider) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "test-provider", Name: "Test Provider", Enabled: true, Health: providers.HealthReady}
 }
@@ -37,6 +39,14 @@ func (serverProvider) ConfigFields() []providers.ConfigField {
 }
 
 func (serverProvider) Configure(map[string]string) error { return nil }
+
+func (failingServerProvider) Descriptor() providers.Descriptor {
+	return providers.Descriptor{ID: "failing-provider", Name: "Failing Provider", Enabled: true, Health: providers.HealthReady}
+}
+
+func (failingServerProvider) Search(context.Context, providers.Query, int) ([]providers.Candidate, error) {
+	return nil, &providers.HTTPError{Status: 503, RetryAfter: 1500 * time.Millisecond, Message: "upstream busy"}
+}
 
 func (serverProvider) Search(_ context.Context, query providers.Query, _ int) ([]providers.Candidate, error) {
 	return []providers.Candidate{{
@@ -684,6 +694,15 @@ func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 		ut.Header{Key: "content-type", Value: "application/json"})
 	if custom.Code != 200 || !containsJSON(custom.Body.Bytes(), `"title":"自定义测试"`) || !containsJSON(custom.Body.Bytes(), `"message":"数据源搜索完成"`) || !containsJSON(custom.Body.Bytes(), `"candidates"`) {
 		t.Fatalf("custom provider test = %d %s", custom.Code, custom.Body.String())
+	}
+}
+
+func TestProviderTestKeepsStructuredFailureDiagnostics(t *testing.T) {
+	s := newTestServer(t)
+	s.providers = providers.NewRegistry(failingServerProvider{})
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/failing-provider/test", nil)
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"status":"error"`) || !containsJSON(response.Body.Bytes(), `"retryable":true`) || !containsJSON(response.Body.Bytes(), `"retryAfterMs":1500`) || !containsJSON(response.Body.Bytes(), `"stage":"search"`) {
+		t.Fatalf("failure diagnostics = %d %s", response.Code, response.Body.String())
 	}
 }
 

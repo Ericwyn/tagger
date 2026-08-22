@@ -99,6 +99,23 @@ describe('SettingsPage provider diagnostics', () => {
     await waitFor(() => expect(JSON.parse(localStorage.getItem('tagger-provider-test-query-v1') || '{}')).toMatchObject({title: '新测试歌曲', artists: ['许嵩']}));
   });
 
+  it('keeps retryable provider failures visible in the diagnostics panel', async () => {
+    const user = userEvent.setup();
+    api.testProvider.mockResolvedValueOnce({
+      provider,
+      result: {status: 'error', count: 0, latencyMs: 1200, retryable: true, retryAfterMs: 1500, error: 'provider HTTP 503: upstream busy'},
+      candidates: [],
+      logs: [{level: 'error', stage: 'search', message: '数据源搜索失败', details: {error: 'provider HTTP 503: upstream busy', retryable: true, retryAfterMs: 1500}}],
+    });
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(await screen.findByRole('button', {name: '测试查询'}));
+    await user.click(screen.getByRole('button', {name: '执行查询并探测封面'}));
+    expect(await screen.findByText('查询异常')).toBeInTheDocument();
+    expect(screen.getByText('可重试')).toBeInTheDocument();
+    expect(screen.getByText('建议等待 2 秒')).toBeInTheDocument();
+    expect(screen.getByText(/provider HTTP 503: upstream busy/)).toBeInTheDocument();
+  });
+
   it('opens strategy-owned fields and persists a provider configuration', async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();

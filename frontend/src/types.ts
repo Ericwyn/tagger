@@ -288,6 +288,7 @@ export interface ProviderTestResult {
   count: number;
   latencyMs: number;
   retryable?: boolean;
+  retryAfterMs?: number;
   error?: string;
   cached?: boolean;
 }

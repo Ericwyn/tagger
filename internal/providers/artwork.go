@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,26 +23,11 @@ func DownloadArtwork(ctx context.Context, reference ArtworkReference, client *ht
 	if client == nil {
 		client = safeArtworkClient(reference.ProviderID)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-	if err != nil {
-		return artwork.Asset{}, err
-	}
-	request.Header.Set("Accept", "image/jpeg, image/png, image/webp")
-	request.Header.Set("User-Agent", "Tagger/0.1 (+https://github.com/ericwyn/tagger)")
-	response, err := client.Do(request)
+	body, err := GetBytesWithHeaders(ctx, client, parsed.String(), "Tagger/0.1 (+https://github.com/ericwyn/tagger)", map[string]string{
+		"Accept": "image/jpeg, image/png, image/webp",
+	}, artwork.MaxBytes)
 	if err != nil {
 		return artwork.Asset{}, fmt.Errorf("download provider artwork: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return artwork.Asset{}, fmt.Errorf("provider artwork HTTP %d", response.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, artwork.MaxBytes+1))
-	if err != nil {
-		return artwork.Asset{}, fmt.Errorf("read provider artwork: %w", err)
-	}
-	if len(body) > artwork.MaxBytes {
-		return artwork.Asset{}, fmt.Errorf("provider artwork exceeds %d MiB", artwork.MaxBytes>>20)
 	}
 	// Provider CDNs often serve an image with a stale or generic Content-Type
 	// (NetEase has returned image/jpeg for PNG bytes). The bytes are the source

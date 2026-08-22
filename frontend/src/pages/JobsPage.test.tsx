@@ -50,4 +50,20 @@ describe('JobsPage', () => {
     await user.click(screen.getByRole('button', {name: /失败/}));
     expect(screen.getByRole('heading', {name: '批量编辑标签'})).toBeInTheDocument();
   });
+
+  it('allows a review task to be discarded before switching libraries', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const reviewJob = {
+      id: 'job-review', kind: 'match', state: 'review', title: '批量抓取元数据', detail: '等待审核',
+      processed: 2, total: 2, succeeded: 2, failed: 0, startedAt: '刚刚',
+    } as const;
+    api.listJobs.mockResolvedValue([reviewJob]);
+    api.cancelJob.mockResolvedValue({...reviewJob, state: 'cancelled', detail: '任务已取消'});
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    render(<JobsPage onOpenReview={() => {}} />);
+    expect(await screen.findByRole('heading', {name: '批量抓取元数据'})).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: '丢弃审核任务'}));
+    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith('job-review'));
+    vi.unstubAllGlobals();
+  });
 });

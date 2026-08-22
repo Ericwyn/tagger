@@ -224,9 +224,18 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 			  </section>
 			)}
             {active.state === 'review' && (
-              <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
-                <Sparkles size={15} /> 打开审核页
-              </button>
+              <>
+                <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
+                  <Sparkles size={15} /> 打开审核页
+                </button>
+                {apiReadMode === 'real' && <button className="danger-quiet full-button" onClick={() => {
+                  if (!window.confirm('丢弃这次待审核结果？不会修改音乐文件。')) return;
+                  setActionError('');
+                  void cancelJob(active.id).then((next) => { if (next) updateJob(next); }).catch((error) => setActionError(error instanceof Error ? error.message : '丢弃审核任务失败'));
+                }}>
+                  <X size={15} /> 丢弃审核任务
+                </button>}
+              </>
             )}
 			{(active.state === 'running' || active.state === 'waiting') && apiReadMode === 'real' && (
 			  <button className="danger-quiet full-button" onClick={() => {

@@ -87,7 +87,7 @@ TAGGER_MUSIC_DIR=/path/to/music TAGGER_DATA_DIR=/path/to/tagger-data TAGGER_LIST
 ```
 
 配置令牌后，浏览器会在首次打开时显示令牌输入页；API 客户端使用
-`Authorization: Bearer <token>`（也兼容 `X-Tagger-Token`）。浏览器成功验证后会获得同源 HttpOnly cookie，因此封面、音频和任务 SSE 也能正常加载。健康检查和嵌入式静态资源保持公开。
+`Authorization: Bearer <token>`（也兼容 `X-Tagger-Token`）。这是单用户实例级 admin token，不提供账号、角色、设备或复杂会话管理；浏览器成功验证后仅通过同源 HttpOnly cookie 免去重复输入，因此封面、音频和任务 SSE 也能正常加载。健康检查和嵌入式静态资源保持公开。
 
 `TAGGER_DATA_DIR` 默认是当前工作目录下的 `./data`，其中保存 `tagger.db`、WAL 和后续缓存。音乐文件仍是标签事实源；SQLite 是可重建的索引与标签级历史，不是音频文件备份。外部程序修改文件后需要在界面执行重新扫描。
 
