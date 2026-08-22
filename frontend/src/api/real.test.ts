@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {APIError, createRealAPI, normalizeTrack} from '@/api/real';
+import {APIError, createRealAPI, normalizeLibrary, normalizeTrack} from '@/api/real';
 import type {LibrarySummary, Track} from '@/types';
 
 const library: LibrarySummary = {
@@ -53,6 +53,18 @@ describe('real API client', () => {
     expect(normalized[0].musicbrainzArtistIds).toEqual([]);
     expect(fetcher).toHaveBeenNthCalledWith(1, '/api/v1/libraries', expect.any(Object));
     expect(fetcher).toHaveBeenNthCalledWith(2, '/api/v1/tracks', expect.any(Object));
+  });
+
+  it('lists registered libraries and queues a new root scan', async () => {
+    const job = {id: 'job-register', kind: 'scan', state: 'waiting', title: '添加曲库', detail: '等待', processed: 0, total: 2, succeeded: 0, failed: 0, startedAt: 'now'};
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: [{...library, active: true}]}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: job, probe: {path: '/music'}}), {status: 202}));
+    const api = createRealAPI(fetcher);
+    await expect(api.listLibraries()).resolves.toEqual([normalizeLibrary({...library, active: true})]);
+    await expect(api.registerLibrary('/music')).resolves.toEqual(job);
+    expect(fetcher.mock.calls[1][0]).toBe('/api/v1/libraries');
+    expect(JSON.parse(String((fetcher.mock.calls[1][1] as RequestInit).body))).toEqual({path: '/music'});
   });
 
   it('preserves stable backend error codes', async () => {

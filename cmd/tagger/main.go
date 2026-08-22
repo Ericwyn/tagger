@@ -52,6 +52,7 @@ func main() {
 	}
 	defer dataStore.Close()
 	musicDir := strings.TrimSpace(cfg.MusicDir)
+	usingEmptyLibrary := false
 	if musicDir == "" {
 		persisted, found, rootErr := dataStore.LibraryRoot(ctx)
 		if rootErr != nil {
@@ -59,12 +60,45 @@ func main() {
 			logger.Error("load persisted library root", "error", rootErr)
 			os.Exit(1)
 		}
-		if !found {
-			cancel()
-			logger.Error("music directory is required", "hint", "pass --music-dir/TAGGER_MUSIC_DIR once or select a persisted library")
-			os.Exit(2)
+		if found {
+			if info, statErr := os.Stat(persisted); statErr == nil && info.IsDir() {
+				musicDir = persisted
+			} else {
+				logger.Warn("persisted music directory is unavailable; waiting for a new library", "path", persisted)
+			}
 		}
-		musicDir = persisted
+		if musicDir == "" {
+			// Older installations may already have indexed libraries but no
+			// active-root setting. Prefer the most recently scanned valid one.
+			first, firstFound, firstErr := dataStore.FirstLibraryRoot(ctx)
+			if firstErr != nil {
+				cancel()
+				logger.Error("load indexed library root", "error", firstErr)
+				os.Exit(1)
+			}
+			if firstFound {
+				if info, statErr := os.Stat(first); statErr == nil && info.IsDir() {
+					musicDir = first
+					if err := dataStore.SetLibraryRoot(ctx, first); err != nil {
+						cancel()
+						logger.Error("persist recovered library root", "error", err)
+						os.Exit(1)
+					}
+				}
+			}
+		}
+		if musicDir == "" {
+			// Keep scanner and writer valid while the UI shows the empty state.
+			// This private root is removed from the registry after the no-op scan.
+			emptyRoot := filepath.Join(cfg.DataDir, ".tagger-empty-library")
+			if err := os.MkdirAll(emptyRoot, 0o700); err != nil {
+				cancel()
+				logger.Error("create empty library root", "error", err)
+				os.Exit(1)
+			}
+			musicDir = emptyRoot
+			usingEmptyLibrary = true
+		}
 	}
 	engine := taglibwasm.New()
 	musicScanner, err := scanner.New(engine, scanner.Options{
@@ -85,6 +119,13 @@ func main() {
 		}
 	}
 	libraryService, err := library.New(ctx, musicScanner, dataStore)
+	if usingEmptyLibrary {
+		if cleanupErr := dataStore.DeleteLibraryByRoot(ctx, musicScanner.Root()); cleanupErr != nil {
+			cancel()
+			logger.Error("remove empty library placeholder", "error", cleanupErr)
+			os.Exit(1)
+		}
+	}
 	cancel()
 	if err != nil {
 		logger.Error("initial library scan failed", "error", err)

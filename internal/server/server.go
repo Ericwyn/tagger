@@ -91,6 +91,7 @@ func (s *Server) routes() {
 	api.GET("/system", s.handleSystem)
 	api.PATCH("/system/settings", s.handleSystemSettings)
 	api.GET("/libraries", s.handleLibraries)
+	api.POST("/libraries", s.handleLibraryRegister)
 	api.POST("/libraries/probe", s.handleLibraryProbe)
 	api.POST("/libraries/:id/switch", s.handleLibrarySwitch)
 	api.POST("/libraries/:id/scans", s.handleRescan)
@@ -209,12 +210,50 @@ func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext
 	s.writeData(c, map[string]any{"historyRetention": s.store.HistoryRetention(ctx)})
 }
 
-func (s *Server) handleLibraries(_ context.Context, c *app.RequestContext) {
-	s.writeData(c, []domain.LibrarySummary{s.library.Library()})
+func (s *Server) handleLibraries(ctx context.Context, c *app.RequestContext) {
+	if s.store != nil {
+		activeRoot := ""
+		if root, found, err := s.store.LibraryRoot(ctx); err == nil && found {
+			activeRoot = root
+		} else if err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "libraries_failed", err.Error())
+			return
+		}
+		libraries, err := s.store.ListLibraries(ctx, activeRoot)
+		if err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "libraries_failed", err.Error())
+			return
+		}
+		s.writeData(c, libraries)
+		return
+	}
+	current := s.library.Library()
+	if current.ID == "" {
+		s.writeData(c, []domain.LibrarySummary{})
+		return
+	}
+	s.writeData(c, []domain.LibrarySummary{current})
 }
 
 type libraryProbeRequest struct {
 	Path string `json:"path"`
+}
+
+func (s *Server) rejectLibraryMutation(ctx context.Context, c *app.RequestContext) bool {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "曲库任务队列尚未启用")
+		return true
+	}
+	active, err := s.jobs.HasActive(ctx)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return true
+	}
+	if active {
+		s.writeError(c, consts.StatusConflict, "library_switch_busy", "存在运行中或待审核任务，请完成或取消后再修改曲库")
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleLibraryProbe(_ context.Context, c *app.RequestContext) {
@@ -231,29 +270,79 @@ func (s *Server) handleLibraryProbe(_ context.Context, c *app.RequestContext) {
 	s.writeData(c, probe)
 }
 
-func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext) {
-	if s.jobs == nil {
-		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "曲库切换任务队列尚未启用")
+// handleLibraryRegister queues the first scan for a new root. The root is
+// intentionally persisted only after a successful scan, so a failed probe or
+// interrupted job never leaves an unusable entry in the library switcher.
+func (s *Server) handleLibraryRegister(ctx context.Context, c *app.RequestContext) {
+	if s.rejectLibraryMutation(ctx, c) {
 		return
 	}
-	current := s.library.Library()
-	if c.Param("id") != current.ID {
-		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+	var request libraryProbeRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "添加曲库 JSON 无效")
 		return
 	}
-	active, err := s.jobs.HasActive(ctx)
+	probe, err := library.ProbeRoot(request.Path)
 	if err != nil {
-		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		s.writeError(c, consts.StatusUnprocessableEntity, "directory_probe_failed", err.Error())
 		return
 	}
-	if active {
-		s.writeError(c, consts.StatusConflict, "library_switch_busy", "存在运行中或待审核任务，请完成或取消后再切换曲库")
+	libraryID := ""
+	if s.store != nil {
+		libraries, listErr := s.store.ListLibraries(ctx, "")
+		if listErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "libraries_failed", listErr.Error())
+			return
+		}
+		for _, item := range libraries {
+			if filepath.Clean(item.RootPath) == filepath.Clean(probe.Path) {
+				libraryID = item.ID
+				break
+			}
+		}
+	}
+	payload, _ := json.Marshal(map[string]string{"root": probe.Path})
+	job, err := s.jobs.Enqueue(ctx, domain.Job{
+		Kind: domain.JobScan, LibraryID: libraryID, Title: "添加曲库 · " + probe.Name,
+		Detail: "等待曲库扫描 worker", Total: probe.AudioFiles, Payload: string(payload),
+	})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job), "probe": probe})
+}
+
+func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext) {
+	if s.rejectLibraryMutation(ctx, c) {
 		return
 	}
 	var request libraryProbeRequest
 	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "曲库切换 JSON 无效")
 		return
+	}
+	targetID := c.Param("id")
+	current := s.library.Library()
+	targetRoot := ""
+	if s.store != nil {
+		_, root, found, lookupErr := s.store.LibraryByID(ctx, targetID)
+		if lookupErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "libraries_failed", lookupErr.Error())
+			return
+		}
+		if found {
+			targetRoot = root
+		} else if targetID != current.ID {
+			s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+			return
+		}
+	} else if targetID != current.ID {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	if strings.TrimSpace(request.Path) == "" {
+		request.Path = targetRoot
 	}
 	probe, err := library.ProbeRoot(request.Path)
 	if err != nil {
@@ -262,7 +351,7 @@ func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext)
 	}
 	payload, _ := json.Marshal(map[string]string{"root": probe.Path})
 	job, err := s.jobs.Enqueue(ctx, domain.Job{
-		Kind: domain.JobScan, LibraryID: current.ID, Title: "切换曲库 · " + probe.Name,
+		Kind: domain.JobScan, LibraryID: targetID, Title: "切换曲库 · " + probe.Name,
 		Detail: "等待曲库切换 worker", Total: probe.AudioFiles, Payload: string(payload),
 	})
 	if err != nil {

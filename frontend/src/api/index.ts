@@ -41,6 +41,15 @@ export async function getLibrary(): Promise<LibrarySummary> {
   return apiReadMode === 'mock' ? mock.getLibrary() : real.getLibrary();
 }
 
+export async function listLibraries(): Promise<LibrarySummary[]> {
+  return apiReadMode === 'mock' ? mock.listLibraries() : real.listLibraries();
+}
+
+export async function registerLibrary(path: string): Promise<Job | null> {
+  if (apiReadMode === 'mock') return mock.registerLibrary(path);
+  return real.registerLibrary(path);
+}
+
 export async function probeLibrary(path: string): Promise<DirectoryProbe> {
   if (apiReadMode === 'mock') return mock.probeLibrary(path);
   return real.probeLibrary(path);

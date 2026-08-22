@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, probeLibrary, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
@@ -103,6 +103,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [configSaving, setConfigSaving] = useState(false);
   const [configError, setConfigError] = useState('');
   const [library, setLibrary] = useState<LibrarySummary>();
+  const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryScanning, setLibraryScanning] = useState(false);
   const [libraryError, setLibraryError] = useState('');
@@ -134,8 +135,12 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     setLibraryLoading(true);
     setLibraryError('');
     try {
-      setLibrary(await getLibrary());
+      const items = await listLibraries();
+      setLibraries(items);
+      setLibrary(items.find((item) => item.active) ?? items[0]);
     } catch (error) {
+      setLibraries([]);
+      setLibrary(undefined);
       setLibraryError(error instanceof Error ? error.message : '曲库信息读取失败');
     } finally {
       setLibraryLoading(false);
@@ -168,10 +173,12 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   };
 
   const switchActiveLibrary = async () => {
-    if (!library || !directoryProbe || directorySwitching) return;
+    if (!directoryProbe || directorySwitching) return;
     setDirectorySwitching(true);
     try {
-      const job = await switchLibrary(library.id, directoryProbe.path);
+      const normalizedPath = directoryProbe.path.trim().replace(/[\\/]+$/, '');
+      const existing = libraries.find((item) => (item.rootPath || '').trim().replace(/[\\/]+$/, '') === normalizedPath);
+      const job = existing ? await switchLibrary(existing.id, directoryProbe.path) : await registerLibrary(directoryProbe.path);
       if (job && apiReadMode === 'real') {
         const completed = await waitForJob(job.id);
         if (completed.state !== 'succeeded') {
@@ -180,9 +187,27 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
       }
       await loadLibrary();
       setDirectoryProbeOpen(false);
-      onNotice(`已切换到曲库：${directoryProbe.name}`);
+      onNotice(`${existing ? '已切换到' : '已添加并切换到'}曲库：${directoryProbe.name}`);
     } catch (error) {
       setDirectoryProbeError(error instanceof Error ? error.message : '曲库切换失败');
+    } finally {
+      setDirectorySwitching(false);
+    }
+  };
+
+  const switchRegisteredLibrary = async (target: LibrarySummary) => {
+    if (target.active || directorySwitching || !target.rootPath) return;
+    setDirectorySwitching(true);
+    try {
+      const job = await switchLibrary(target.id, target.rootPath);
+      if (job && apiReadMode === 'real') {
+        const completed = await waitForJob(job.id);
+        if (completed.state !== 'succeeded') throw new Error(completed.detail || `曲库切换${completed.state}`);
+      }
+      await loadLibrary();
+      onNotice(`已切换到曲库：${target.name}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '曲库切换失败');
     } finally {
       setDirectorySwitching(false);
     }
@@ -440,7 +465,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
           <div>
             <span className="eyebrow">LIBRARY DIRECTORY PROBE</span>
             <h3>验证音乐目录</h3>
-            <p>先读取目录权限和音频样本；确认后才会排队切换当前曲库，不会直接修改文件。</p>
+            <p>先读取目录权限和音频样本；确认后会添加或切换曲库并排队扫描，不会直接修改文件。</p>
           </div>
           <button className="icon-button" title="关闭目录探测" onClick={() => setDirectoryProbeOpen(false)}><X size={17} /></button>
         </div>
@@ -459,8 +484,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
               </div>
               <div className="directory-probe-formats">{Object.entries(directoryProbe.formats).map(([format, count]) => <span key={format}>{format.toUpperCase()} <strong>{count}</strong></span>)}</div>
               {(directoryProbe.warnings?.length ?? 0) > 0 && <div className="directory-probe-warnings">{directoryProbe.warnings!.map((warning) => <p key={warning}><CircleAlert size={13} /> {warning}</p>)}</div>}
-              <small>切换会排队扫描并更新当前曲库；有运行中或待审核任务时会被拒绝。未显式提供 <code>--music-dir</code> 时，重启会恢复最近一次选择。</small>
-              <button className="primary-button" type="button" disabled={!directoryProbe.readable || directorySwitching} onClick={() => void switchActiveLibrary()}>{directorySwitching ? <LoaderCircle size={14} className="spin" /> : <FolderCog size={14} />} {directorySwitching ? '切换中…' : '切换到此目录'}</button>
+              <small>添加或切换会排队扫描并更新当前曲库；有运行中或待审核任务时会被拒绝。未显式提供 <code>--music-dir</code> 时，重启会恢复最近一次选择。</small>
+              <button className="primary-button" type="button" disabled={!directoryProbe.readable || directorySwitching} onClick={() => void switchActiveLibrary()}>{directorySwitching ? <LoaderCircle size={14} className="spin" /> : <FolderCog size={14} />} {directorySwitching ? '处理中…' : '添加并切换到此目录'}</button>
             </div>
           )}
         </form>
@@ -576,6 +601,17 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 </div>
                 <div className="ignore-box"><span>忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><button>编辑</button></div>
               </article>
+              <div className="registered-libraries" aria-label="已注册曲库">
+                <div className="registered-libraries-head"><div><h3>已注册曲库</h3><p>切换只会改变当前浏览和写入目标，不会删除其他曲库的索引。</p></div><span>{libraries.length} 个</span></div>
+                {libraries.length === 0 && <div className="empty-library-state"><Database size={18} /><span>还没有已完成扫描的曲库。验证一个本地目录即可添加。</span></div>}
+                {libraries.map((item) => (
+                  <article className={cn('registered-library-row', item.active && 'is-active')} key={item.id}>
+                    <span className="registered-library-icon"><Database size={17} /></span>
+                    <div><strong>{item.name}</strong><code>{item.rootPath || item.rootLabel}</code><small>{item.trackCount} 首 · {item.folderCount} 个目录 · {item.lastScanLabel || '尚未扫描'}</small></div>
+                    {item.active ? <span className="registered-library-active"><Check size={13} /> 当前</span> : <button className="secondary-button" disabled={directorySwitching} onClick={() => void switchRegisteredLibrary(item)}>{directorySwitching ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />} 切换</button>}
+                  </article>
+                ))}
+              </div>
               <div className="settings-policy-note">
                 <FolderCog size={18} />
 				<div><strong>{apiReadMode === 'real' ? '当前使用真实曲库索引' : '当前使用 Mock 数据'}</strong><span>{apiReadMode === 'real' ? '目录权限、索引和扫描任务由 Go 后端管理。' : '连接 Go 后端后，这里会读取真实目录权限。'}</span></div>

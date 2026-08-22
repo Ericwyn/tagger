@@ -160,6 +160,33 @@ func TestLibraryDirectoryProbeAPI(t *testing.T) {
 	}
 }
 
+func TestLibraryRegisterQueuesNewRootScan(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "new.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"path":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"title":"添加曲库 ·`) {
+		t.Fatalf("register = %d %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := manager.Get(context.Background(), envelope.Data.ID)
+	if err != nil || !strings.Contains(queued.Payload, root) {
+		t.Fatalf("queued=%#v err=%v", queued, err)
+	}
+}
+
 func TestLibrarySwitchQueuesSafeBackgroundJob(t *testing.T) {
 	s := newTestServer(t)
 	manager := jobs.New(s.store)

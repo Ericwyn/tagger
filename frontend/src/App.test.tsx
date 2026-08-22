@@ -103,7 +103,8 @@ describe('Tagger app prototype', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', {name: '许嵩 · 青年晚报 9'}));
+    await user.click(await screen.findByRole('button', {name: '许嵩 18'}));
+    await user.click(await screen.findByRole('button', {name: '青年晚报 9'}));
     expect(await screen.findByRole('heading', {name: '奇谈'})).toBeInTheDocument();
   });
 

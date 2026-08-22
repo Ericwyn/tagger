@@ -81,6 +81,7 @@ export interface LibrarySummary {
   name: string;
   rootLabel: string;
   rootPath?: string;
+  active?: boolean;
   trackCount: number;
   folderCount: number;
   writable: boolean;

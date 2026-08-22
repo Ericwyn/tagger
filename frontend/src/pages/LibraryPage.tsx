@@ -40,6 +40,7 @@ interface LyricsSaveOptions {
 
 interface LibraryPageProps {
   onOpenReview: (ids: string[]) => void;
+  onOpenSettings?: () => void;
   onNotice: (message: string) => void;
   playerTrackId?: string;
   playerPlaying: boolean;
@@ -76,7 +77,7 @@ const sortLabels: Record<SortMode, string> = {
 
 const trackCollator = new Intl.Collator('zh-Hans-CN', {numeric: true, sensitivity: 'base'});
 
-export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
+export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
@@ -425,6 +426,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
         <strong>无法装载音乐档案</strong>
         <span>{loadError || '尚未配置音乐曲库'}</span>
         <button className="secondary-button" onClick={() => void loadData()}><RefreshCw size={15} /> 重试</button>
+        {!library && onOpenSettings && <button className="primary-button" onClick={onOpenSettings}><FolderTree size={15} /> 打开设置添加曲库</button>}
       </div>
     );
   }

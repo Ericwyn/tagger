@@ -1,6 +1,8 @@
+import {useState} from 'react';
 import {
   AlertTriangle,
   ChevronDown,
+  ChevronRight,
   CircleDashed,
   Disc3,
   FileWarning,
@@ -14,6 +16,7 @@ import {
 } from 'lucide-react';
 import {cn, formatBytes} from '@/lib/utils';
 import type {LibrarySummary, TrackHealth} from '@/types';
+import type {FolderNode} from '@/types';
 
 export type SidebarFilter = 'all' | TrackHealth;
 
@@ -39,6 +42,62 @@ const smartFilters: Array<{id: SidebarFilter; label: string; icon: typeof Music2
   {id: 'complete', label: '资料完整', icon: ShieldCheck},
 ];
 
+interface FolderBranch {
+  key: string;
+  name: string;
+  count: number;
+  folderId?: string;
+  children: FolderBranch[];
+}
+
+function folderTree(folders: FolderNode[]): FolderBranch[] {
+  const roots: FolderBranch[] = [];
+  for (const folder of folders) {
+    if (folder.id === 'folder-root') continue;
+    const parts = folder.name.split(' · ').map((part) => part.trim()).filter(Boolean);
+    if (parts.length === 0) continue;
+    let siblings = roots;
+    let key = '';
+    parts.forEach((part, index) => {
+      key = key ? `${key}/${part}` : part;
+      let branch = siblings.find((item) => item.key === key);
+      if (!branch) {
+        branch = {key, name: part, count: 0, children: []};
+        siblings.push(branch);
+      }
+      branch.count += folder.count;
+      if (index === parts.length - 1) branch.folderId = folder.id;
+      siblings = branch.children;
+    });
+  }
+  const sort = (items: FolderBranch[]) => {
+    items.sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'));
+    items.forEach((item) => sort(item.children));
+  };
+  sort(roots);
+  return roots;
+}
+
+function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: FolderBranch; activeFolder: string | null; onSelectFolder: (id: string | null) => void}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChildren = branch.children.length > 0;
+  const active = branch.folderId === activeFolder;
+  return (
+    <div className="tree-branch">
+      <button className={cn('tree-row', active && 'is-active')} aria-expanded={hasChildren ? expanded : undefined} onClick={() => branch.folderId ? onSelectFolder(branch.folderId) : setExpanded((value) => !value)}>
+        <span
+          className={cn('tree-disclosure', !hasChildren && 'is-empty')}
+          onClick={(event) => { if (hasChildren) { event.stopPropagation(); setExpanded((value) => !value); } }}
+        >{hasChildren ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}</span>
+        {expanded ? <FolderOpen size={15} /> : <Folder size={15} />}
+        <span>{branch.name}</span>
+        <em>{branch.count}</em>
+      </button>
+      {expanded && hasChildren && <div className="tree-nested-children">{branch.children.map((child) => <FolderBranchRow key={child.key} branch={child} activeFolder={activeFolder} onSelectFolder={onSelectFolder} />)}</div>}
+    </div>
+  );
+}
+
 export function LibrarySidebar({
   library,
   activeFolder,
@@ -51,6 +110,7 @@ export function LibrarySidebar({
   onSelectFolder,
   onSelectFilter,
 }: LibrarySidebarProps) {
+  const folders = folderTree(library.folders);
   return (
     <aside className={cn('library-sidebar', mobileOpen && 'is-mobile-open')}>
       <div className="sidebar-mobile-head">
@@ -83,22 +143,13 @@ export function LibrarySidebar({
             onSelectFilter('all');
           }}
         >
+          <span className="tree-disclosure is-empty" aria-hidden="true" />
           <FolderOpen size={16} />
           <span>{library.rootLabel}</span>
           <em>{library.trackCount}</em>
         </button>
         <div className="tree-children">
-          {library.folders.map((folder) => (
-            <button
-              key={folder.id}
-              className={cn('tree-row', activeFolder === folder.id && 'is-active')}
-              onClick={() => onSelectFolder(folder.id)}
-            >
-              <Folder size={15} />
-              <span>{folder.name}</span>
-              <em>{folder.count}</em>
-            </button>
-          ))}
+          {folders.map((folder) => <FolderBranchRow key={folder.key} branch={folder} activeFolder={activeFolder} onSelectFolder={onSelectFolder} />)}
         </div>
       </section>
 

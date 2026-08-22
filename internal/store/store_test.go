@@ -69,6 +69,32 @@ func TestSaveLoadAndReplaceScan(t *testing.T) {
 	}
 }
 
+func TestListLibrariesMarksActiveAndKeepsRootsIndependent(t *testing.T) {
+	dataStore := openTestStore(t)
+	firstRoot := filepath.Join(t.TempDir(), "First")
+	secondRoot := filepath.Join(t.TempDir(), "Second")
+	if err := dataStore.SaveScan(context.Background(), firstRoot, testScanResult("lib-first", "First", testTrack("trk-first", "one.mp3"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SaveScan(context.Background(), secondRoot, testScanResult("lib-second", "Second", testTrack("trk-second", "two.flac"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SetLibraryRoot(context.Background(), secondRoot); err != nil {
+		t.Fatal(err)
+	}
+	libraries, err := dataStore.ListLibraries(context.Background(), secondRoot)
+	if err != nil || len(libraries) != 2 {
+		t.Fatalf("libraries=%#v err=%v", libraries, err)
+	}
+	if libraries[0].ID != "lib-second" || !libraries[0].Active || libraries[1].Active {
+		t.Fatalf("active ordering/flag mismatch: %#v", libraries)
+	}
+	_, root, found, err := dataStore.LibraryByID(context.Background(), "lib-first")
+	if err != nil || !found || root != firstRoot {
+		t.Fatalf("library lookup root=%q found=%v err=%v", root, found, err)
+	}
+}
+
 func TestScanAndRevisionSurviveReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "tagger.db")
 	first, err := Open(context.Background(), path)

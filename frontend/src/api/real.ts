@@ -135,6 +135,20 @@ export function normalizeTrack(track: Track): Track {
   };
 }
 
+export function normalizeLibrary(library: LibrarySummary): LibrarySummary {
+  const raw = library as LibrarySummary & Record<string, unknown>;
+  const folders = Array.isArray(raw.folders) ? raw.folders.filter((item): item is LibrarySummary['folders'][number] => Boolean(item && typeof item === 'object')) : [];
+  return {
+    ...library,
+    name: stringValue(raw.name) || stringValue(raw.rootLabel) || '未命名曲库',
+    rootLabel: stringValue(raw.rootLabel),
+    rootPath: stringValue(raw.rootPath) || undefined,
+    trackCount: typeof raw.trackCount === 'number' ? raw.trackCount : 0,
+    folderCount: typeof raw.folderCount === 'number' ? raw.folderCount : folders.length,
+    folders,
+  };
+}
+
 function normalizeTrackResult<T extends {track: Track}>(result: T): T {
   return {...result, track: normalizeTrack(result.track)};
 }
@@ -174,11 +188,22 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       });
     },
 
-    async getLibrary(): Promise<LibrarySummary> {
-      const libraries = await request<LibrarySummary[]>('/api/v1/libraries');
-      if (!libraries[0]) throw new APIError(404, 'library_not_found', '尚未配置音乐曲库');
-      return libraries[0];
+	    async getLibrary(): Promise<LibrarySummary> {
+	      const libraries = await request<LibrarySummary[]>('/api/v1/libraries');
+	      const current = libraries.find((library) => library.active) ?? libraries[0];
+	      if (!current) throw new APIError(404, 'library_not_found', '尚未配置音乐曲库');
+      return normalizeLibrary(current);
     },
+
+    listLibraries(): Promise<LibrarySummary[]> {
+      return request<LibrarySummary[]>('/api/v1/libraries').then((items) => items.map(normalizeLibrary));
+	    },
+
+	    registerLibrary(path: string): Promise<Job> {
+	      return request<Job>('/api/v1/libraries', {
+	        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path}),
+	      });
+	    },
 
     probeLibrary(path: string): Promise<DirectoryProbe> {
       return request<DirectoryProbe>('/api/v1/libraries/probe', {

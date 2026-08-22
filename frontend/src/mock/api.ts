@@ -12,6 +12,16 @@ export async function getLibrary(): Promise<LibrarySummary> {
   return structuredClone(library);
 }
 
+export async function listLibraries(): Promise<LibrarySummary[]> {
+  await wait();
+  return [structuredClone({...library, active: true})];
+}
+
+export async function registerLibrary(path: string): Promise<Job> {
+  await wait(140);
+  return {id: `mock-register-${Date.now()}`, kind: 'scan', title: `添加曲库 · ${path.split('/').filter(Boolean).pop() || path}`, detail: 'Mock 曲库添加完成', state: 'succeeded', processed: library.trackCount, total: library.trackCount, succeeded: library.trackCount, failed: 0, startedAt: '刚刚'};
+}
+
 export async function probeLibrary(path: string): Promise<DirectoryProbe> {
   await wait();
   const normalized = path.trim() || library.rootPath || library.rootLabel;
