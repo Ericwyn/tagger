@@ -1,4 +1,4 @@
-import {render, screen} from '@testing-library/react';
+import {fireEvent, render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {describe, expect, it, vi} from 'vitest';
 import {TrackInspector} from '@/components/library/TrackInspector';
@@ -29,7 +29,32 @@ describe('TrackInspector', () => {
     expect(screen.getByText('再回首（修订）')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: '确认写入'}));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({title: '再回首（修订）'}));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({title: '再回首（修订）'}), {writeTag: true, writeSidecar: true});
+  });
+
+  it('lets the user keep lyrics out of the audio tag while saving the sidecar', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={onSave}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', {name: '歌词'}));
+    const lyrics = screen.getByPlaceholderText(/在这里输入歌词/);
+    fireEvent.change(lyrics, {target: {value: '[00:01.00] sidecar only'}});
+    await user.click(screen.getByLabelText('写入音频标签'));
+    await user.click(screen.getByRole('button', {name: '保存修改'}));
+    await user.click(screen.getByRole('button', {name: '确认写入'}));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({lyrics: '[00:01.00] sidecar only'}), {writeTag: false, writeSidecar: true});
   });
 
   it('uploads artwork and requires a second click before deletion', async () => {

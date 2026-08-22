@@ -13,6 +13,13 @@ export interface TrackProperties {
   channels: number;
 }
 
+export interface SidecarInfo {
+  exists: boolean;
+  revision?: string;
+  sizeBytes?: number;
+  modifiedAt?: string;
+}
+
 export interface Track {
   id: string;
   fileName: string;
@@ -32,6 +39,7 @@ export interface Track {
   year?: number;
   genres: string[];
   lyrics: string;
+  lyricsSidecar?: SidecarInfo;
   artworkCount: number;
   coverTone: CoverTone;
   health: TrackHealth;
@@ -208,6 +216,27 @@ export interface RawTagsResponse {
   trackId: string;
   revision: string;
   tags: Record<string, string[]>;
+}
+
+export interface LyricsSidecarResponse {
+  trackId: string;
+  revision: string;
+  sidecar?: SidecarInfo;
+  content: string;
+}
+
+export interface LyricsSidecarWriteResult {
+  track: Track;
+  sidecar: {
+    baseRevision: string;
+    currentRevision: string;
+    baseSidecarRevision: string;
+    currentSidecarRevision?: string;
+    dryRun: boolean;
+    changed: boolean;
+    before?: SidecarInfo;
+    after?: SidecarInfo;
+  };
 }
 
 export interface UpdateProvenance {

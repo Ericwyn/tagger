@@ -16,6 +16,8 @@ import type {
 	BatchEditOperation,
 	BatchEditSelection,
 	UpdateProvenance,
+	LyricsSidecarResponse,
+	LyricsSidecarWriteResult,
 } from '@/types';
 
 interface DataEnvelope<T> {
@@ -170,7 +172,42 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	},
 
 	getRawTags(trackId: string): Promise<RawTagsResponse> {
-	  return request<RawTagsResponse>(`/api/v1/tracks/${encodeURIComponent(trackId)}/raw-tags`);
+		return request<RawTagsResponse>(`/api/v1/tracks/${encodeURIComponent(trackId)}/raw-tags`);
+	},
+
+	getLyricsSidecar(trackId: string): Promise<LyricsSidecarResponse> {
+		return request<LyricsSidecarResponse>(`/api/v1/tracks/${encodeURIComponent(trackId)}/lyrics-sidecar`);
+	},
+
+	writeLyricsSidecar(track: Track, content: string): Promise<LyricsSidecarWriteResult> {
+		return request<LyricsSidecarWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/lyrics-sidecar`, {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json',
+				'If-Match': `"${track.revision}"`,
+			},
+			body: JSON.stringify({
+				baseRevision: track.revision,
+				baseSidecarRevision: track.lyricsSidecar?.revision ?? '',
+				content,
+				dryRun: false,
+			}),
+		});
+	},
+
+	deleteLyricsSidecar(track: Track): Promise<LyricsSidecarWriteResult> {
+		return request<LyricsSidecarWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/lyrics-sidecar`, {
+			method: 'DELETE',
+			headers: {
+				'Content-Type': 'application/json',
+				'If-Match': `"${track.revision}"`,
+			},
+			body: JSON.stringify({
+				baseRevision: track.revision,
+				baseSidecarRevision: track.lyricsSidecar?.revision ?? '',
+				dryRun: false,
+			}),
+		});
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {

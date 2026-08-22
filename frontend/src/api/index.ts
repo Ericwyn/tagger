@@ -10,6 +10,7 @@ import type {
   RestoreResult,
 	Revision,
 	RawTagsResponse,
+	LyricsSidecarResponse,
 	Track,
   TrackPatch,
 	UpdateProvenance,
@@ -85,11 +86,33 @@ export function getRawTags(trackId: string): Promise<RawTagsResponse | null> {
   return apiReadMode === 'mock' ? Promise.resolve(null) : real.getRawTags(trackId);
 }
 
+export function getLyricsSidecar(trackId: string): Promise<LyricsSidecarResponse | null> {
+  return apiReadMode === 'mock' ? Promise.resolve(null) : real.getLyricsSidecar(trackId);
+}
+
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {
   if (apiReadMode === 'mock') return mock.updateTrack(trackId, patch);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
   const result = await real.updateTrack(current, patch, provenance);
+  realTrackCache.set(trackId, result.track);
+  return result.track;
+}
+
+export async function writeLyricsSidecar(trackId: string, content: string): Promise<Track> {
+  if (apiReadMode === 'mock') return (await mock.writeLyricsSidecar(trackId, content)).track;
+  const current = realTrackCache.get(trackId);
+  if (!current) throw new Error('track_not_found');
+  const result = await real.writeLyricsSidecar(current, content);
+  realTrackCache.set(trackId, result.track);
+  return result.track;
+}
+
+export async function deleteLyricsSidecar(trackId: string): Promise<Track> {
+  if (apiReadMode === 'mock') return (await mock.deleteLyricsSidecar(trackId)).track;
+  const current = realTrackCache.get(trackId);
+  if (!current) throw new Error('track_not_found');
+  const result = await real.deleteLyricsSidecar(current);
   realTrackCache.set(trackId, result.track);
   return result.track;
 }

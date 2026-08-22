@@ -137,6 +137,30 @@ describe('real API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/v1/tracks/trk%2F1/raw-tags', expect.any(Object));
   });
 
+  it('guards lyrics sidecar writes with both audio and sidecar revisions', async () => {
+    const current = {...track, revision: 'rev-1', lyricsSidecar: {exists: true, revision: 'sidecar-old'}} as Track;
+    const updated = {...current, revision: 'rev-2', lyricsSidecar: {exists: true, revision: 'sidecar-new'}};
+    const result = {track: updated, sidecar: {baseRevision: 'rev-1', currentRevision: 'rev-2', baseSidecarRevision: 'sidecar-old', currentSidecarRevision: 'sidecar-new', dryRun: false, changed: true}};
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: result}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: result}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.writeLyricsSidecar(current, '[00:01.00] hello')).resolves.toEqual(result);
+    const putInit = fetcher.mock.calls[0][1] as RequestInit;
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/lyrics-sidecar');
+    expect(putInit.method).toBe('PUT');
+    expect(putInit.headers).toEqual(expect.objectContaining({'If-Match': '"rev-1"'}));
+    expect(JSON.parse(String(putInit.body))).toEqual({
+      baseRevision: 'rev-1', baseSidecarRevision: 'sidecar-old', content: '[00:01.00] hello', dryRun: false,
+    });
+
+    await expect(api.deleteLyricsSidecar(updated)).resolves.toEqual(result);
+    const deleteInit = fetcher.mock.calls[1][1] as RequestInit;
+    expect(deleteInit.method).toBe('DELETE');
+    expect(JSON.parse(String(deleteInit.body))).toEqual({baseRevision: 'rev-2', baseSidecarRevision: 'sidecar-new', dryRun: false});
+  });
+
   it('writes an explicit patch guarded by the indexed revision', async () => {
     const fullTrack = {
       ...track,

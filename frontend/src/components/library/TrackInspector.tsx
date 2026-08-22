@@ -30,8 +30,13 @@ interface TrackInspectorProps {
   mobileOpen: boolean;
   onCloseMobile: () => void;
   onSearch: (focus?: 'metadata' | 'lyrics') => void;
-  onSave: (patch: TrackPatch) => Promise<void>;
+  onSave: (patch: TrackPatch, options?: TrackSaveOptions) => Promise<void>;
   onArtworkChange: (file: File | null) => Promise<void>;
+}
+
+export interface TrackSaveOptions {
+  writeTag: boolean;
+  writeSidecar: boolean;
 }
 
 const tabs: Array<{id: InspectorTab; label: string}> = [
@@ -95,6 +100,8 @@ export function TrackInspector({
   const [showPreview, setShowPreview] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
+  const [writeTag, setWriteTag] = useState(true);
+  const [writeSidecar, setWriteSidecar] = useState(true);
   const [rawTags, setRawTags] = useState<Record<string, string[]> | null>(null);
   const [rawTagsOpen, setRawTagsOpen] = useState(false);
   const [rawTagsLoading, setRawTagsLoading] = useState(false);
@@ -108,6 +115,8 @@ export function TrackInspector({
     setShowPreview(false);
     setPlaying(false);
 	setDeleteArtworkArmed(false);
+	setWriteTag(true);
+	setWriteSidecar(true);
 	setRawTags(null);
 	setRawTagsOpen(false);
 	setRawTagsError('');
@@ -439,8 +448,12 @@ export function TrackInspector({
               spellCheck={false}
             />
             <div className="lyrics-options">
-              <label><input type="checkbox" defaultChecked /> 写入音频标签</label>
-              <label><input type="checkbox" defaultChecked /> 同时保存 .lrc</label>
+              <label><input type="checkbox" checked={writeTag} onChange={(event) => setWriteTag(event.target.checked)} /> 写入音频标签</label>
+              <label>
+                <input type="checkbox" checked={writeSidecar} onChange={(event) => setWriteSidecar(event.target.checked)} />
+                同时保存 .lrc
+                <small>{track.lyricsSidecar?.exists ? '已存在同名文件' : '未发现同名文件'}</small>
+              </label>
             </div>
             <p className="format-note">保存时会写入同目录临时副本，重读验证成功后再原子替换原文件。</p>
           </div>
@@ -536,7 +549,7 @@ export function TrackInspector({
                 className="primary-button"
                 disabled={saving}
                 onClick={async () => {
-                  await onSave(draft);
+                  await onSave(draft, {writeTag, writeSidecar});
                   setShowPreview(false);
                 }}
               >

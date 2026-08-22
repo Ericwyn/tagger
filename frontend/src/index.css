@@ -1736,6 +1736,7 @@ button:disabled {
 
 .lyrics-options {
   display: flex;
+  flex-wrap: wrap;
   gap: 15px;
   padding: 12px 0;
   border-bottom: 1px solid var(--line);
@@ -1748,6 +1749,11 @@ button:disabled {
   gap: 6px;
   color: var(--muted);
   font-size: 9px;
+}
+
+.lyrics-options label small {
+  color: var(--faint);
+  font-size: 8px;
 }
 
 .format-note {
