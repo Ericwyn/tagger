@@ -3214,6 +3214,50 @@ button:disabled {
   border-top: 1px solid var(--line-strong);
 }
 
+.restore-preview-banner {
+  display: flex !important;
+  grid-template-columns: none !important;
+  flex-direction: column;
+  align-items: flex-start !important;
+  gap: 3px !important;
+  min-height: auto !important;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)) !important;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.restore-preview-banner span,
+.restore-preview-banner small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 7px;
+}
+
+.restore-warning,
+.restore-error {
+  margin: 9px 0 0;
+  padding: 7px 8px;
+  border-left: 2px solid var(--warning);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.restore-error {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+
+.restore-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.restore-actions button {
+  justify-content: center;
+}
+
 .revision-diff-head,
 .revision-diff > div {
   display: grid;

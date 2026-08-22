@@ -1,6 +1,17 @@
 import * as mock from '@/mock/api';
 import {createRealAPI, type ScanResult} from '@/api/real';
-import type {Job, LibrarySummary, MatchCandidate, ProviderConfig, Revision, Track, TrackPatch, UpdateProvenance} from '@/types';
+import type {
+  Job,
+  LibrarySummary,
+  MatchCandidate,
+  ProviderConfig,
+  RestorePreview,
+  RestoreResult,
+  Revision,
+  Track,
+  TrackPatch,
+  UpdateProvenance,
+} from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
 export const apiReadMode: 'mock' | 'real' = configuredMode === 'mock' || import.meta.env.MODE === 'test'
@@ -54,4 +65,18 @@ export function listJobs(): Promise<Job[]> {
 
 export function listRevisions(): Promise<Revision[]> {
   return apiReadMode === 'mock' ? mock.listRevisions() : real.listRevisions();
+}
+
+export function previewRevisionRestore(revision: Revision): Promise<RestorePreview> {
+  if (apiReadMode === 'mock' || !revision.currentRevision) {
+    return Promise.reject(new Error('历史恢复仅在真实后端模式可用'));
+  }
+  return real.previewRevisionRestore(revision.id, revision.currentRevision);
+}
+
+export function restoreRevision(revision: Revision, preview: RestorePreview): Promise<RestoreResult> {
+  if (apiReadMode === 'mock' || !revision.currentRevision) {
+    return Promise.reject(new Error('历史恢复仅在真实后端模式可用'));
+  }
+  return real.restoreRevision(revision.id, preview.preview.currentRevision);
 }

@@ -69,6 +69,8 @@ func (s *Server) routes() {
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
+	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
+	api.POST("/revisions/:id/restore", s.handleRevisionRestore)
 
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
@@ -224,18 +226,19 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 }
 
 type revisionResponse struct {
-	ID             string                `json:"id"`
-	TrackID        string                `json:"trackId"`
-	TrackTitle     string                `json:"trackTitle"`
-	FileName       string                `json:"fileName"`
-	Action         string                `json:"action"`
-	Source         string                `json:"source"`
-	Time           string                `json:"time"`
-	Fields         []string              `json:"fields"`
-	Diff           []domain.RevisionDiff `json:"diff"`
-	CoverTone      domain.CoverTone      `json:"coverTone"`
-	BaseRevision   string                `json:"baseRevision"`
-	ResultRevision string                `json:"resultRevision"`
+	ID              string                `json:"id"`
+	TrackID         string                `json:"trackId"`
+	TrackTitle      string                `json:"trackTitle"`
+	FileName        string                `json:"fileName"`
+	Action          string                `json:"action"`
+	Source          string                `json:"source"`
+	Time            string                `json:"time"`
+	Fields          []string              `json:"fields"`
+	Diff            []domain.RevisionDiff `json:"diff"`
+	CoverTone       domain.CoverTone      `json:"coverTone"`
+	BaseRevision    string                `json:"baseRevision"`
+	ResultRevision  string                `json:"resultRevision"`
+	CurrentRevision string                `json:"currentRevision,omitempty"`
 }
 
 func (s *Server) handleRevisions(ctx context.Context, c *app.RequestContext) {
@@ -250,7 +253,7 @@ func (s *Server) handleRevisions(ctx context.Context, c *app.RequestContext) {
 	}
 	result := make([]revisionResponse, len(revisions))
 	for index, revision := range revisions {
-		result[index] = toRevisionResponse(revision)
+		result[index] = toRevisionResponse(revision, s.trackRevision(revision.TrackID))
 	}
 	s.writeData(c, result)
 }
@@ -269,17 +272,132 @@ func (s *Server) handleRevision(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
 		return
 	}
-	s.writeData(c, toRevisionResponse(revision))
+	s.writeData(c, toRevisionResponse(revision, s.trackRevision(revision.TrackID)))
 }
 
-func toRevisionResponse(revision domain.Revision) revisionResponse {
+func toRevisionResponse(revision domain.Revision, currentRevision string) revisionResponse {
 	return revisionResponse{
 		ID: revision.ID, TrackID: revision.TrackID, TrackTitle: revision.TrackTitle,
 		FileName: revision.FileName, Action: revision.Action, Source: revision.Source,
 		Time: revision.CreatedAt.Local().Format("2006-01-02 15:04"), Fields: revision.Fields,
 		Diff: revision.Diff, CoverTone: revision.CoverTone, BaseRevision: revision.BaseRevision,
-		ResultRevision: revision.ResultRevision,
+		ResultRevision: revision.ResultRevision, CurrentRevision: currentRevision,
 	}
+}
+
+func (s *Server) trackRevision(trackID string) string {
+	track, err := s.library.Track(trackID)
+	if err != nil {
+		return ""
+	}
+	return track.Revision
+}
+
+type revisionRestoreRequest struct {
+	BaseRevision string `json:"baseRevision"`
+	Target       string `json:"target"`
+}
+
+func (s *Server) handleRevisionRestorePreview(ctx context.Context, c *app.RequestContext) {
+	s.handleRevisionRestoreRequest(ctx, c, true)
+}
+
+func (s *Server) handleRevisionRestore(ctx context.Context, c *app.RequestContext) {
+	s.handleRevisionRestoreRequest(ctx, c, false)
+}
+
+func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.RequestContext, dryRun bool) {
+	if s.store == nil || s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "restore_unavailable", "历史恢复服务尚未启用")
+		return
+	}
+	var request revisionRestoreRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	headerRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if request.BaseRevision == "" {
+		request.BaseRevision = headerRevision
+	}
+	if request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "baseRevision 与 If-Match 必须一致且不能为空")
+		return
+	}
+	if request.Target == "" {
+		request.Target = "before"
+	}
+	if request.Target != "before" && request.Target != "after" {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "target 必须是 before 或 after")
+		return
+	}
+	revision, err := s.store.Revision(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
+		return
+	}
+	if revision.LibraryID != s.library.Library().ID {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	ref, err := s.library.FileRef(revision.TrackID)
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "修订对应的曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	targetTags := revision.BeforeTags
+	if request.Target == "after" {
+		targetTags = revision.AfterTags
+	}
+	result, err := s.writer.Restore(ctx, ref, request.BaseRevision, targetTags, dryRun)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	if dryRun {
+		s.writeData(c, map[string]any{
+			"revisionId": revision.ID, "trackId": revision.TrackID, "target": request.Target, "preview": result,
+		})
+		return
+	}
+	if result.Changed {
+		if err := s.library.Rescan(ctx); err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已恢复，但重新索引失败："+err.Error())
+			return
+		}
+	}
+	track, err := s.library.Track(revision.TrackID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已恢复，但曲目索引不可用")
+		return
+	}
+	if result.Changed {
+		action := "恢复到修订前"
+		if request.Target == "after" {
+			action = "恢复到修订后"
+		}
+		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
+			LibraryID: s.library.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
+			Action: action, Source: "历史修订 " + revision.ID, BaseRevision: result.BaseRevision,
+			ResultRevision: track.Revision, Diff: result.Diff, CoverTone: track.CoverTone,
+			BeforeTags: result.BeforeTags, AfterTags: result.AfterTags,
+		})
+		if historyErr != nil {
+			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
+		}
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, map[string]any{
+		"track": track, "write": result, "restoredRevisionId": revision.ID, "target": request.Target,
+	})
 }
 
 func (s *Server) handleWriteError(c *app.RequestContext, err error) {

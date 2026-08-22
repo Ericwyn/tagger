@@ -8,11 +8,12 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {listRevisions} from '@/api';
-import type {Revision} from '@/types';
+import {listRevisions, previewRevisionRestore, restoreRevision} from '@/api';
+import type {RestorePreview, Revision} from '@/types';
 
 interface HistoryPageProps {
   onNotice: (message: string) => void;
@@ -23,14 +24,26 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
   const [activeId, setActiveId] = useState<string>();
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [query, setQuery] = useState('');
+  const [restorePreview, setRestorePreview] = useState<RestorePreview>();
+  const [restoreState, setRestoreState] = useState<'idle' | 'previewing' | 'restoring'>('idle');
+  const [restoreError, setRestoreError] = useState('');
+
+  const reload = async () => {
+    const next = await listRevisions();
+    setRevisions(next);
+    setActiveId(next[0]?.id);
+    setState('ready');
+  };
 
   useEffect(() => {
-    listRevisions().then((next) => {
-      setRevisions(next);
-      setActiveId(next[0]?.id);
-      setState('ready');
-    }).catch(() => setState('error'));
+	void reload().catch(() => setState('error'));
   }, []);
+
+  useEffect(() => {
+	setRestorePreview(undefined);
+	setRestoreState('idle');
+	setRestoreError('');
+  }, [activeId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleRevisions = normalizedQuery
@@ -38,9 +51,41 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
     : revisions;
   const active = revisions.find((revision) => revision.id === activeId);
-  const activeDiff = active?.diff?.length
+	const recordedDiff = active?.diff?.length
     ? active.diff
     : active?.fields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined})) ?? [];
+	const activeDiff = restorePreview?.preview.diff ?? recordedDiff;
+
+	const buildRestorePreview = async () => {
+	  if (!active) return;
+	  setRestoreState('previewing');
+	  setRestoreError('');
+	  try {
+		setRestorePreview(await previewRevisionRestore(active));
+	  } catch (error) {
+		setRestoreError(error instanceof Error ? error.message : '恢复预览失败');
+	  } finally {
+		setRestoreState('idle');
+	  }
+	};
+
+	const confirmRestore = async () => {
+	  if (!active || !restorePreview) return;
+	  setRestoreState('restoring');
+	  setRestoreError('');
+	  try {
+		const result = await restoreRevision(active, restorePreview);
+		onNotice(result.write.changed
+		  ? `已将「${result.track.title}」恢复到该修订修改前，并生成新的审计记录`
+		  : `「${result.track.title}」当前已是目标版本`);
+		setRestorePreview(undefined);
+		await reload();
+	  } catch (error) {
+		setRestoreError(error instanceof Error ? error.message : '恢复失败');
+	  } finally {
+		setRestoreState('idle');
+	  }
+	};
 
   return (
     <div className="section-page history-page">
@@ -111,7 +156,14 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
               <div><FileClock size={15} /><span>修改来源</span><strong>{active.source}</strong></div>
             </div>
             <div className="revision-diff">
-              <div className="revision-diff-head"><span>字段</span><span>修改前</span><span /><span>修改后</span></div>
+			  {restorePreview && (
+				<div className="restore-preview-banner">
+				  <span>RESTORE PREVIEW</span>
+				  <strong>将当前文件恢复到这次修改之前</strong>
+				  <small>以下是相对当前磁盘标签即将发生的变化，尚未写入。</small>
+				</div>
+			  )}
+			  <div className="revision-diff-head"><span>字段</span><span>当前值</span><span /><span>{restorePreview ? '恢复后' : '修改后'}</span></div>
               {activeDiff.map((diff) => (
                 <div key={diff.field}>
                   <strong>{fieldLabel(diff.field)}</strong>
@@ -121,6 +173,8 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
                 </div>
               ))}
             </div>
+			{restorePreview?.preview.warnings.map((warning) => <p className="restore-warning" key={warning}>{warning}</p>)}
+			{restoreError && <p className="restore-error">{restoreError}</p>}
             <div className="integrity-note">
               <Check size={15} />
               <span>
@@ -128,12 +182,29 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
                 <small>文件容器、时长与音频属性保持一致</small>
               </span>
             </div>
-            <button
-              className="secondary-button full-button"
-              onClick={() => onNotice(`「${active.trackTitle}」的恢复能力将在下一阶段接入`)}
-            >
-              <RotateCcw size={15} /> 恢复此版本（即将接入）
-            </button>
+			{restorePreview ? (
+			  <div className="restore-actions">
+				<button className="secondary-button" disabled={restoreState !== 'idle'} onClick={() => setRestorePreview(undefined)}>
+				  <X size={15} /> 取消
+				</button>
+				<button
+				  className="primary-button"
+				  disabled={restoreState !== 'idle' || !restorePreview.preview.changed}
+				  onClick={() => void confirmRestore()}
+				>
+				  <RotateCcw size={15} /> {restoreState === 'restoring' ? '恢复中…' : restorePreview.preview.changed ? '确认恢复' : '当前已是目标版本'}
+				</button>
+			  </div>
+			) : (
+			  <button
+				className="secondary-button full-button"
+				disabled={restoreState !== 'idle' || !active.currentRevision}
+				title={active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
+				onClick={() => void buildRestorePreview()}
+			  >
+				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : '恢复到修改前…'}
+			  </button>
+			)}
           </aside>
         )}
         {!active && state === 'ready' && (

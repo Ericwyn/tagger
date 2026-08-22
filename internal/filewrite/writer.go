@@ -76,6 +76,28 @@ func New(root string, engine tags.Engine) (*Writer, error) {
 }
 
 func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision string, patch domain.TagPatch, dryRun bool) (Result, error) {
+	return w.mutate(ctx, ref, baseRevision, dryRun, func(raw map[string][]string) (map[string][]string, []FieldDiff, error) {
+		return compilePatch(raw, patch)
+	})
+}
+
+func (w *Writer) Restore(ctx context.Context, ref library.FileRef, baseRevision string, target map[string][]string, dryRun bool) (Result, error) {
+	if target == nil {
+		return Result{}, fmt.Errorf("%w: restore target is missing", ErrInvalidPatch)
+	}
+	result, err := w.mutate(ctx, ref, baseRevision, dryRun, func(raw map[string][]string) (map[string][]string, []FieldDiff, error) {
+		return compileRestore(raw, target)
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	result.Warnings = append(result.Warnings, "恢复仅覆盖 Tagger 管理的标准字段；未知或格式私有标签保持当前值")
+	return result, nil
+}
+
+type updateCompiler func(raw map[string][]string) (map[string][]string, []FieldDiff, error)
+
+func (w *Writer) mutate(ctx context.Context, ref library.FileRef, baseRevision string, dryRun bool, compile updateCompiler) (Result, error) {
 	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
 		return Result{}, ErrUnsupportedFormat
 	}
@@ -104,7 +126,7 @@ func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision st
 		return Result{}, &RevisionConflictError{Expected: baseRevision, Current: currentRevision}
 	}
 
-	updates, diffs, err := compilePatch(before.Raw, patch)
+	updates, diffs, err := compile(before.Raw)
 	if err != nil {
 		return Result{}, err
 	}
@@ -167,6 +189,58 @@ func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision st
 	result.CurrentRevision = scanner.FileRevision(ref.RelativePath, finalInfo, after.Raw)
 	result.AfterTags = cloneRawTags(after.Raw)
 	return result, nil
+}
+
+type restorableField struct {
+	field string
+	key   string
+	multi bool
+}
+
+var restorableFields = []restorableField{
+	{field: "title", key: "TITLE"},
+	{field: "artists", key: "ARTIST", multi: true},
+	{field: "album", key: "ALBUM"},
+	{field: "albumArtists", key: "ALBUMARTIST", multi: true},
+	{field: "trackNumber", key: "TRACKNUMBER"},
+	{field: "trackTotal", key: "TRACKTOTAL"},
+	{field: "discNumber", key: "DISCNUMBER"},
+	{field: "discTotal", key: "DISCTOTAL"},
+	{field: "year", key: "DATE"},
+	{field: "genres", key: "GENRE", multi: true},
+	{field: "lyrics", key: "LYRICS"},
+}
+
+func compileRestore(current, target map[string][]string) (map[string][]string, []FieldDiff, error) {
+	updates := make(map[string][]string)
+	diffs := make([]FieldDiff, 0, len(restorableFields))
+	for _, field := range restorableFields {
+		before := rawValues(current, field.key)
+		after := rawValues(target, field.key)
+		if slices.Equal(before, after) {
+			continue
+		}
+		operation := domain.OperationSet
+		if len(after) == 0 {
+			operation = domain.OperationDelete
+		}
+		updates[field.key] = append([]string(nil), after...)
+		diffs = append(diffs, FieldDiff{
+			Field: field.field, Operation: operation,
+			Before: restoreDiffValue(before, field.multi), After: restoreDiffValue(after, field.multi),
+		})
+	}
+	return updates, diffs, nil
+}
+
+func restoreDiffValue(values []string, multi bool) any {
+	if multi {
+		return append([]string(nil), values...)
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func cloneRawTags(raw map[string][]string) map[string][]string {

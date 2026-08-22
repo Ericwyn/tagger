@@ -1,4 +1,14 @@
-import type {LibrarySummary, MatchCandidate, ProviderConfig, Revision, Track, TrackPatch, UpdateProvenance} from '@/types';
+import type {
+  LibrarySummary,
+  MatchCandidate,
+  ProviderConfig,
+  RestorePreview,
+  RestoreResult,
+  Revision,
+  Track,
+  TrackPatch,
+  UpdateProvenance,
+} from '@/types';
 
 interface DataEnvelope<T> {
   data: T;
@@ -132,6 +142,22 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
     listRevisions(): Promise<Revision[]> {
       return request<Revision[]>('/api/v1/revisions');
+    },
+
+    previewRevisionRestore(revisionId: string, baseRevision: string): Promise<RestorePreview> {
+      return request<RestorePreview>(`/api/v1/revisions/${encodeURIComponent(revisionId)}/restore-preview`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
+        body: JSON.stringify({baseRevision, target: 'before'}),
+      });
+    },
+
+    restoreRevision(revisionId: string, baseRevision: string): Promise<RestoreResult> {
+      return request<RestoreResult>(`/api/v1/revisions/${encodeURIComponent(revisionId)}/restore`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
+        body: JSON.stringify({baseRevision, target: 'before'}),
+      });
     },
   };
 }

@@ -119,6 +119,7 @@ export interface Revision {
   diff?: RevisionDiff[];
   baseRevision?: string;
   resultRevision?: string;
+  currentRevision?: string;
 }
 
 export interface RevisionDiff {
@@ -159,4 +160,25 @@ export interface TrackPatch {
 
 export interface UpdateProvenance {
   providerId: string;
+}
+
+export interface RestorePreview {
+  revisionId: string;
+  trackId: string;
+  target: 'before' | 'after';
+  preview: {
+    baseRevision: string;
+    currentRevision: string;
+    dryRun: boolean;
+    changed: boolean;
+    diff: RevisionDiff[];
+    warnings: string[];
+  };
+}
+
+export interface RestoreResult {
+  track: Track;
+  write: RestorePreview['preview'];
+  restoredRevisionId: string;
+  target: 'before' | 'after';
 }

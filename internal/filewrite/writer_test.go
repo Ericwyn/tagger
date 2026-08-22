@@ -127,6 +127,52 @@ func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	}
 }
 
+func TestWriterRestoresManagedSnapshotAndPreservesPrivateTags(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "song.flac")
+	if err := os.WriteFile(path, []byte("fake audio"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	engine := newMemoryEngine(map[string][]string{
+		"TITLE": {"Current title"}, "ARTIST": {"Current artist"}, "GENRE": {"Rock"},
+		"PRIVATE:OWNER": {"keep-current-private-value"},
+	})
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatFLAC, engine)
+	target := map[string][]string{
+		"TITLE": {"Historic title"}, "ARTIST": {"Artist A", "Artist B"},
+		"PRIVATE:OWNER": {"historic-private-value-must-not-be-restored"},
+	}
+
+	preview, err := writer.Restore(context.Background(), ref, ref.Revision, target, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.DryRun || len(preview.Diff) != 3 || engine.writes != 0 || len(preview.Warnings) != 1 {
+		t.Fatalf("restore preview = %#v writes=%d", preview, engine.writes)
+	}
+	result, err := writer.Restore(context.Background(), ref, ref.Revision, target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || engine.writes != 1 {
+		t.Fatalf("restore result = %#v writes=%d", result, engine.writes)
+	}
+	if firstRaw(result.AfterTags, "TITLE") != "Historic title" ||
+		!slices.Equal(result.AfterTags["ARTIST"], []string{"Artist A", "Artist B"}) ||
+		len(result.AfterTags["GENRE"]) != 0 ||
+		firstRaw(result.AfterTags, "PRIVATE:OWNER") != "keep-current-private-value" {
+		t.Fatalf("restored tags = %#v", result.AfterTags)
+	}
+	_, err = writer.Restore(context.Background(), ref, ref.Revision, target, false)
+	if !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale restore error = %v", err)
+	}
+}
+
 func TestWriterDoesNotReplaceSourceWhenVerificationFails(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "song.flac")

@@ -126,4 +126,25 @@ describe('real API client', () => {
     await expect(api.listRevisions()).resolves.toEqual([revision]);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/revisions', expect.any(Object));
   });
+
+  it('previews and executes revision restore with the current revision guard', async () => {
+	const preview = {
+	  revisionId: 'revlog-1', trackId: 'trk-1', target: 'before',
+	  preview: {baseRevision: 'current-rev', currentRevision: 'current-rev', dryRun: true, changed: true, diff: [], warnings: []},
+	};
+	const restored = {track, write: {...preview.preview, dryRun: false}, restoredRevisionId: 'revlog-1', target: 'before'};
+	const fetcher = vi.fn()
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: preview}), {status: 200}))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: restored}), {status: 200}));
+	const api = createRealAPI(fetcher);
+
+	await expect(api.previewRevisionRestore('revlog/a', 'current-rev')).resolves.toEqual(preview);
+	await expect(api.restoreRevision('revlog/a', 'current-rev')).resolves.toEqual(restored);
+	for (const [path, init] of fetcher.mock.calls) {
+	  expect(path).toMatch(/^\/api\/v1\/revisions\/revlog%2Fa\/restore/);
+	  expect(init).toEqual(expect.objectContaining({method: 'POST'}));
+	  expect((init as RequestInit).headers).toEqual(expect.objectContaining({'If-Match': '"current-rev"'}));
+	  expect(JSON.parse(String((init as RequestInit).body))).toEqual({baseRevision: 'current-rev', target: 'before'});
+	}
+  });
 });

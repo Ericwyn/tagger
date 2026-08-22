@@ -82,6 +82,41 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 		!containsJSON(history.Body.Bytes(), `"after":"`+newTitle+`"`) {
 		t.Fatalf("history = %d %s", history.Code, history.Body.String())
 	}
+	revisions, err := dataStore.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 1 {
+		t.Fatalf("stored revisions = %#v err=%v", revisions, err)
+	}
+	updatedTrack, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreBody, err := json.Marshal(map[string]any{"baseRevision": updatedTrack.Revision, "target": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore-preview",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updatedTrack.Revision + `"`})
+	if preview.Code != 200 || !containsJSON(preview.Body.Bytes(), `"before":"`+newTitle+`"`) ||
+		!containsJSON(preview.Body.Bytes(), `"after":"`+track.Title+`"`) {
+		t.Fatalf("restore preview = %d %s", preview.Code, preview.Body.String())
+	}
+	restore := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updatedTrack.Revision + `"`})
+	if restore.Code != 200 || !containsJSON(restore.Body.Bytes(), `"title":"`+track.Title+`"`) ||
+		!containsJSON(restore.Body.Bytes(), `"changed":true`) {
+		t.Fatalf("restore = %d %s", restore.Code, restore.Body.String())
+	}
+	staleRestore := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+revisions[0].ID+"/restore",
+		&ut.Body{Body: bytes.NewReader(restoreBody), Len: len(restoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updatedTrack.Revision + `"`})
+	if staleRestore.Code != 409 || !containsJSON(staleRestore.Body.Bytes(), `"code":"revision_conflict"`) {
+		t.Fatalf("stale restore = %d %s", staleRestore.Code, staleRestore.Body.String())
+	}
 	if err := dataStore.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -91,9 +126,14 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	revisions, err := reopened.ListRevisions(context.Background(), 10)
-	if err != nil || len(revisions) != 1 || revisions[0].Diff[0].After != newTitle {
+	revisions, err = reopened.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 2 || revisions[0].Action != "恢复到修订前" ||
+		revisions[0].Source != "历史修订 "+revisions[1].ID || revisions[0].Diff[0].After != track.Title {
 		t.Fatalf("reopened history = %#v err=%v", revisions, err)
+	}
+	loaded, found, err := reopened.LoadScan(context.Background(), root)
+	if err != nil || !found || len(loaded.Tracks) != 1 || loaded.Tracks[0].Title != track.Title {
+		t.Fatalf("reopened scan = %#v found=%v err=%v", loaded, found, err)
 	}
 }
 

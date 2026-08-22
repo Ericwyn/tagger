@@ -174,18 +174,21 @@ func TestProviderListAndTrackMatchSearch(t *testing.T) {
 
 func TestRevisionHistoryAPI(t *testing.T) {
 	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
 	created, err := s.store.CreateRevision(context.Background(), domain.Revision{
-		ID: "revlog-test", LibraryID: s.library.Library().ID, TrackID: "trk-test",
+		ID: "revlog-test", LibraryID: s.library.Library().ID, TrackID: track.ID,
 		TrackTitle: "Changed song", FileName: "changed.flac", Action: "修改标签", Source: "手工编辑",
 		BaseRevision: "before", ResultRevision: "after", CoverTone: domain.CoverMoss,
-		Diff: []domain.RevisionDiff{{Field: "title", Operation: domain.OperationSet, Before: "Old", After: "Changed song"}},
+		Diff:       []domain.RevisionDiff{{Field: "title", Operation: domain.OperationSet, Before: "Old", After: "Changed song"}},
+		BeforeTags: map[string][]string{"TITLE": {"Old"}}, AfterTags: map[string][]string{"TITLE": {"Changed song"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	list := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions", nil)
-	if list.Code != 200 || !containsJSON(list.Body.Bytes(), `"id":"revlog-test"`) || !containsJSON(list.Body.Bytes(), `"before":"Old"`) {
+	if list.Code != 200 || !containsJSON(list.Body.Bytes(), `"id":"revlog-test"`) ||
+		!containsJSON(list.Body.Bytes(), `"before":"Old"`) || !containsJSON(list.Body.Bytes(), `"currentRevision":"`+track.Revision+`"`) {
 		t.Fatalf("revision list = %d %s", list.Code, list.Body.String())
 	}
 	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/"+created.ID, nil)
@@ -195,6 +198,14 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	missing := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/missing", nil)
 	if missing.Code != 404 || !containsJSON(missing.Body.Bytes(), `"code":"revision_not_found"`) {
 		t.Fatalf("missing revision = %d %s", missing.Code, missing.Body.String())
+	}
+	invalidBody := []byte(`{"baseRevision":"` + track.Revision + `","target":"unknown"}`)
+	invalid := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+created.ID+"/restore-preview",
+		&ut.Body{Body: bytes.NewReader(invalidBody), Len: len(invalidBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `"code":"invalid_request"`) {
+		t.Fatalf("invalid restore target = %d %s", invalid.Code, invalid.Body.String())
 	}
 }
 
