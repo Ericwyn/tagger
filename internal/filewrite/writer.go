@@ -38,20 +38,17 @@ func (e *RevisionConflictError) Error() string {
 
 func (e *RevisionConflictError) Unwrap() error { return ErrRevisionConflict }
 
-type FieldDiff struct {
-	Field     string           `json:"field"`
-	Operation domain.Operation `json:"operation"`
-	Before    any              `json:"before"`
-	After     any              `json:"after"`
-}
+type FieldDiff = domain.RevisionDiff
 
 type Result struct {
-	BaseRevision    string      `json:"baseRevision"`
-	CurrentRevision string      `json:"currentRevision"`
-	DryRun          bool        `json:"dryRun"`
-	Changed         bool        `json:"changed"`
-	Diff            []FieldDiff `json:"diff"`
-	Warnings        []string    `json:"warnings"`
+	BaseRevision    string              `json:"baseRevision"`
+	CurrentRevision string              `json:"currentRevision"`
+	DryRun          bool                `json:"dryRun"`
+	Changed         bool                `json:"changed"`
+	Diff            []FieldDiff         `json:"diff"`
+	Warnings        []string            `json:"warnings"`
+	BeforeTags      map[string][]string `json:"-"`
+	AfterTags       map[string][]string `json:"-"`
 }
 
 type Writer struct {
@@ -118,8 +115,10 @@ func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision st
 		Changed:         len(diffs) > 0,
 		Diff:            diffs,
 		Warnings:        []string{},
+		BeforeTags:      cloneRawTags(before.Raw),
 	}
 	if dryRun || len(diffs) == 0 {
+		result.AfterTags = cloneRawTags(before.Raw)
 		return result, nil
 	}
 
@@ -166,7 +165,16 @@ func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision st
 		return Result{}, fmt.Errorf("stat written file: %w", err)
 	}
 	result.CurrentRevision = scanner.FileRevision(ref.RelativePath, finalInfo, after.Raw)
+	result.AfterTags = cloneRawTags(after.Raw)
 	return result, nil
+}
+
+func cloneRawTags(raw map[string][]string) map[string][]string {
+	result := make(map[string][]string, len(raw))
+	for key, values := range raw {
+		result[key] = append([]string(nil), values...)
+	}
+	return result
 }
 
 func (w *Writer) containedPath(ref library.FileRef) (string, error) {

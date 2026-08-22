@@ -4,14 +4,27 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/scanner"
+	"github.com/ericwyn/tagger/internal/store"
 	"github.com/ericwyn/tagger/internal/tags"
 )
 
 type serviceEngine struct{}
+
+type countingServiceEngine struct{ reads atomic.Int32 }
+
+func (engine *countingServiceEngine) Read(ctx context.Context, path string) (tags.Snapshot, error) {
+	engine.reads.Add(1)
+	return serviceEngine{}.Read(ctx, path)
+}
+
+func (*countingServiceEngine) Write(context.Context, string, map[string][]string) error { return nil }
+
+func (*countingServiceEngine) Version() string { return "counting-test" }
 
 func (serviceEngine) Read(_ context.Context, path string) (tags.Snapshot, error) {
 	name := filepath.Base(path)
@@ -62,5 +75,43 @@ func TestServiceFiltersAndReturnsDefensiveCopies(t *testing.T) {
 	}
 	if _, err := service.Track("missing"); err != ErrTrackNotFound {
 		t.Fatalf("missing error = %v", err)
+	}
+}
+
+func TestServiceLoadsPersistedIndexAndRescansOnDemand(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Persisted.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := &countingServiceEngine{}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+
+	first, err := New(context.Background(), musicScanner, dataStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 1 || first.Library().TrackCount != 1 {
+		t.Fatalf("initial scan reads=%d tracks=%d", engine.reads.Load(), first.Library().TrackCount)
+	}
+	second, err := New(context.Background(), musicScanner, dataStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 1 || second.Library().TrackCount != 1 {
+		t.Fatalf("persisted load unexpectedly rescanned: reads=%d tracks=%d", engine.reads.Load(), second.Library().TrackCount)
+	}
+	if err := second.Rescan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 2 {
+		t.Fatalf("explicit rescan reads=%d, want 2", engine.reads.Load())
 	}
 }

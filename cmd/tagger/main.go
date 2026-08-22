@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/ericwyn/tagger/internal/providers/musicbrainz"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/server"
+	"github.com/ericwyn/tagger/internal/store"
 	"github.com/ericwyn/tagger/internal/tags/taglibwasm"
 	"github.com/ericwyn/tagger/internal/version"
 	"github.com/ericwyn/tagger/web"
@@ -40,7 +42,14 @@ func main() {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	libraryService, err := library.New(ctx, musicScanner)
+	dataStore, err := store.Open(ctx, filepath.Join(cfg.DataDir, "tagger.db"))
+	if err != nil {
+		cancel()
+		logger.Error("initialize persistent store", "error", err)
+		os.Exit(1)
+	}
+	defer dataStore.Close()
+	libraryService, err := library.New(ctx, musicScanner, dataStore)
 	cancel()
 	if err != nil {
 		logger.Error("initial library scan failed", "error", err)
@@ -67,10 +76,11 @@ func main() {
 		}),
 	)
 
-	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, web.Dist(), version.Version, engine.Version())
+	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, dataStore, web.Dist(), version.Version, engine.Version())
 	logger.Info("tagger started",
 		"listen", cfg.Listen,
 		"library", cfg.MusicDir,
+		"data", dataStore.Path(),
 		"tracks", libraryService.Library().TrackCount,
 		"version", version.Version,
 	)

@@ -107,6 +107,9 @@ func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	if !result.Changed || result.CurrentRevision == ref.Revision || engine.writes != 1 {
 		t.Fatalf("result = %#v writes=%d", result, engine.writes)
 	}
+	if firstRaw(result.BeforeTags, "TITLE") != "Old title" || firstRaw(result.AfterTags, "TITLE") != "New title" {
+		t.Fatalf("writer did not retain history snapshots: before=%v after=%v", result.BeforeTags, result.AfterTags)
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

@@ -3055,6 +3055,12 @@ button:disabled {
   border-right: 1px solid var(--line-strong);
 }
 
+.history-empty {
+  min-height: 230px;
+  padding: 28px;
+  text-align: center;
+}
+
 .revision-date {
   display: flex;
   align-items: center;
@@ -3226,13 +3232,19 @@ button:disabled {
 }
 
 .revision-diff del {
-  color: var(--muted);
+	overflow: hidden;
+	color: var(--muted);
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .revision-diff ins {
-  color: var(--accent);
-  font-weight: 700;
-  text-decoration: none;
+	overflow: hidden;
+	color: var(--accent);
+	font-weight: 700;
+	text-decoration: none;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .integrity-note {

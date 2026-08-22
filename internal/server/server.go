@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -16,6 +17,7 @@ import (
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/store"
 )
 
 type Server struct {
@@ -23,12 +25,13 @@ type Server struct {
 	library       *library.Service
 	writer        *filewrite.Writer
 	providers     *providers.Registry
+	store         *store.Store
 	frontend      fs.FS
 	version       string
 	tagEngineInfo string
 }
 
-func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, frontend fs.FS, version, tagEngineInfo string) *Server {
+func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, dataStore *store.Store, frontend fs.FS, version, tagEngineInfo string) *Server {
 	h := hserver.Default(
 		hserver.WithHostPorts(listen),
 		hserver.WithMaxRequestBodySize(1<<20),
@@ -38,6 +41,7 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 		library:       libraryService,
 		writer:        writer,
 		providers:     providerRegistry,
+		store:         dataStore,
 		frontend:      frontend,
 		version:       version,
 		tagEngineInfo: tagEngineInfo,
@@ -63,6 +67,8 @@ func (s *Server) routes() {
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 	api.GET("/providers", s.handleProviders)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
+	api.GET("/revisions", s.handleRevisions)
+	api.GET("/revisions/:id", s.handleRevision)
 
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
@@ -132,6 +138,9 @@ type tagWriteRequest struct {
 	BaseRevision string          `json:"baseRevision"`
 	Patch        domain.TagPatch `json:"patch"`
 	DryRun       bool            `json:"dryRun"`
+	Provenance   *struct {
+		ProviderID string `json:"providerId"`
+	} `json:"provenance,omitempty"`
 }
 
 func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
@@ -151,6 +160,18 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 	if request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "baseRevision 与 If-Match 必须一致且不能为空")
 		return
+	}
+	action, source := "修改标签", "手工编辑"
+	if request.Provenance != nil {
+		descriptor, found := providers.Descriptor{}, false
+		if s.providers != nil {
+			descriptor, found = s.providers.Descriptor(strings.TrimSpace(request.Provenance.ProviderID))
+		}
+		if !found {
+			s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "数据来源未注册")
+			return
+		}
+		action, source = "采用数据源元数据", descriptor.Name
 	}
 	ref, err := s.library.FileRef(c.Param("id"))
 	if errors.Is(err, library.ErrTrackNotFound) {
@@ -179,8 +200,86 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但曲目索引不可用")
 		return
 	}
+	if s.store != nil {
+		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
+			LibraryID:      s.library.Library().ID,
+			TrackID:        track.ID,
+			TrackTitle:     track.Title,
+			FileName:       track.FileName,
+			Action:         action,
+			Source:         source,
+			BaseRevision:   result.BaseRevision,
+			ResultRevision: track.Revision,
+			Diff:           result.Diff,
+			CoverTone:      track.CoverTone,
+			BeforeTags:     result.BeforeTags,
+			AfterTags:      result.AfterTags,
+		})
+		if historyErr != nil {
+			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
+		}
+	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, map[string]any{"track": track, "write": result})
+}
+
+type revisionResponse struct {
+	ID             string                `json:"id"`
+	TrackID        string                `json:"trackId"`
+	TrackTitle     string                `json:"trackTitle"`
+	FileName       string                `json:"fileName"`
+	Action         string                `json:"action"`
+	Source         string                `json:"source"`
+	Time           string                `json:"time"`
+	Fields         []string              `json:"fields"`
+	Diff           []domain.RevisionDiff `json:"diff"`
+	CoverTone      domain.CoverTone      `json:"coverTone"`
+	BaseRevision   string                `json:"baseRevision"`
+	ResultRevision string                `json:"resultRevision"`
+}
+
+func (s *Server) handleRevisions(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeData(c, []revisionResponse{})
+		return
+	}
+	revisions, err := s.store.ListRevisions(ctx, 100)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
+		return
+	}
+	result := make([]revisionResponse, len(revisions))
+	for index, revision := range revisions {
+		result[index] = toRevisionResponse(revision)
+	}
+	s.writeData(c, result)
+}
+
+func (s *Server) handleRevision(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	revision, err := s.store.Revision(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
+		return
+	}
+	s.writeData(c, toRevisionResponse(revision))
+}
+
+func toRevisionResponse(revision domain.Revision) revisionResponse {
+	return revisionResponse{
+		ID: revision.ID, TrackID: revision.TrackID, TrackTitle: revision.TrackTitle,
+		FileName: revision.FileName, Action: revision.Action, Source: revision.Source,
+		Time: revision.CreatedAt.Local().Format("2006-01-02 15:04"), Fields: revision.Fields,
+		Diff: revision.Diff, CoverTone: revision.CoverTone, BaseRevision: revision.BaseRevision,
+		ResultRevision: revision.ResultRevision,
+	}
 }
 
 func (s *Server) handleWriteError(c *app.RequestContext, err error) {

@@ -17,7 +17,7 @@ import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySi
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
 import {apiReadMode, getLibrary, listTracks, rescanLibrary, searchCandidates, updateTrack} from '@/api';
-import type {LibrarySummary, MatchCandidate, Track, TrackPatch} from '@/types';
+import type {LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LibraryPageProps {
   onOpenReview: (ids: string[]) => void;
@@ -124,11 +124,12 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
   const saveTrack = async (
     patch: TrackPatch,
     notice = apiReadMode === 'real' ? '标签已通过安全写入流程保存到音乐文件' : '标签草稿已写入 Mock 数据层',
+	provenance?: UpdateProvenance,
   ) => {
     if (!activeTrack) return;
     setSaving(true);
     try {
-      const updated = await updateTrack(activeTrack.id, patch);
+      const updated = await updateTrack(activeTrack.id, patch, provenance);
       setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
       onNotice(notice);
     } finally {
@@ -313,6 +314,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
           apiReadMode === 'real'
             ? `已采用 ${candidate.providerName} 候选并安全写入音乐文件`
             : `已采用 ${candidate.providerName} 候选，Mock 修订已更新`,
+		  {providerId: candidate.providerId},
         )}
       />
     </div>

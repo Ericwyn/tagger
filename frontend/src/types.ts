@@ -116,6 +116,16 @@ export interface Revision {
   time: string;
   fields: string[];
   coverTone: CoverTone;
+  diff?: RevisionDiff[];
+  baseRevision?: string;
+  resultRevision?: string;
+}
+
+export interface RevisionDiff {
+  field: string;
+  operation: 'keep' | 'set' | 'delete';
+  before: unknown;
+  after: unknown;
 }
 
 export type ProviderHealth = 'ready' | 'degraded' | 'misconfigured' | 'disabled';
@@ -145,4 +155,8 @@ export interface TrackPatch {
   year?: number;
   genres: string[];
   lyrics: string;
+}
+
+export interface UpdateProvenance {
+  providerId: string;
 }

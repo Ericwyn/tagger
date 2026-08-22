@@ -43,6 +43,16 @@ func (r *Registry) Descriptors() []Descriptor {
 	return result
 }
 
+func (r *Registry) Descriptor(id string) (Descriptor, bool) {
+	strategy, ok := r.strategies[id]
+	if !ok {
+		return Descriptor{}, false
+	}
+	descriptor := strategy.Descriptor()
+	descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
+	return descriptor, true
+}
+
 func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string, limit int) (SearchResult, error) {
 	if query.Title == "" {
 		return SearchResult{}, fmt.Errorf("title is required")

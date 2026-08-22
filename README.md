@@ -16,23 +16,25 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 前端标签表单已经接通真实安全写入 API。
 - MusicBrainz、LRCLIB、Apple/iTunes 官方数据源策略、统一候选评分和多源失败隔离。
 - 前端数据源设置、候选搜索、字段选择和 LRCLIB 歌词采用已经接通真实 Go API。
-- 前端生产构建读取真实 Go API；任务和历史页面暂时继续使用明确标注的原型数据。
+- SQLite WAL 持久化曲库索引；重启后可直接恢复最近一次扫描结果，并支持显式重新扫描。
+- 每次成功标签写入都会记录字段 diff、写入前后标签快照和 revision，历史页已经接通真实 API。
+- 前端生产构建读取真实 Go API；任务页面暂时继续使用明确标注的原型数据。
 
 正在实现：
 
-- SQLite 修订历史和恢复。
-- SQLite 持久化扫描索引和任务。
+- 历史版本恢复预览与安全恢复。
+- SQLite 持久化任务队列。
 - 网易云、酷我实验性 provider 的实际适配、缓存与配置健康检查。
 
 写标签会直接修改曲库中的音乐文件。首次使用前请确认音乐目录有独立备份；revision 冲突和写后验证不能代替文件系统备份。
 
 ## 快速开始
 
-要求 Go 1.25+、Node.js 20+ 和 npm。构建时需要 Node.js，运行生成的二进制不需要。
+要求 Go 1.25.7+、Node.js 20+ 和 npm。构建时需要 Node.js，运行生成的二进制不需要。
 
 ```bash
 make build
-./dist/tagger --music-dir /path/to/music
+./dist/tagger --music-dir /path/to/music --data-dir /path/to/tagger-data
 ```
 
 默认监听 `127.0.0.1:8080`，浏览器打开 <http://127.0.0.1:8080>。
@@ -40,14 +42,16 @@ make build
 本项目开发时可直接使用现有测试曲库：
 
 ```bash
-./dist/tagger --music-dir /home/ericwyn/Downloads/TestMusic
+./dist/tagger --music-dir /home/ericwyn/Downloads/TestMusic --data-dir ./data
 ```
 
 也可以用环境变量配置：
 
 ```bash
-TAGGER_MUSIC_DIR=/path/to/music TAGGER_LISTEN=0.0.0.0:8080 ./dist/tagger
+TAGGER_MUSIC_DIR=/path/to/music TAGGER_DATA_DIR=/path/to/tagger-data TAGGER_LISTEN=0.0.0.0:8080 ./dist/tagger
 ```
+
+`TAGGER_DATA_DIR` 默认是当前工作目录下的 `./data`，其中保存 `tagger.db`、WAL 和后续缓存。音乐文件仍是标签事实源；SQLite 是可重建的索引与标签级历史，不是音频文件备份。外部程序修改文件后需要在界面执行重新扫描。
 
 ## 开发
 
@@ -83,9 +87,11 @@ internal/domain/     前后端统一领域模型
 internal/scanner/    文件发现、并发提取和归一化
 internal/tags/       标签引擎接口与 TagLib-WASM 适配器
 internal/library/    线程安全的曲库查询服务
+internal/store/      SQLite migration、曲库索引和修订历史
 internal/providers/  抓取策略、统一评分和官方数据源客户端
 internal/server/     REST API、健康检查和 SPA 静态资源
 frontend/            React 工作台
 web/                 嵌入式前端资源
 docs/前期设计/       产品、架构、API 与路线图设计
+docs/实现记录/       已完成里程碑的验证记录
 ```

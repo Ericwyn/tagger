@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Listen      string
 	MusicDir    string
+	DataDir     string
 	LibraryName string
 	ScanWorkers int
 }
@@ -29,12 +30,14 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	cfg := Config{
 		Listen:      valueOr(getenv("TAGGER_LISTEN"), "127.0.0.1:8080"),
 		MusicDir:    strings.TrimSpace(getenv("TAGGER_MUSIC_DIR")),
+		DataDir:     valueOr(getenv("TAGGER_DATA_DIR"), "./data"),
 		LibraryName: strings.TrimSpace(getenv("TAGGER_LIBRARY_NAME")),
 		ScanWorkers: workers,
 	}
 	flags := flag.NewFlagSet("tagger", flag.ContinueOnError)
 	flags.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
 	flags.StringVar(&cfg.MusicDir, "music-dir", cfg.MusicDir, "music library root directory")
+	flags.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "persistent application data directory")
 	flags.StringVar(&cfg.LibraryName, "library-name", cfg.LibraryName, "display name for the music library")
 	flags.IntVar(&cfg.ScanWorkers, "scan-workers", cfg.ScanWorkers, "parallel metadata readers (1-32)")
 	if err := flags.Parse(args); err != nil {
@@ -45,11 +48,15 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	}
 	cfg.Listen = strings.TrimSpace(cfg.Listen)
 	cfg.MusicDir = strings.TrimSpace(cfg.MusicDir)
+	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
 	if cfg.Listen == "" {
 		return Config{}, fmt.Errorf("listen address cannot be empty")
 	}
 	if cfg.MusicDir == "" {
 		return Config{}, fmt.Errorf("music directory is required; pass --music-dir or TAGGER_MUSIC_DIR")
+	}
+	if cfg.DataDir == "" {
+		return Config{}, fmt.Errorf("data directory cannot be empty")
 	}
 	if cfg.ScanWorkers < 1 || cfg.ScanWorkers > 32 {
 		return Config{}, fmt.Errorf("scan workers must be between 1 and 32")

@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -29,8 +30,14 @@ type TrackFilter struct {
 	Format   domain.TrackFormat
 }
 
+type Repository interface {
+	SaveScan(ctx context.Context, root string, result scanner.Result) error
+	LoadScan(ctx context.Context, root string) (scanner.Result, bool, error)
+}
+
 type Service struct {
 	scanner *scanner.Scanner
+	repo    Repository
 
 	scanMu  sync.Mutex
 	mu      sync.RWMutex
@@ -40,8 +47,21 @@ type Service struct {
 	report  domain.ScanReport
 }
 
-func New(ctx context.Context, scanner *scanner.Scanner) (*Service, error) {
+func New(ctx context.Context, scanner *scanner.Scanner, repositories ...Repository) (*Service, error) {
 	service := &Service{scanner: scanner}
+	if len(repositories) > 0 {
+		service.repo = repositories[0]
+	}
+	if service.repo != nil {
+		result, found, err := service.repo.LoadScan(ctx, scanner.Root())
+		if err != nil {
+			return nil, fmt.Errorf("load persisted library: %w", err)
+		}
+		if found {
+			service.apply(result)
+			return service, nil
+		}
+	}
 	if err := service.Rescan(ctx); err != nil {
 		return nil, err
 	}
@@ -56,6 +76,16 @@ func (s *Service) Rescan(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if s.repo != nil {
+		if err := s.repo.SaveScan(ctx, s.scanner.Root(), result); err != nil {
+			return fmt.Errorf("persist scan: %w", err)
+		}
+	}
+	s.apply(result)
+	return nil
+}
+
+func (s *Service) apply(result scanner.Result) {
 	byID := make(map[string]domain.Track, len(result.Tracks))
 	for _, track := range result.Tracks {
 		byID[track.ID] = cloneTrack(track)
@@ -67,7 +97,6 @@ func (s *Service) Rescan(ctx context.Context) error {
 	s.byID = byID
 	s.report = result.Report
 	s.mu.Unlock()
-	return nil
 }
 
 func (s *Service) Library() domain.LibrarySummary {

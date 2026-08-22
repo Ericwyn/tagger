@@ -1,6 +1,6 @@
 import * as mock from '@/mock/api';
 import {createRealAPI, type ScanResult} from '@/api/real';
-import type {Job, LibrarySummary, MatchCandidate, ProviderConfig, Revision, Track, TrackPatch} from '@/types';
+import type {Job, LibrarySummary, MatchCandidate, ProviderConfig, Revision, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
 export const apiReadMode: 'mock' | 'real' = configuredMode === 'mock' || import.meta.env.MODE === 'test'
@@ -29,17 +29,17 @@ export async function rescanLibrary(libraryId: string): Promise<ScanResult | nul
   return real.rescanLibrary(libraryId);
 }
 
-export async function updateTrack(trackId: string, patch: TrackPatch): Promise<Track> {
+export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {
   if (apiReadMode === 'mock') return mock.updateTrack(trackId, patch);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
-  const result = await real.updateTrack(current, patch);
+  const result = await real.updateTrack(current, patch, provenance);
   realTrackCache.set(trackId, result.track);
   return result.track;
 }
 
-// Job and revision views remain intentionally backed by the mock strategy
-// until their corresponding persistent Go modules are connected.
+// The job view remains backed by the mock strategy until its persistent Go
+// module is connected. Revision history is served by SQLite in real mode.
 export function searchCandidates(track: Track): Promise<MatchCandidate[]> {
   return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track);
 }
@@ -53,5 +53,5 @@ export function listJobs(): Promise<Job[]> {
 }
 
 export function listRevisions(): Promise<Revision[]> {
-  return mock.listRevisions();
+  return apiReadMode === 'mock' ? mock.listRevisions() : real.listRevisions();
 }

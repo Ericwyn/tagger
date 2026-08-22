@@ -72,7 +72,7 @@ describe('real API client', () => {
       genres: ['Pop'],
       lyrics: '',
       trackNumber: 1,
-    })).resolves.toEqual(expect.objectContaining({track: updated}));
+    }, {providerId: 'musicbrainz'})).resolves.toEqual(expect.objectContaining({track: updated}));
 
     const init = fetcher.mock.calls[0][1] as RequestInit;
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/tags');
@@ -86,6 +86,7 @@ describe('real API client', () => {
         albumArtists: {op: 'delete'},
         lyrics: {op: 'delete'},
       }),
+	  provenance: {providerId: 'musicbrainz'},
     }));
     const serialized = JSON.parse(String(init.body)).patch;
     expect(serialized).not.toHaveProperty('artists');
@@ -111,5 +112,18 @@ describe('real API client', () => {
       limitPerProvider: 5,
     }));
     expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers');
+  });
+
+  it('lists persistent revision history', async () => {
+    const revision = {
+      id: 'revlog-1', trackId: 'trk-1', trackTitle: 'Song', fileName: 'Song.flac',
+      action: '修改标签', source: '手工编辑', time: '2026-08-20 12:00', fields: ['title'],
+      coverTone: 'moss', diff: [{field: 'title', operation: 'set', before: 'Old', after: 'Song'}],
+    };
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: [revision]}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.listRevisions()).resolves.toEqual([revision]);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/revisions', expect.any(Object));
   });
 });

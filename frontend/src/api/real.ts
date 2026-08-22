@@ -1,4 +1,4 @@
-import type {LibrarySummary, MatchCandidate, ProviderConfig, Track, TrackPatch} from '@/types';
+import type {LibrarySummary, MatchCandidate, ProviderConfig, Revision, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface DataEnvelope<T> {
   data: T;
@@ -89,7 +89,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return request<ScanResult>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
     },
 
-    async updateTrack(track: Track, patch: TrackPatch): Promise<WriteResult> {
+    async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {
       return request<WriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/tags`, {
         method: 'PATCH',
         headers: {
@@ -100,6 +100,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
           baseRevision: track.revision,
           patch: serializePatch(track, patch),
           dryRun: false,
+          provenance,
         }),
       });
     },
@@ -127,6 +128,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
     listProviders(): Promise<ProviderConfig[]> {
       return request<ProviderConfig[]>('/api/v1/providers');
+    },
+
+    listRevisions(): Promise<Revision[]> {
+      return request<Revision[]>('/api/v1/revisions');
     },
   };
 }

@@ -11,10 +11,12 @@ import (
 	"testing/fstest"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/scanner"
+	"github.com/ericwyn/tagger/internal/store"
 	"github.com/ericwyn/tagger/internal/tags"
 )
 
@@ -170,6 +172,32 @@ func TestProviderListAndTrackMatchSearch(t *testing.T) {
 	}
 }
 
+func TestRevisionHistoryAPI(t *testing.T) {
+	s := newTestServer(t)
+	created, err := s.store.CreateRevision(context.Background(), domain.Revision{
+		ID: "revlog-test", LibraryID: s.library.Library().ID, TrackID: "trk-test",
+		TrackTitle: "Changed song", FileName: "changed.flac", Action: "修改标签", Source: "手工编辑",
+		BaseRevision: "before", ResultRevision: "after", CoverTone: domain.CoverMoss,
+		Diff: []domain.RevisionDiff{{Field: "title", Operation: domain.OperationSet, Before: "Old", After: "Changed song"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions", nil)
+	if list.Code != 200 || !containsJSON(list.Body.Bytes(), `"id":"revlog-test"`) || !containsJSON(list.Body.Bytes(), `"before":"Old"`) {
+		t.Fatalf("revision list = %d %s", list.Code, list.Body.String())
+	}
+	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/"+created.ID, nil)
+	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"resultRevision":"after"`) {
+		t.Fatalf("revision detail = %d %s", detail.Code, detail.Body.String())
+	}
+	missing := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/missing", nil)
+	if missing.Code != 404 || !containsJSON(missing.Body.Bytes(), `"code":"revision_not_found"`) {
+		t.Fatalf("missing revision = %d %s", missing.Code, missing.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	root := t.TempDir()
@@ -183,6 +211,12 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	service, err := library.New(context.Background(), musicScanner)
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	service, err = library.New(context.Background(), musicScanner, dataStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +229,7 @@ func newTestServer(t *testing.T) *Server {
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('tagger')")},
 	}
 	registry := providers.NewRegistry(serverProvider{})
-	return New("127.0.0.1:0", service, writer, registry, fs.FS(frontend), "test-version", serverEngine{}.Version())
+	return New("127.0.0.1:0", service, writer, registry, dataStore, fs.FS(frontend), "test-version", serverEngine{}.Version())
 }
 
 func containsJSON(body []byte, fragment string) bool {
