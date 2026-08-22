@@ -23,11 +23,12 @@ import {
   apiReadMode,
   applyCandidateArtwork,
   createBatchEditJob,
-  getLibrary,
+  listLibraries,
   listTracks,
   rescanLibrary,
   rescanTrack,
   searchCandidates,
+  switchLibrary,
   updateArtwork,
 	updateTrack,
 	waitForJob,
@@ -79,10 +80,12 @@ const trackCollator = new Intl.Collator('zh-Hans-CN', {numeric: true, sensitivit
 
 export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [switchingLibraryId, setSwitchingLibraryId] = useState<string>();
   const [activeTrackId, setActiveTrackId] = useState<string>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
@@ -105,8 +108,11 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     setLoading(true);
     setLoadError('');
     try {
-      const [nextLibrary, nextTracks] = await Promise.all([getLibrary(), listTracks()]);
-      setLibrary(nextLibrary);
+      const [nextLibraries, nextTracks] = await Promise.all([listLibraries(), listTracks()]);
+      const nextLibrary = nextLibraries.find((item) => item.active) ?? nextLibraries[0];
+      if (!nextLibrary) throw new Error('尚未配置音乐曲库');
+      setLibraries(nextLibraries.map((item) => ({...item, active: item.id === nextLibrary.id})));
+      setLibrary({...nextLibrary, active: true});
       setTracks(nextTracks);
       setActiveTrackId((current) => preserveSelection && nextTracks.some((track) => track.id === current)
         ? current
@@ -115,6 +121,24 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       setLoadError(error instanceof Error ? error.message : '曲库加载失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const switchActiveLibrary = async (target: LibrarySummary) => {
+    if (target.active || switchingLibraryId || !target.rootPath) return;
+    setSwitchingLibraryId(target.id);
+    try {
+      const job = await switchLibrary(target.id, target.rootPath);
+      if (job && apiReadMode === 'real') {
+        const completed = await waitForJob(job.id);
+        if (completed.state !== 'succeeded') throw new Error(completed.detail || `曲库切换${completed.state}`);
+      }
+      await loadData();
+      onNotice(`已切换到曲库：${target.name}`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '曲库切换失败');
+    } finally {
+      setSwitchingLibraryId(undefined);
     }
   };
 
@@ -439,6 +463,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     <div className="library-page">
       <LibrarySidebar
         library={library}
+        libraries={libraries}
+        switchingLibraryId={switchingLibraryId}
         activeFolder={activeFolder}
         activeFilter={activeFilter}
         counts={counts}
@@ -446,6 +472,10 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         indexedSizeBytes={tracks.reduce((total, track) => total + track.sizeBytes, 0)}
         mobileOpen={mobileSidebar}
         onCloseMobile={() => setMobileSidebar(false)}
+        onSwitchLibrary={(target) => void switchActiveLibrary(target)}
+        onRescan={() => void runRescan()}
+        scanning={scanning}
+        onOpenSettings={onOpenSettings}
         onSelectFolder={(id) => {
           setActiveFolder(id);
           setActiveFilter('all');

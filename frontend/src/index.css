@@ -943,6 +943,40 @@ button:disabled {
   font-size: 11px;
 }
 
+.library-switcher-menu {
+  position: relative;
+  z-index: 3;
+  margin-top: 6px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+
+.library-switcher-menu > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.library-switcher-menu > button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.library-switcher-menu > button:disabled { cursor: default; opacity: 0.68; }
+
+.library-switcher-menu strong,
+.library-switcher-menu small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-switcher-menu strong { font-size: 13px; }
+.library-switcher-menu small { margin-top: 2px; color: var(--muted); font-family: var(--mono); font-size: 10px; }
+.library-switcher-menu p { margin: 0; padding: 12px 10px; color: var(--muted); font-size: 12px; }
+
+.library-switcher-menu .library-menu-current { color: var(--success); font-size: 11px; white-space: nowrap; }
+.library-switcher-menu .library-menu-settings { justify-content: flex-start; border-bottom: 0; color: var(--accent); font-size: 12px; }
+
 .scan-line {
   display: flex;
   align-items: center;

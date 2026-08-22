@@ -22,6 +22,8 @@ export type SidebarFilter = 'all' | TrackHealth;
 
 interface LibrarySidebarProps {
   library: LibrarySummary;
+  libraries?: LibrarySummary[];
+  switchingLibraryId?: string;
   activeFolder: string | null;
   activeFilter: SidebarFilter;
   counts: Record<SidebarFilter, number>;
@@ -29,6 +31,10 @@ interface LibrarySidebarProps {
   indexedSizeBytes: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  onSwitchLibrary?: (library: LibrarySummary) => void;
+  onRescan?: () => void;
+  scanning?: boolean;
+  onOpenSettings?: () => void;
   onSelectFolder: (id: string | null) => void;
   onSelectFilter: (filter: SidebarFilter) => void;
 }
@@ -100,6 +106,8 @@ function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: Folder
 
 export function LibrarySidebar({
   library,
+  libraries = [],
+  switchingLibraryId,
   activeFolder,
   activeFilter,
   counts,
@@ -107,10 +115,15 @@ export function LibrarySidebar({
   indexedSizeBytes,
   mobileOpen,
   onCloseMobile,
+  onSwitchLibrary,
+  onRescan,
+  scanning = false,
+  onOpenSettings,
   onSelectFolder,
   onSelectFilter,
 }: LibrarySidebarProps) {
   const folders = folderTree(library.folders);
+  const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
   return (
     <aside className={cn('library-sidebar', mobileOpen && 'is-mobile-open')}>
       <div className="sidebar-mobile-head">
@@ -120,7 +133,7 @@ export function LibrarySidebar({
 
       <section className="library-card">
         <div className="eyebrow">ACTIVE LIBRARY</div>
-        <button className="library-switcher">
+        <button className="library-switcher" aria-expanded={libraryMenuOpen} onClick={() => setLibraryMenuOpen((value) => !value)}>
           <span className="library-icon"><Disc3 size={20} /></span>
           <span>
             <strong>{library.name}</strong>
@@ -128,9 +141,21 @@ export function LibrarySidebar({
           </span>
           <ChevronDown size={16} />
         </button>
+        {libraryMenuOpen && (
+          <div className="library-switcher-menu" role="listbox" aria-label="切换音乐库">
+            {libraries.map((item) => (
+              <button key={item.id} role="option" aria-selected={item.id === library.id} disabled={item.id === library.id || Boolean(switchingLibraryId)} onClick={() => { setLibraryMenuOpen(false); onSwitchLibrary?.(item); }}>
+                <span><strong>{item.name}</strong><small>{item.rootPath || item.rootLabel}</small></span>
+                {switchingLibraryId === item.id ? <RefreshCw size={14} className="spin" /> : item.id === library.id ? <span className="library-menu-current">当前</span> : <ChevronRight size={14} />}
+              </button>
+            ))}
+            {libraries.length === 0 && <p>尚未注册其他曲库</p>}
+            {onOpenSettings && <button className="library-menu-settings" onClick={() => { setLibraryMenuOpen(false); onOpenSettings(); }}><FolderOpen size={14} /> 管理曲库</button>}
+          </div>
+        )}
         <div className="scan-line">
           <span><i /> 已同步 · {library.lastScanLabel}</span>
-          <button title="重新扫描曲库"><RefreshCw size={14} /></button>
+          <button title="重新扫描曲库" disabled={scanning} onClick={onRescan}>{<RefreshCw size={14} className={scanning ? 'spin' : undefined} />}</button>
         </div>
       </section>
 
