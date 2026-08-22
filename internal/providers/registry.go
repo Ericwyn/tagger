@@ -271,7 +271,10 @@ func providerCacheKey(providerID string, query Query, limit int) string {
 		Limit                  int
 	}{providerID, normalize(query.Title), normalize(query.Album), artists, query.DurationSeconds, limit})
 	digest := sha256.Sum256(payload)
-	return "provider-search-" + hex.EncodeToString(digest[:])
+	// Bump the cache namespace when candidate enrichment changes. This avoids
+	// serving metadata-only results cached by the old NetEase adapter after
+	// lyrics-capable providers are upgraded.
+	return "provider-search-v2-" + hex.EncodeToString(digest[:])
 }
 
 func providerCacheTTL(providerID string) time.Duration {

@@ -20,6 +20,7 @@ import (
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/providers/itunes"
+	"github.com/ericwyn/tagger/internal/providers/kugou"
 	"github.com/ericwyn/tagger/internal/providers/kuwo"
 	"github.com/ericwyn/tagger/internal/providers/lrclib"
 	"github.com/ericwyn/tagger/internal/providers/musicbrainz"
@@ -75,6 +76,7 @@ func main() {
 		lrclib.New(lrclib.Config{}),
 		itunes.New(itunes.Config{}),
 		netease.New(netease.Config{}),
+		kugou.New(kugou.Config{}),
 		kuwo.New(kuwo.Config{}),
 	)
 	if err := providerRegistry.SetPersistence(context.Background(), dataStore); err != nil {

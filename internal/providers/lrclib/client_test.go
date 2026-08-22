@@ -44,6 +44,24 @@ func TestSearchTreatsNotFoundAsEmpty(t *testing.T) {
 	}
 }
 
+func TestSearchFallsBackToBroadLookupWithoutArtist(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/api/search" {
+			if request.URL.Query().Get("q") != "没有艺术家" {
+				t.Fatalf("fallback query = %v", request.URL.Query())
+			}
+			body := `[{"id":99,"trackName":"没有艺术家","artistName":"未知歌手","albumName":"专辑","duration":180,"plainLyrics":"plain","syncedLyrics":"[00:01.00] synced"}]`
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		}
+		return &http.Response{StatusCode: 404, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found"))}, nil
+	})}
+	client := New(Config{BaseURL: "https://lrclib.test/api/get", SearchURL: "https://lrclib.test/api/search", Client: httpClient, RateInterval: 0})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "没有艺术家"}, 5)
+	if err != nil || len(candidates) != 1 || candidates[0].ExternalID != "99" || candidates[0].SyncedLyrics == "" {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

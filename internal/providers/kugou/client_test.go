@@ -1,0 +1,66 @@
+package kugou
+
+import (
+	"context"
+	"encoding/base64"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/ericwyn/tagger/internal/providers"
+)
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestSearchMapsLyricsAndArtwork(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("\ufeff[00:01.00] hello\r\n"))
+	client := New(Config{
+		SearchEndpoint:    "https://example.test/search",
+		LyricsSearchURL:   "https://example.test/lyrics/search",
+		LyricsDownloadURL: "https://example.test/lyrics/download",
+		ArtworkEndpoint:   "https://example.test/artwork",
+		RateInterval:      0,
+		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/search":
+				if r.URL.Query().Get("keyword") != "Song Artist" || r.Header.Get("Referer") == "" {
+					t.Fatalf("search request = %v headers=%v", r.URL, r.Header)
+				}
+				return response(r, `{"data":{"info":[{"hash":"ABC","songname":"Song","singername":"Artist&Guest","album_id":55,"album_name":"Album","duration":"03:21","tracknum":4}]}}`), nil
+			case "/lyrics/search":
+				if r.URL.Query().Get("hash") != "ABC" {
+					t.Fatalf("lyrics search query = %v", r.URL.Query())
+				}
+				return response(r, `{"candidates":[{"id":7,"accesskey":"key"}]}`), nil
+			case "/lyrics/download":
+				return response(r, `{"content":"`+encoded+`"}`), nil
+			case "/artwork":
+				return response(r, `{"data":{"img":"https://imge.kugou.com/stdmusic/cover.jpg"}}`), nil
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+				return nil, nil
+			}
+		})},
+	})
+	items, err := client.Search(context.Background(), providers.Query{Title: "Song", Artists: []string{"Artist"}}, 3)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	item := items[0]
+	if item.ExternalID != "ABC" || len(item.Artists) != 2 || item.DurationSeconds != 201 || item.TrackNumber != 4 {
+		t.Fatalf("metadata = %#v", item)
+	}
+	if item.SyncedLyrics != "[00:01.00] hello" || item.Lyrics != item.SyncedLyrics {
+		t.Fatalf("lyrics = %#v", item)
+	}
+	if item.ArtworkURL != "https://imge.kugou.com/stdmusic/cover.jpg" {
+		t.Fatalf("artwork = %q", item.ArtworkURL)
+	}
+}
+
+func response(request *http.Request, body string) *http.Response {
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": {"application/json"}}, Request: request}
+}

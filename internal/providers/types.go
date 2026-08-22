@@ -37,9 +37,13 @@ type Query struct {
 }
 
 type Candidate struct {
-	ProviderID           string
-	ExternalID           string
-	Title                string
+	ProviderID string
+	ExternalID string
+	Title      string
+	// AlternateTitles contains aliases returned by a provider. They are kept
+	// internal to matching so an alias such as "Song (Live)" can still score
+	// well without changing the title that will be written to the file.
+	AlternateTitles      []string
 	Artists              []string
 	Album                string
 	AlbumArtists         []string

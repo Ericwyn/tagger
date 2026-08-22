@@ -294,8 +294,8 @@ export function CandidateDrawer({
               <i />
               <Sparkles size={24} />
             </div>
-            <strong>正在查询 3 个数据源</strong>
-            <p>MusicBrainz · 网易云音乐 · Apple Music</p>
+            <strong>正在查询已启用数据源</strong>
+            <p>MusicBrainz · LRCLIB · Apple；网易云 / 酷狗可在设置中启用</p>
           </div>
         ) : (
           <div className="candidate-layout">

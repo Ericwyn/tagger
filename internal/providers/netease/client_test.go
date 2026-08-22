@@ -2,26 +2,82 @@ package netease
 
 import (
 	"context"
-	"github.com/ericwyn/tagger/internal/providers"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/ericwyn/tagger/internal/providers"
 )
 
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestSearchMapsNeteaseResponse(t *testing.T) {
-	client := New(Config{Endpoint: "https://example.test/search", Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
-		if !strings.Contains(r.URL.Query().Get("s"), "Song") {
-			t.Fatal(r.URL)
-		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"result":{"songs":[{"id":42,"name":"Song","dt":210000,"ar":[{"name":"Artist"}],"al":{"name":"Album","picUrl":"https://img.music.126.net/a.jpg"},"no":3}]}}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
-	})}})
+func TestSearchMapsMetadataLyricsAndArtwork(t *testing.T) {
+	client := New(Config{
+		Endpoint:      "https://example.test/search",
+		LyricEndpoint: "https://example.test/lyric",
+		RateInterval:  0,
+		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/search" {
+				if !strings.Contains(r.URL.Query().Get("s"), "Song") || r.Header.Get("Origin") != "https://music.163.com" {
+					t.Fatalf("search request = %v headers=%v", r.URL, r.Header)
+				}
+				return response(r, `{"result":{"songs":[{"id":42,"name":"Song","alia":["Song (Live)"],"dt":210000,"ar":[{"name":"Artist"}],"al":{"name":"Album","picUrl":"https://img.music.126.net/a.jpg"},"no":3}]}}`), nil
+			}
+			if r.URL.Path == "/lyric" {
+				return response(r, `{"lrc":{"lyric":"\ufeff[00:01.00] hello\r\n"},"tlyric":{"lyric":"[00:01.00] translated"}}`), nil
+			}
+			t.Fatalf("unexpected path %s", r.URL.Path)
+			return nil, nil
+		})},
+	})
 	items, err := client.Search(context.Background(), providers.Query{Title: "Song", Artists: []string{"Artist"}}, 3)
-	if err != nil || len(items) != 1 || items[0].ExternalID != "42" || items[0].TrackNumber != 3 || items[0].DurationSeconds != 210 {
+	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%#v err=%v", items, err)
 	}
+	item := items[0]
+	if item.ExternalID != "42" || item.TrackNumber != 3 || item.DurationSeconds != 210 || item.Album != "Album" {
+		t.Fatalf("metadata = %#v", item)
+	}
+	if len(item.AlternateTitles) != 1 || item.AlternateTitles[0] != "Song (Live)" {
+		t.Fatalf("aliases = %#v", item.AlternateTitles)
+	}
+	if item.SyncedLyrics != "[00:01.00] hello" || item.Lyrics != item.SyncedLyrics {
+		t.Fatalf("lyrics = %#v", item)
+	}
+	if item.ArtworkURL != "https://img.music.126.net/a.jpg?param=500y" {
+		t.Fatalf("artwork = %q", item.ArtworkURL)
+	}
+}
+
+func TestSearchUsesAlbumEndpointWhenSearchResultHasNoCover(t *testing.T) {
+	client := New(Config{
+		Endpoint:      "https://example.test/search",
+		LyricEndpoint: "https://example.test/lyric",
+		AlbumEndpoint: "https://example.test/album",
+		RateInterval:  0,
+		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/search":
+				return response(r, `{"result":{"songs":[{"id":42,"name":"Song","dt":210000,"ar":[{"name":"Artist"}],"al":{"id":7,"name":"Album"}}]}}`), nil
+			case "/album/7":
+				return response(r, `{"album":{"picUrl":"http://p1.music.126.net/fallback.jpg"}}`), nil
+			case "/lyric":
+				return response(r, `{"lrc":{"lyric":"[00:01.00] hello"}}`), nil
+			default:
+				t.Fatalf("unexpected path %s", r.URL.Path)
+				return nil, nil
+			}
+		})},
+	})
+	items, err := client.Search(context.Background(), providers.Query{Title: "Song", Artists: []string{"Artist"}}, 1)
+	if err != nil || len(items) != 1 || items[0].ArtworkURL != "https://p1.music.126.net/fallback.jpg?param=500y" {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+}
+
+func response(request *http.Request, body string) *http.Response {
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": {"application/json"}}, Request: request}
 }

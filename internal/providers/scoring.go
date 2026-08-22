@@ -65,6 +65,9 @@ func toView(query Query, descriptor Descriptor, candidate Candidate) MatchCandid
 
 func scoreCandidate(query Query, candidate Candidate) (float64, []string) {
 	titleScore := similarity(query.Title, candidate.Title)
+	for _, alternate := range candidate.AlternateTitles {
+		titleScore = math.Max(titleScore, similarity(query.Title, alternate))
+	}
 	artistScore := similarity(strings.Join(query.Artists, " "), strings.Join(candidate.Artists, " "))
 	albumScore := similarity(query.Album, candidate.Album)
 	durationScore := 0.0

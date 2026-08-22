@@ -28,6 +28,14 @@ func (e *HTTPError) Error() string {
 }
 
 func GetJSON(ctx context.Context, client *http.Client, endpoint, userAgent string, target any) error {
+	return GetJSONWithHeaders(ctx, client, endpoint, userAgent, nil, target)
+}
+
+// GetJSONWithHeaders is the common bounded JSON transport used by providers.
+// A few public music endpoints require an Origin/Referer pair in addition to
+// User-Agent, so keeping the header extension here avoids duplicating response
+// size and status handling in each strategy.
+func GetJSONWithHeaders(ctx context.Context, client *http.Client, endpoint, userAgent string, headers map[string]string, target any) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -35,6 +43,11 @@ func GetJSON(ctx context.Context, client *http.Client, endpoint, userAgent strin
 	request.Header.Set("Accept", "application/json")
 	if userAgent != "" {
 		request.Header.Set("User-Agent", userAgent)
+	}
+	for name, value := range headers {
+		if strings.TrimSpace(name) != "" && value != "" {
+			request.Header.Set(name, value)
+		}
 	}
 	response, err := client.Do(request)
 	if err != nil {

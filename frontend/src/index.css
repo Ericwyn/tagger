@@ -1879,8 +1879,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 2px;
   outline: 0;
-  background:
-    repeating-linear-gradient(var(--paper-2) 0 24px, var(--line) 24px 25px);
+  background: var(--paper-2);
   font-family: var(--mono);
   font-size: 10px;
   line-height: 25px;

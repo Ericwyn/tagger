@@ -78,6 +78,16 @@ func TestSimilarityHandlesPunctuationAndCJK(t *testing.T) {
 	}
 }
 
+func TestAlternateTitlesImproveCandidateScore(t *testing.T) {
+	registry := NewRegistry(fakeStrategy{descriptor: Descriptor{ID: "alias", Name: "Alias", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+		ExternalID: "alias-1", Title: "现场版", AlternateTitles: []string{"原曲名"}, Artists: []string{"歌手"},
+	}}})
+	result, err := registry.Search(context.Background(), Query{Title: "原曲名", Artists: []string{"歌手"}}, []string{"alias"}, 1)
+	if err != nil || len(result.Candidates) != 1 || result.Candidates[0].Score < 0.9 {
+		t.Fatalf("alias score = %#v err=%v", result, err)
+	}
+}
+
 func TestRegistryCacheAndSettingsSurviveReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tagger.db")
 	repository, err := store.Open(context.Background(), path)

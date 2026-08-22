@@ -51,7 +51,7 @@ describe('Tagger app prototype', () => {
     await screen.findByRole('heading', {name: '再回首'});
 
     await user.click(screen.getByRole('button', {name: /从数据源补全/}));
-    expect(screen.getByText('正在查询 3 个数据源')).toBeInTheDocument();
+    expect(screen.getByText('正在查询已启用数据源')).toBeInTheDocument();
     expect(await screen.findByText('找到 3 个候选', {}, {timeout: 2000})).toBeInTheDocument();
     expect(screen.getAllByText('MusicBrainz').length).toBeGreaterThan(0);
   });

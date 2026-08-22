@@ -224,7 +224,14 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     setCandidateLoading(true);
     setCandidates([]);
     try {
-      setCandidates(await searchCandidates(activeTrack, query));
+      const nextCandidates = await searchCandidates(activeTrack, query);
+      if (focus === 'lyrics') {
+        // Lyrics search is an asset lookup, so records that actually contain
+        // lyrics should be immediately visible even when a metadata-only
+        // provider scored a little higher on title similarity.
+        nextCandidates.sort((left, right) => Number(right.hasLyrics) - Number(left.hasLyrics) || right.score - left.score);
+      }
+      setCandidates(nextCandidates);
     } finally {
       setCandidateLoading(false);
     }
