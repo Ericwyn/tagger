@@ -25,6 +25,7 @@ import {
   searchCandidates,
   updateArtwork,
   updateTrack,
+	waitForJob,
 } from '@/api';
 import type {LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
@@ -85,11 +86,12 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     if (!library || scanning) return;
     setScanning(true);
     try {
-      const result = await rescanLibrary(library.id);
-      await loadData(true);
-      onNotice(result
-        ? `扫描完成：解析 ${result.report.parsed} 首，失败 ${result.report.failed} 首`
-        : 'Mock 扫描已完成');
+	  const queued = await rescanLibrary(library.id);
+	  const result = queued ? await waitForJob(queued.id) : null;
+	  await loadData(true);
+	  onNotice(result
+		? result.state === 'succeeded' ? `扫描完成：索引 ${result.succeeded} 首曲目` : `扫描任务失败：${result.error || result.detail}`
+		: 'Mock 扫描已完成');
     } catch (error) {
       onNotice(error instanceof Error ? error.message : '扫描失败');
     } finally {

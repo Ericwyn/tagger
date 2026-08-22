@@ -18,6 +18,7 @@ import (
 	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
+	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/store"
@@ -29,6 +30,7 @@ type Server struct {
 	writer          *filewrite.Writer
 	providers       *providers.Registry
 	store           *store.Store
+	jobs            *jobs.Manager
 	frontend        fs.FS
 	version         string
 	tagEngineInfo   string
@@ -61,6 +63,8 @@ func (s *Server) Spin() { s.h.Spin() }
 
 func (s *Server) Shutdown(ctx context.Context) error { return s.h.Shutdown(ctx) }
 
+func (s *Server) SetJobManager(manager *jobs.Manager) { s.jobs = manager }
+
 func (s *Server) routes() {
 	s.h.GET("/healthz", s.handleHealth)
 	s.h.GET("/readyz", s.handleHealth)
@@ -78,6 +82,8 @@ func (s *Server) routes() {
 	api.GET("/providers", s.handleProviders)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
+	api.GET("/jobs", s.handleJobs)
+	api.GET("/jobs/:id", s.handleJob)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
 	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
@@ -109,6 +115,18 @@ func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
 		return
 	}
+	if s.jobs != nil {
+		job, err := s.jobs.Enqueue(ctx, domain.Job{
+			Kind: domain.JobScan, LibraryID: librarySummary.ID, Title: librarySummary.Name + " 曲库扫描",
+			Detail: "等待扫描 worker", Total: librarySummary.TrackCount,
+		})
+		if err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+			return
+		}
+		c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
+		return
+	}
 	if err := s.library.Rescan(ctx); err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "scan_failed", err.Error())
 		return
@@ -117,6 +135,64 @@ func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {
 		"library": s.library.Library(),
 		"report":  s.library.LastReport(),
 	})
+}
+
+type jobResponse struct {
+	ID        string          `json:"id"`
+	Kind      domain.JobKind  `json:"kind"`
+	State     domain.JobState `json:"state"`
+	Title     string          `json:"title"`
+	Detail    string          `json:"detail"`
+	Processed int             `json:"processed"`
+	Total     int             `json:"total"`
+	Succeeded int             `json:"succeeded"`
+	Failed    int             `json:"failed"`
+	Error     string          `json:"error,omitempty"`
+	StartedAt string          `json:"startedAt"`
+}
+
+func toJobResponse(job domain.Job) jobResponse {
+	started := job.StartedAt
+	if started.IsZero() {
+		started = job.CreatedAt
+	}
+	return jobResponse{ID: job.ID, Kind: job.Kind, State: job.State, Title: job.Title, Detail: job.Detail,
+		Processed: job.Processed, Total: job.Total, Succeeded: job.Succeeded, Failed: job.Failed,
+		Error: job.Error, StartedAt: started.Local().Format("2006-01-02 15:04:05")}
+}
+
+func (s *Server) handleJobs(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeData(c, []jobResponse{})
+		return
+	}
+	items, err := s.jobs.List(ctx, 100)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	result := make([]jobResponse, len(items))
+	for index, item := range items {
+		result[index] = toJobResponse(item)
+	}
+	s.writeData(c, result)
+}
+
+func (s *Server) handleJob(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	job, err := s.jobs.Get(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	s.writeData(c, toJobResponse(job))
 }
 
 func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {

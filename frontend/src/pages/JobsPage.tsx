@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {listJobs} from '@/api';
+import {apiReadMode, listJobs} from '@/api';
 import type {Job} from '@/types';
 
 interface JobsPageProps {
@@ -21,9 +21,10 @@ interface JobsPageProps {
 const stateMeta: Record<Job['state'], {label: string; icon: typeof Check}> = {
   running: {label: '执行中', icon: LoaderCircle},
   review: {label: '等待审核', icon: CircleAlert},
-  waiting: {label: '等待重试', icon: Clock3},
+	waiting: {label: '等待执行', icon: Clock3},
   succeeded: {label: '已完成', icon: Check},
   partial: {label: '部分完成', icon: CircleAlert},
+	failed: {label: '失败', icon: CircleAlert},
 };
 
 const kindIcon = {
@@ -36,11 +37,16 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
 
+	const refresh = () => listJobs().then((next) => {
+	  setJobs(next);
+	  setSelectedId((current) => next.some((job) => job.id === current) ? current : next[0]?.id);
+	});
+
   useEffect(() => {
-    listJobs().then((next) => {
-      setJobs(next);
-      setSelectedId(next[0]?.id);
-    });
+	void refresh();
+	if (apiReadMode === 'mock') return;
+	const timer = window.setInterval(() => void refresh(), 1000);
+	return () => window.clearInterval(timer);
   }, []);
 
   const active = jobs.find((job) => job.id === selectedId);
@@ -49,22 +55,23 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
     <div className="section-page jobs-page">
       <header className="section-hero">
         <div>
-          <div className="eyebrow">DURABLE QUEUE / MOCK</div>
+		  <div className="eyebrow">DURABLE QUEUE / {apiReadMode === 'real' ? 'SQLITE' : 'MOCK'}</div>
           <h1>任务中心</h1>
           <p>扫描、抓取与文件写入都有独立进度；服务重启后仍能恢复。</p>
         </div>
-        <button className="secondary-button"><RefreshCw size={15} /> 刷新状态</button>
+		<button className="secondary-button" onClick={() => void refresh()}><RefreshCw size={15} /> 刷新状态</button>
       </header>
 
       <div className="section-tabs">
         <button className="is-active">全部 <em>{jobs.length}</em></button>
-        <button>进行中 <em>0</em></button>
-        <button>待审核 <em>1</em></button>
-        <button>失败 <em>1</em></button>
+		<button>进行中 <em>{jobs.filter((job) => job.state === 'running' || job.state === 'waiting').length}</em></button>
+		<button>待审核 <em>{jobs.filter((job) => job.state === 'review').length}</em></button>
+		<button>失败 <em>{jobs.filter((job) => job.state === 'failed' || job.state === 'partial').length}</em></button>
       </div>
 
       <div className="jobs-layout">
-        <section className="jobs-list">
+		<section className="jobs-list">
+		  {jobs.length === 0 && <div className="empty-state"><span>∅</span><strong>还没有任务</strong><p>重新扫描或批量操作后会出现在这里。</p></div>}
           {jobs.map((job) => {
             const KindIcon = kindIcon[job.kind];
             const meta = stateMeta[job.state];
@@ -99,8 +106,8 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
             <h2>{active.title}</h2>
             <p>{active.detail}</p>
             <div className="job-detail-progress">
-              <strong>{Math.round((active.processed / active.total) * 100)}<small>%</small></strong>
-              <div><span style={{width: `${(active.processed / active.total) * 100}%`}} /></div>
+			  <strong>{active.total ? Math.round((active.processed / active.total) * 100) : 0}<small>%</small></strong>
+			  <div><span style={{width: `${active.total ? (active.processed / active.total) * 100 : 0}%`}} /></div>
             </div>
             <dl>
               <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : '安全写入'}</dd></div>
@@ -110,11 +117,10 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
               <div><dt>失败</dt><dd className={active.failed ? 'danger-text' : undefined}>{active.failed}</dd></div>
               <div><dt>开始时间</dt><dd>{active.startedAt}</dd></div>
             </dl>
-            <div className="job-log">
-              <span>最新事件</span>
-              <code>09:51:06　候选聚合完成</code>
-              <code>09:51:05　LRCLIB 返回 8 条歌词</code>
-              <code>09:51:04　MusicBrainz 限流等待 1s</code>
+		  <div className="job-log">
+			<span>最新事件</span>
+			<code>{active.startedAt}　{active.detail}</code>
+			{active.error && <code>{active.error}</code>}
             </div>
             {active.state === 'review' && (
               <button className="primary-button full-button" onClick={onOpenReview}>

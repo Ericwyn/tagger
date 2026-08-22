@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
+	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/scanner"
@@ -114,6 +116,55 @@ func TestRescanRejectsUnknownLibrary(t *testing.T) {
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/unknown/scans", nil)
 	if response.Code != 404 || !containsJSON(response.Body.Bytes(), `"code":"library_not_found"`) {
 		t.Fatalf("response = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestRescanQueuesPersistentJobAndExposesStatus(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	manager.Register(domain.JobScan, func(ctx context.Context, _ domain.Job, progress jobs.Progress) error {
+		if err := progress(0, 2, 0, 0, "扫描中"); err != nil {
+			return err
+		}
+		if err := s.library.Rescan(ctx); err != nil {
+			return err
+		}
+		return progress(2, 2, 2, 0, "扫描完成")
+	})
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Close)
+	s.SetJobManager(manager)
+
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/"+s.library.Library().ID+"/scans", nil)
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"state":"waiting"`) {
+		t.Fatalf("enqueue = %d %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data jobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := manager.Get(context.Background(), envelope.Data.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.State == domain.JobSucceeded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+envelope.Data.ID, nil)
+	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"state":"succeeded"`) || !containsJSON(detail.Body.Bytes(), `"processed":2`) {
+		t.Fatalf("job detail = %d %s", detail.Code, detail.Body.String())
+	}
+	list := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs", nil)
+	if list.Code != 200 || !containsJSON(list.Body.Bytes(), `"id":"`+envelope.Data.ID+`"`) {
+		t.Fatalf("jobs = %d %s", list.Code, list.Body.String())
 	}
 }
 

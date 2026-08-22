@@ -38,12 +38,24 @@ describe('real API client', () => {
   });
 
   it('posts a rescan request to the selected library', async () => {
-    const result = {library, report: {discovered: 1, parsed: 1, failed: 0, warningCount: 0}};
+	const result = {id: 'job-1', kind: 'scan', state: 'waiting', title: 'Scan', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: result}), {status: 200}));
     const api = createRealAPI(fetcher);
 
     await expect(api.rescanLibrary('lib/a')).resolves.toEqual(result);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
+  });
+
+  it('lists and retrieves persistent jobs', async () => {
+	const job = {id: 'job-1', kind: 'scan', state: 'running', title: 'Scan', detail: 'Scanning', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
+	const fetcher = vi.fn()
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: [job]}), {status: 200}))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: job}), {status: 200}));
+	const api = createRealAPI(fetcher);
+	await expect(api.listJobs()).resolves.toEqual([job]);
+	await expect(api.getJob('job/a')).resolves.toEqual(job);
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/jobs');
+	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/jobs/job%2Fa');
   });
 
   it('writes an explicit patch guarded by the indexed revision', async () => {

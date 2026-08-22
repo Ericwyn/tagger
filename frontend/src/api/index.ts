@@ -1,5 +1,5 @@
 import * as mock from '@/mock/api';
-import {createRealAPI, type ScanResult} from '@/api/real';
+import {createRealAPI} from '@/api/real';
 import type {
   Job,
   LibrarySummary,
@@ -32,12 +32,23 @@ export async function listTracks(): Promise<Track[]> {
   return tracks;
 }
 
-export async function rescanLibrary(libraryId: string): Promise<ScanResult | null> {
+export async function rescanLibrary(libraryId: string): Promise<Job | null> {
   if (apiReadMode === 'mock') {
     await mock.getLibrary();
     return null;
   }
   return real.rescanLibrary(libraryId);
+}
+
+export async function waitForJob(jobId: string, timeoutMs = 5 * 60_000): Promise<Job> {
+  if (apiReadMode === 'mock') throw new Error('Mock 模式没有持久化任务');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+	const job = await real.getJob(jobId);
+	if (job.state === 'succeeded' || job.state === 'partial' || job.state === 'failed' || job.state === 'review') return job;
+	await new Promise((resolve) => window.setTimeout(resolve, 350));
+  }
+  throw new Error('等待扫描任务超时');
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {
@@ -49,8 +60,6 @@ export async function updateTrack(trackId: string, patch: TrackPatch, provenance
   return result.track;
 }
 
-// The job view remains backed by the mock strategy until its persistent Go
-// module is connected. Revision history is served by SQLite in real mode.
 export function searchCandidates(track: Track): Promise<MatchCandidate[]> {
   return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track);
 }
@@ -60,7 +69,7 @@ export function listProviders(): Promise<ProviderConfig[]> {
 }
 
 export function listJobs(): Promise<Job[]> {
-  return mock.listJobs();
+	return apiReadMode === 'mock' ? mock.listJobs() : real.listJobs();
 }
 
 export function listRevisions(): Promise<Revision[]> {

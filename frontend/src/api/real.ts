@@ -1,5 +1,6 @@
 import type {
   LibrarySummary,
+	Job,
   MatchCandidate,
   ArtworkWriteResult,
   ProviderConfig,
@@ -96,9 +97,17 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return result.tracks;
     },
 
-    async rescanLibrary(libraryId: string): Promise<ScanResult> {
-      return request<ScanResult>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
+	async rescanLibrary(libraryId: string): Promise<Job> {
+	  return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
     },
+
+	listJobs(): Promise<Job[]> {
+	  return request<Job[]>('/api/v1/jobs');
+	},
+
+	getJob(jobId: string): Promise<Job> {
+	  return request<Job>(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {
       return request<WriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/tags`, {

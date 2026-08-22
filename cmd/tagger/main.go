@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/config"
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
+	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/providers/itunes"
@@ -75,8 +78,26 @@ func main() {
 			Enabled: false, Experimental: true, Accent: "#d69e2e", QuotaLabel: "实验性适配器 · 尚未启用",
 		}),
 	)
+	jobManager := jobs.New(dataStore)
+	jobManager.Register(domain.JobScan, func(ctx context.Context, _ domain.Job, progress jobs.Progress) error {
+		before := libraryService.Library().TrackCount
+		if err := progress(0, before, 0, 0, "正在发现并解析音乐文件"); err != nil {
+			return err
+		}
+		if err := libraryService.Rescan(ctx); err != nil {
+			return err
+		}
+		total := libraryService.Library().TrackCount
+		return progress(total, total, total, 0, fmt.Sprintf("扫描完成，共索引 %d 首曲目", total))
+	})
+	if err := jobManager.Start(context.Background()); err != nil {
+		logger.Error("start persistent job worker", "error", err)
+		os.Exit(1)
+	}
+	defer jobManager.Close()
 
 	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, dataStore, web.Dist(), version.Version, engine.Version())
+	srv.SetJobManager(jobManager)
 	logger.Info("tagger started",
 		"listen", cfg.Listen,
 		"library", cfg.MusicDir,

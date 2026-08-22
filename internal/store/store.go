@@ -318,7 +318,11 @@ func nonNilTags(tags map[string][]string) map[string][]string {
 }
 
 func newRevisionID(now time.Time) string {
+	return newID("revlog", now)
+}
+
+func newID(prefix string, now time.Time) string {
 	random := make([]byte, 6)
 	_, _ = rand.Read(random)
-	return fmt.Sprintf("revlog-%d-%s", now.UTC().UnixMilli(), hex.EncodeToString(random))
+	return fmt.Sprintf("%s-%d-%s", prefix, now.UTC().UnixMilli(), hex.EncodeToString(random))
 }

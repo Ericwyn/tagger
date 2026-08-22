@@ -141,6 +141,33 @@ func TestListRevisionsIsNewestFirstAndConcurrentSafe(t *testing.T) {
 	}
 }
 
+func TestJobsClaimInOrderAndRecoverAfterRestart(t *testing.T) {
+	dataStore := openTestStore(t)
+	first, err := dataStore.CreateJob(context.Background(), domain.Job{Kind: domain.JobScan, Title: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = dataStore.CreateJob(context.Background(), domain.Job{Kind: domain.JobScan, Title: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, found, err := dataStore.ClaimJob(context.Background())
+	if err != nil || !found || claimed.ID != first.ID || claimed.State != domain.JobRunning {
+		t.Fatalf("claim = %#v found=%v err=%v", claimed, found, err)
+	}
+	if err := dataStore.RecoverRunningJobs(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := dataStore.Job(context.Background(), first.ID)
+	if err != nil || recovered.State != domain.JobWaiting || !recovered.StartedAt.IsZero() {
+		t.Fatalf("recovered = %#v err=%v", recovered, err)
+	}
+	jobs, err := dataStore.ListJobs(context.Background(), 10)
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("jobs = %#v err=%v", jobs, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	dataStore, err := Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
