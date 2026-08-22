@@ -68,6 +68,7 @@ const TrackRow = memo(function TrackRow({
         tone={track.coverTone}
         missing={!showGeneratedCovers && track.artworkCount === 0}
 		imageUrl={artworkURL(track)}
+		blankOnImageError={!showGeneratedCovers}
         size="xs"
       />
       <div className="track-primary">

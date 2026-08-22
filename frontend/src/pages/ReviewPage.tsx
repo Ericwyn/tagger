@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, subscribeJobEvents, updateMatchItem, waitForJob} from '@/api';
+import {apiReadMode, artworkURL, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, subscribeJobEvents, updateMatchItem, waitForJob} from '@/api';
 import type {Job, MatchCandidate, MatchItem, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -96,6 +96,73 @@ function availableFields(candidate: MatchCandidate): string[] {
   });
 }
 
+function candidateAssetSummary(candidate: MatchCandidate): string {
+  const assets = [candidate.hasArtwork ? '封面' : '', candidate.hasLyrics ? '歌词' : ''].filter(Boolean);
+  return assets.length > 0 ? assets.join(' + ') : '仅元数据';
+}
+
+function candidateFieldValue(candidate: MatchCandidate, field: string): unknown {
+  switch (field) {
+    case 'title': return candidate.title.value;
+    case 'artists': return candidate.artists.value;
+    case 'album': return candidate.album.value;
+    case 'albumArtists': return candidate.albumArtists.value;
+    case 'trackNumber': return candidate.trackNumber.value;
+    case 'trackTotal': return candidate.trackTotal.value;
+    case 'discNumber': return candidate.discNumber.value;
+    case 'discTotal': return candidate.discTotal.value;
+    case 'year': return candidate.year.value;
+    case 'genres': return candidate.genres.value;
+    case 'comment': return candidate.comment?.value ?? '';
+    case 'composers': return candidate.composers?.value ?? [];
+    case 'conductor': return candidate.conductor?.value ?? '';
+    case 'lyricists': return candidate.lyricists?.value ?? [];
+    case 'copyright': return candidate.copyright?.value ?? '';
+    case 'bpm': return candidate.bpm?.value ?? 0;
+    case 'isrc': return candidate.isrc?.value ?? '';
+    case 'musicbrainzTrackId': return candidate.musicbrainzTrackId?.value ?? '';
+    case 'musicbrainzReleaseId': return candidate.musicbrainzReleaseId?.value ?? '';
+    case 'musicbrainzArtistIds': return candidate.musicbrainzArtistIds?.value ?? [];
+    case 'acoustidId': return candidate.acoustidId?.value ?? '';
+    case 'acoustidFingerprint': return candidate.acoustidFingerprint?.value ?? '';
+    case 'lyrics': return candidate.lyrics?.value ?? '';
+    default: return undefined;
+  }
+}
+
+function trackFieldValue(track: Track, field: string): unknown {
+  switch (field) {
+    case 'title': return track.title;
+    case 'artists': return track.artists;
+    case 'album': return track.album;
+    case 'albumArtists': return track.albumArtists;
+    case 'trackNumber': return track.trackNumber ?? 0;
+    case 'trackTotal': return track.trackTotal ?? 0;
+    case 'discNumber': return track.discNumber ?? 0;
+    case 'discTotal': return track.discTotal ?? 0;
+    case 'year': return track.year ?? 0;
+    case 'genres': return track.genres;
+    case 'comment': return track.comment;
+    case 'composers': return track.composers;
+    case 'conductor': return track.conductor;
+    case 'lyricists': return track.lyricists;
+    case 'copyright': return track.copyright;
+    case 'bpm': return track.bpm ?? 0;
+    case 'isrc': return track.isrc;
+    case 'musicbrainzTrackId': return track.musicbrainzTrackId;
+    case 'musicbrainzReleaseId': return track.musicbrainzReleaseId;
+    case 'musicbrainzArtistIds': return track.musicbrainzArtistIds;
+    case 'acoustidId': return track.acoustidId;
+    case 'acoustidFingerprint': return track.acoustidFingerprint;
+    case 'lyrics': return track.lyrics;
+    default: return undefined;
+  }
+}
+
+function changedFields(track: Track, candidate: MatchCandidate): string[] {
+  return availableFields(candidate).filter((field) => JSON.stringify(candidateFieldValue(candidate, field)) !== JSON.stringify(trackFieldValue(track, field)));
+}
+
 export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, onBack, onComplete, onJobQueued}: ReviewPageProps) {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -104,9 +171,10 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const [query, setQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('all');
 	const [sourceFilter, setSourceFilter] = useState('all');
-	const [rematching, setRematching] = useState(false);
+  const [rematching, setRematching] = useState(false);
 	const [rematchError, setRematchError] = useState('');
 	const [job, setJob] = useState<Job>();
+	const [candidatePickerOpen, setCandidatePickerOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -168,7 +236,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           track,
           candidate,
           candidates,
-          fields: candidate ? (persistedFields == null ? availableFields(candidate) : persistedFields) : [],
+          fields: candidate ? (persistedFields == null ? changedFields(track, candidate) : persistedFields) : [],
           includeArtwork: reviewArtworkByTrack.get(track.id) ?? false,
 		  artworkMaxSize: reviewArtworkMaxSizeByTrack.get(track.id) ?? 0,
           error: errorByTrack.get(track.id),
@@ -206,6 +274,12 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const accepted = items.filter((item) => item.state === 'accepted').length;
   const needsReview = items.filter((item) => item.state === 'review').length;
   const skipped = items.filter((item) => item.state === 'skipped').length;
+	const activeAvailableFields = active?.candidate ? availableFields(active.candidate) : [];
+	const allActiveFieldsSelected = activeAvailableFields.length > 0 && activeAvailableFields.every((field) => active.fields.includes(field));
+
+	useEffect(() => {
+	  setCandidatePickerOpen(false);
+	}, [active?.track.id]);
 
   const setItemState = (trackId: string, state: ReviewState) => {
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, state} : item));
@@ -230,6 +304,20 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
   const toggleField = (trackId: string, field: string) => toggleFields(trackId, [field]);
 
+	const toggleAllFields = (trackId: string) => {
+	  const item = items.find((entry) => entry.track.id === trackId);
+	  if (!item?.candidate) return;
+	  const available = availableFields(item.candidate);
+	  const next = new Set(item.fields);
+	  const allSelected = available.length > 0 && available.every((field) => next.has(field));
+	  if (allSelected) available.forEach((field) => next.delete(field));
+	  else available.forEach((field) => next.add(field));
+	  const nextFields = [...next];
+	  const nextState = next.size === 0 && item.state === 'accepted' ? 'review' : item.state;
+	  setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, fields: nextFields, state: nextState} : entry));
+	  persistReviewState(trackId, nextState, item.candidate.id, nextFields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0);
+	};
+
   const moveToNext = (trackId: string) => {
     const index = visibleItems.findIndex((item) => item.track.id === trackId);
     if (index < 0) return;
@@ -237,15 +325,14 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     if (next && next.track.id !== trackId) setActiveId(next.track.id);
   };
 
-  const changeCandidate = (trackId: string) => {
+  const selectCandidate = (trackId: string, nextCandidate: MatchCandidate) => {
     const item = items.find((entry) => entry.track.id === trackId);
-    if (!item || item.candidates.length < 2) return;
-    const currentIndex = item.candidates.findIndex((candidate) => candidate.id === item.candidate?.id);
-    const nextCandidate = item.candidates[(currentIndex + 1) % item.candidates.length];
+    if (!item) return;
     setItems((current) => current.map((entry) => entry.track.id === trackId
-      ? {...entry, candidate: nextCandidate, fields: availableFields(nextCandidate), state: 'review'}
+      ? {...entry, candidate: nextCandidate, fields: changedFields(entry.track, nextCandidate), state: 'review'}
       : entry));
-    persistReviewState(trackId, 'review', nextCandidate.id, availableFields(nextCandidate), false, 0);
+    persistReviewState(trackId, 'review', nextCandidate.id, changedFields(item.track, nextCandidate), false, 0);
+	setCandidatePickerOpen(false);
   };
 
   const toggleArtwork = (trackId: string) => {
@@ -278,7 +365,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           ...entry,
           candidate,
           candidates,
-          fields: candidate ? availableFields(candidate) : [],
+          fields: candidate ? changedFields(active.track, candidate) : [],
           includeArtwork: false,
           artworkMaxSize: 0,
           state: candidate ? 'review' : 'skipped',
@@ -372,7 +459,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               className={cn('review-row', active?.track.id === item.track.id && 'is-active')}
               onClick={() => setActiveId(item.track.id)}
             >
-              <CoverArt title={item.track.title} artist={item.track.artists[0]} tone={item.track.coverTone} missing={!showGeneratedCovers && item.track.artworkCount === 0} size="xs" />
+              <CoverArt title={item.track.title} artist={item.track.artists[0]} tone={item.track.coverTone} missing={!showGeneratedCovers && item.track.artworkCount === 0} imageUrl={artworkURL(item.track)} blankOnImageError={!showGeneratedCovers} size="xs" />
               <span className="review-track-copy">
                 <strong>{item.track.title}</strong>
                 <small>{item.track.fileName}</small>
@@ -410,7 +497,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           <section className="review-detail">
             <div className="review-detail-head">
               <div className="record-comparison">
-                <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} size="md" />
+                <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} imageUrl={artworkURL(active.track)} blankOnImageError={!showGeneratedCovers} size="md" />
                 <div className="comparison-line"><span /><Sparkles size={16} /><span /></div>
                 <CoverArt title={active.candidate.title.value} artist={active.candidate.artists.value[0]} tone={active.candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(active.candidate)} imageUrl={candidateArtworkURL(active.candidate)} blankOnImageError={!showGeneratedCovers} size="md" />
               </div>
@@ -434,6 +521,26 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               </button>
             </div>
 			{rematchError && <div className="review-rematch-error">{rematchError}</div>}
+
+			{active.candidates.length > 1 && candidatePickerOpen && (
+			  <div className="candidate-picker-wrap">
+				<div className="candidate-picker" role="listbox" aria-label="候选列表">
+					{active.candidates.map((candidate) => (
+					  <button
+						key={candidate.id}
+						role="option"
+						aria-selected={candidate.id === active.candidate?.id}
+						className={cn('candidate-picker-option', candidate.id === active.candidate?.id && 'is-selected')}
+						onClick={() => selectCandidate(active.track.id, candidate)}
+					  >
+						<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
+						<span><strong>{candidate.title.value}</strong><small>{candidate.providerName} · {candidate.externalId}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
+						{candidate.id === active.candidate?.id && <Check size={15} />}
+					  </button>
+					))}
+				</div>
+			  </div>
+			)}
 
             <div className="review-diff-table">
               <div className="review-diff-head"><span>采用</span><span>字段</span><span>当前值</span><span>候选值</span><span>来源</span></div>
@@ -468,27 +575,49 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="内嵌歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} />}
               {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} />}
             </div>
+			<div className="review-fields-actions">
+			  <span>已选择 {active.fields.filter((field) => activeAvailableFields.includes(field)).length} / {activeAvailableFields.length} 个可用字段</span>
+			  <button
+				type="button"
+				aria-label={allActiveFieldsSelected ? '全部取消字段' : '全选字段'}
+				disabled={activeAvailableFields.length === 0}
+				onClick={() => toggleAllFields(active.track.id)}
+			  >{allActiveFieldsSelected ? '全部取消' : '全选字段'}</button>
+			</div>
 
             {active.candidate.hasArtwork && (
-              <label className="review-artwork-size-control">
-                <span>封面写入尺寸</span>
-                <select
-                  aria-label="审核封面写入尺寸"
-                  value={active.artworkMaxSize}
-                  disabled={!active.includeArtwork}
-                  onChange={(event) => setArtworkMaxSize(active.track.id, Number(event.target.value))}
-                >
-                  <option value={0}>保留原图</option>
-                  <option value={1000}>居中裁剪至 1000×1000</option>
-                  <option value={500}>居中裁剪至 500×500</option>
-                </select>
-                <small>仅在勾选“替换封面”时写入；小于目标尺寸的图片不会被放大。</small>
-              </label>
+              <div className="review-artwork-size-control">
+                <div className="review-artwork-control-head">
+                  <label className="review-artwork-toggle">
+                    <input
+                      type="checkbox"
+                      aria-label="审核是否写入候选封面"
+                      checked={active.includeArtwork}
+                      onChange={() => toggleArtwork(active.track.id)}
+                    />
+                    <span>同时写入候选封面</span>
+                  </label>
+                  <label className="review-artwork-size-select">
+                    <span>写入尺寸</span>
+                    <select
+                      aria-label="审核封面写入尺寸"
+                      value={active.artworkMaxSize}
+                      disabled={!active.includeArtwork}
+                      onChange={(event) => setArtworkMaxSize(active.track.id, Number(event.target.value))}
+                    >
+                      <option value={0}>保留原图</option>
+                      <option value={1000}>居中裁剪至 1000×1000</option>
+                      <option value={500}>居中裁剪至 500×500</option>
+                    </select>
+                  </label>
+                </div>
+                <small>勾选后才会写入候选封面；小于目标尺寸的图片不会被放大。</small>
+              </div>
             )}
 
             <div className="review-detail-actions">
               <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
-              <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => changeCandidate(active.track.id)}><ChevronRight size={15} /> 更换候选</button>
+              <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => setCandidatePickerOpen((value) => !value)}><ChevronRight size={15} /> 更换候选</button>
               <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
             </div>
           </section>

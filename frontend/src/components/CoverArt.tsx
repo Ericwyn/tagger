@@ -17,24 +17,26 @@ interface CoverArtProps {
 
 export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, blankOnImageError = false, className, onImageInfo}: CoverArtProps) {
 	const [imageFailed, setImageFailed] = useState(false);
+	const [imageLoaded, setImageLoaded] = useState(false);
 
-	useEffect(() => setImageFailed(false), [imageUrl]);
+	useEffect(() => {
+	  setImageFailed(false);
+	  setImageLoaded(false);
+	}, [imageUrl]);
 
-  if (missing || (blankOnImageError && Boolean(imageUrl) && imageFailed)) {
-    return (
-      <div className={cn('cover-art cover-missing', `cover-${size}`, className)} aria-label="没有封面">
-        <Disc3 aria-hidden="true" />
-      </div>
-    );
-  }
+  const imagePending = Boolean(imageUrl) && !imageFailed && !imageLoaded;
+  const shouldBlank = Boolean(missing) || (blankOnImageError && (!imageUrl || imageFailed || imagePending));
 
   return (
-    <div className={cn('cover-art', `cover-${tone}`, `cover-${size}`, className)} aria-label={`${title} 封面`}>
-      {imageUrl && !imageFailed && <img className="cover-image" src={imageUrl} alt="" onError={() => setImageFailed(true)} onLoad={(event) => onImageInfo?.({width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight})} />}
-      <span className="cover-index">{initials(artist || title)}</span>
-      <span className="cover-title">{title}</span>
-      <span className="cover-rule" />
-      <span className="cover-artist">{artist}</span>
+    <div className={cn('cover-art', !shouldBlank && `cover-${tone}`, `cover-${size}`, shouldBlank && 'cover-missing', className)} aria-label={shouldBlank ? '没有封面' : `${title} 封面`}>
+      {imageUrl && !imageFailed && <img className="cover-image" src={imageUrl} alt="" onError={() => setImageFailed(true)} onLoad={(event) => { setImageLoaded(true); onImageInfo?.({width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight}); }} />}
+      {!shouldBlank && <>
+        <span className="cover-index">{initials(artist || title)}</span>
+        <span className="cover-title">{title}</span>
+        <span className="cover-rule" />
+        <span className="cover-artist">{artist}</span>
+      </>}
+      {shouldBlank && !imagePending && <Disc3 aria-hidden="true" />}
     </div>
   );
 }

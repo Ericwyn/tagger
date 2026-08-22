@@ -268,6 +268,7 @@ export function TrackInspector({
           missing={!showGeneratedCovers && track.artworkCount === 0}
           size="lg"
 		  imageUrl={artworkURL(track)}
+		  blankOnImageError={!showGeneratedCovers}
         />
         <div className="hero-copy">
           <div className="eyebrow">NOW INSPECTING · {track.format.toUpperCase()}</div>
@@ -497,6 +498,7 @@ export function TrackInspector({
                 missing={!showGeneratedCovers && track.artworkCount === 0}
                 size="hero"
 				imageUrl={artworkURL(track)}
+				blankOnImageError={!showGeneratedCovers}
               />
               <span className="artwork-index">01 / {Math.max(track.artworkCount, 1)}</span>
             </div>

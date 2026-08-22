@@ -9,13 +9,17 @@ describe('ReviewPage field selection', () => {
     render(<ReviewPage trackIds={['trk-001']} onBack={vi.fn()} onComplete={vi.fn()} />);
 
     expect(await screen.findByRole('heading', {name: '审核抓取结果'})).toBeInTheDocument();
-    const titleToggle = screen.getByRole('button', {name: '取消采用标题'});
-    expect(titleToggle).toHaveClass('is-checked');
+    const titleToggle = screen.getByRole('button', {name: '采用标题'});
+    expect(titleToggle).not.toHaveClass('is-checked');
 
     await user.click(titleToggle);
 
-    expect(screen.getByRole('button', {name: '采用标题'})).not.toHaveClass('is-checked');
-	const artworkToggle = screen.getByRole('button', {name: '采用替换封面'});
+    expect(screen.getByRole('button', {name: '取消采用标题'})).toHaveClass('is-checked');
+	await user.click(screen.getByRole('button', {name: '全选字段'}));
+	expect(screen.getByRole('button', {name: '取消采用标题'})).toHaveClass('is-checked');
+	await user.click(screen.getByRole('button', {name: '全部取消字段'}));
+	expect(screen.getByRole('button', {name: '采用标题'})).not.toHaveClass('is-checked');
+	const artworkToggle = screen.getByRole('checkbox', {name: '审核是否写入候选封面'});
 	await user.click(artworkToggle);
 	expect(screen.getByRole('button', {name: '取消采用替换封面'})).toHaveClass('is-checked');
 	const artworkSize = screen.getByRole('combobox', {name: '审核封面写入尺寸'});
@@ -23,7 +27,7 @@ describe('ReviewPage field selection', () => {
 	expect(artworkSize).toHaveValue('500');
 	});
 
-  it('moves to the next track after accepting and cycles alternative candidates', async () => {
+  it('opens every candidate and lets the reviewer choose a specific source', async () => {
     const user = userEvent.setup();
     render(<ReviewPage trackIds={['trk-001', 'trk-002']} onBack={vi.fn()} onComplete={vi.fn()} />);
 
@@ -31,7 +35,9 @@ describe('ReviewPage field selection', () => {
     expect(screen.getByRole('heading', {name: '再回首'})).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: /更换候选/}));
-    expect(screen.getByText(/网易云音乐 \/ song-186001/)).toBeInTheDocument();
+    expect(screen.getByRole('listbox', {name: '候选列表'})).toBeInTheDocument();
+    await user.click(screen.getByRole('option', {name: /Apple Music.*apple-182911/}));
+    expect(screen.getByText(/Apple Music \/ apple-182911/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: /接受候选/}));
     expect(screen.getByRole('heading', {name: '愛上一個不回家的人'})).toBeInTheDocument();
