@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Check,
   ChevronRight,
@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
+import {artworkURL} from '@/api';
 import {cn, formatBytes, formatDuration} from '@/lib/utils';
 import type {InspectorTab, Track, TrackPatch} from '@/types';
 
@@ -30,6 +31,7 @@ interface TrackInspectorProps {
   onCloseMobile: () => void;
   onSearch: () => void;
   onSave: (patch: TrackPatch) => Promise<void>;
+  onArtworkChange: (file: File | null) => Promise<void>;
 }
 
 const tabs: Array<{id: InspectorTab; label: string}> = [
@@ -71,16 +73,20 @@ export function TrackInspector({
   onCloseMobile,
   onSearch,
   onSave,
+  onArtworkChange,
 }: TrackInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>('tags');
   const [draft, setDraft] = useState<TrackPatch | null>(track ? toPatch(track) : null);
   const [showPreview, setShowPreview] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
+  const artworkInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDraft(track ? toPatch(track) : null);
     setShowPreview(false);
     setPlaying(false);
+	setDeleteArtworkArmed(false);
   }, [track]);
 
   const original = useMemo(() => track ? toPatch(track) : null, [track]);
@@ -141,6 +147,7 @@ export function TrackInspector({
           tone={track.coverTone}
           missing={track.artworkCount === 0}
           size="lg"
+		  imageUrl={artworkURL(track)}
         />
         <div className="hero-copy">
           <div className="eyebrow">NOW INSPECTING · {track.format.toUpperCase()}</div>
@@ -281,20 +288,49 @@ export function TrackInspector({
                 tone={track.coverTone}
                 missing={track.artworkCount === 0}
                 size="hero"
+				imageUrl={artworkURL(track)}
               />
               <span className="artwork-index">01 / {Math.max(track.artworkCount, 1)}</span>
             </div>
             <dl className="meta-list">
               <div><dt>类型</dt><dd>Front Cover</dd></div>
-              <div><dt>规格</dt><dd>{track.artworkCount ? '1200 × 1200 · JPEG' : '—'}</dd></div>
-              <div><dt>大小</dt><dd>{track.artworkCount ? '284 KB' : '—'}</dd></div>
-              <div><dt>描述</dt><dd>Album artwork</dd></div>
+			  <div><dt>规格</dt><dd>{track.artworkCount ? '从文件实时读取' : '—'}</dd></div>
+			  <div><dt>数量</dt><dd>{track.artworkCount} 张嵌入图片</dd></div>
+			  <div><dt>描述</dt><dd>{track.artworkCount ? 'Front Cover' : '尚未嵌入封面'}</dd></div>
             </dl>
             <div className="button-pair">
-              <button className="secondary-button"><Upload size={15} /> 上传封面</button>
-              <button className="secondary-button"><Search size={15} /> 在线查找</button>
+			  <input
+				ref={artworkInput}
+				className="visually-hidden"
+				type="file"
+				accept="image/jpeg,image/png,image/webp"
+				onChange={async (event) => {
+				  const file = event.target.files?.[0];
+				  if (file) await onArtworkChange(file);
+				  event.target.value = '';
+				}}
+			  />
+			  <button className="secondary-button" disabled={saving} onClick={() => artworkInput.current?.click()}>
+				<Upload size={15} /> {saving ? '写入中…' : '上传封面'}
+			  </button>
+			  <button className="secondary-button" onClick={onSearch}><Search size={15} /> 在线查找</button>
             </div>
-            <button className="danger-link"><Trash2 size={14} /> 删除当前封面</button>
+			{track.artworkCount > 0 && (
+			  <button
+				className="danger-link"
+				disabled={saving}
+				onClick={async () => {
+				  if (!deleteArtworkArmed) {
+					setDeleteArtworkArmed(true);
+					return;
+				  }
+				  await onArtworkChange(null);
+				  setDeleteArtworkArmed(false);
+				}}
+			  >
+				<Trash2 size={14} /> {deleteArtworkArmed ? '再次点击确认删除' : '删除当前封面'}
+			  </button>
+			)}
           </div>
         )}
 

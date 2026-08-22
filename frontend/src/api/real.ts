@@ -1,6 +1,7 @@
 import type {
   LibrarySummary,
   MatchCandidate,
+  ArtworkWriteResult,
   ProviderConfig,
   RestorePreview,
   RestoreResult,
@@ -159,6 +160,21 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
         body: JSON.stringify({baseRevision, target: 'before'}),
       });
     },
+
+    writeArtwork(track: Track, file: File): Promise<ArtworkWriteResult> {
+	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0`, {
+		method: 'PUT',
+		headers: {'Content-Type': file.type || 'application/octet-stream', 'If-Match': `"${track.revision}"`},
+		body: file,
+	  });
+	},
+
+	deleteArtwork(track: Track): Promise<ArtworkWriteResult> {
+	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0`, {
+		method: 'DELETE',
+		headers: {'If-Match': `"${track.revision}"`},
+	  });
+	},
   };
 }
 

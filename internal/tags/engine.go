@@ -24,3 +24,11 @@ type Engine interface {
 	Write(ctx context.Context, path string, updates map[string][]string) error
 	Version() string
 }
+
+// ArtworkEngine is an optional capability implemented by engines that can
+// round-trip embedded image bytes. Keeping it separate lets lightweight test
+// engines and future read-only engines continue to implement Engine only.
+type ArtworkEngine interface {
+	ReadArtwork(ctx context.Context, path string, index int) ([]byte, error)
+	WriteArtwork(ctx context.Context, path string, index int, image []byte, mimeType string) error
+}

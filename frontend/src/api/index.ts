@@ -80,3 +80,17 @@ export function restoreRevision(revision: Revision, preview: RestorePreview): Pr
   }
   return real.restoreRevision(revision.id, preview.preview.currentRevision);
 }
+
+export function artworkURL(track: Track): string | undefined {
+  if (apiReadMode === 'mock' || track.artworkCount === 0) return undefined;
+  return `/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0?revision=${encodeURIComponent(track.revision)}`;
+}
+
+export async function updateArtwork(trackId: string, file: File | null): Promise<Track> {
+  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, file);
+  const current = realTrackCache.get(trackId);
+  if (!current) throw new Error('track_not_found');
+  const result = file ? await real.writeArtwork(current, file) : await real.deleteArtwork(current);
+  realTrackCache.set(trackId, result.track);
+  return result.track;
+}

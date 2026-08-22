@@ -209,6 +209,19 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	}
 }
 
+func TestArtworkAPIRejectsInvalidImagesBeforeWriting(t *testing.T) {
+	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	body := []byte("not an image")
+	response := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/artwork/0",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+		ut.Header{Key: "content-type", Value: "image/jpeg"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if response.Code != 422 || !containsJSON(response.Body.Bytes(), `"code":"invalid_artwork"`) {
+		t.Fatalf("invalid artwork = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	root := t.TempDir()

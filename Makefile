@@ -41,7 +41,7 @@ test-frontend:
 test-integration:
 	@test -n "$(MUSIC_DIR)" || (echo "MUSIC_DIR is required" && exit 2)
 	TAGGER_TEST_MUSIC_DIR="$(MUSIC_DIR)" go test ./internal/scanner ./internal/filewrite ./internal/server \
-		-run 'TestScannerReadsTestMusicCorpus|TestWriterWithCopiedTestMusicMP3AndFLAC|TestSuccessfulRealTagWriteCreatesPersistentRevision' -count=1 -v
+		-run 'TestScannerReadsTestMusicCorpus|TestWriterWithCopiedTestMusicMP3AndFLAC|TestWriterWithCopiedTestMusicArtwork|TestSuccessfulRealTagWriteCreatesPersistentRevision' -count=1 -v
 
 lint:
 	go vet ./...

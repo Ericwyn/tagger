@@ -54,7 +54,8 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
 	const recordedDiff = active?.diff?.length
     ? active.diff
     : active?.fields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined})) ?? [];
-	const activeDiff = restorePreview?.preview.diff ?? recordedDiff;
+  const activeDiff = restorePreview?.preview.diff ?? recordedDiff;
+	const hasRestorableTagFields = Boolean(active?.fields.some((field) => field !== 'artwork'));
 
 	const buildRestorePreview = async () => {
 	  if (!active) return;
@@ -163,7 +164,7 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
 				  <small>以下是相对当前磁盘标签即将发生的变化，尚未写入。</small>
 				</div>
 			  )}
-			  <div className="revision-diff-head"><span>字段</span><span>当前值</span><span /><span>{restorePreview ? '恢复后' : '修改后'}</span></div>
+			  <div className="revision-diff-head"><span>字段</span><span>{restorePreview ? '当前值' : '修改前'}</span><span /><span>{restorePreview ? '恢复后' : '修改后'}</span></div>
               {activeDiff.map((diff) => (
                 <div key={diff.field}>
                   <strong>{fieldLabel(diff.field)}</strong>
@@ -198,11 +199,11 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
 			) : (
 			  <button
 				className="secondary-button full-button"
-				disabled={restoreState !== 'idle' || !active.currentRevision}
-				title={active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
+				disabled={restoreState !== 'idle' || !active.currentRevision || !hasRestorableTagFields}
+				title={!hasRestorableTagFields ? '封面二进制历史恢复将在 blob 去重阶段接入' : active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
 				onClick={() => void buildRestorePreview()}
 			  >
-				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : '恢复到修改前…'}
+				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : !hasRestorableTagFields ? '封面恢复待接入' : '恢复到修改前…'}
 			  </button>
 			)}
           </aside>
@@ -223,6 +224,7 @@ const fieldLabels: Record<string, string> = {
   title: '标题', artists: '艺术家', album: '专辑', albumArtists: '专辑艺术家',
   trackNumber: '音轨号', trackTotal: '总音轨', discNumber: '光盘号', discTotal: '总光盘',
   year: '年份', genres: '流派', lyrics: '歌词',
+	artwork: '封面',
 };
 
 function fieldLabel(field: string): string {
@@ -232,6 +234,15 @@ function fieldLabel(field: string): string {
 function fullDiffValue(value: unknown): string {
   if (value === undefined || value === null || value === '') return '空';
   if (Array.isArray(value)) return value.length > 0 ? value.join(' / ') : '空';
+	if (typeof value === 'object') {
+	  const asset = value as {format?: string; width?: number; height?: number; size?: number; hash?: string};
+	  if (asset.hash) {
+		const dimensions = asset.width && asset.height ? `${asset.width}×${asset.height}` : '尺寸未知';
+		const size = asset.size ? `${(asset.size / 1024).toFixed(0)} KB` : '大小未知';
+		return `${asset.format || 'IMAGE'} · ${dimensions} · ${size} · ${asset.hash.slice(0, 8)}`;
+	  }
+	  return JSON.stringify(value);
+	}
   return String(value);
 }
 

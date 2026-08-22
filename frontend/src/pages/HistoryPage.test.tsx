@@ -29,6 +29,7 @@ const preview: RestorePreview = {
 
 describe('HistoryPage restore flow', () => {
   beforeEach(() => {
+	vi.clearAllMocks();
     vi.mocked(listRevisions).mockResolvedValue([revision]);
     vi.mocked(previewRevisionRestore).mockResolvedValue(preview);
     vi.mocked(restoreRevision).mockResolvedValue({
@@ -53,5 +54,23 @@ describe('HistoryPage restore flow', () => {
     await user.click(screen.getByRole('button', {name: '确认恢复'}));
     await waitFor(() => expect(restoreRevision).toHaveBeenCalledWith(revision, preview));
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('生成新的审计记录'));
+  });
+
+  it('keeps artwork-only revisions honest until binary blob restore is available', async () => {
+	vi.mocked(listRevisions).mockResolvedValue([{
+	  ...revision,
+	  action: '替换封面',
+	  fields: ['artwork'],
+	  diff: [{
+		field: 'artwork', operation: 'set',
+		before: {format: 'JPEG', width: 1200, height: 1200, size: 500000, hash: 'a'.repeat(64)},
+		after: {format: 'JPEG', width: 600, height: 600, size: 90000, hash: 'b'.repeat(64)},
+	  }],
+	}]);
+	render(<HistoryPage onNotice={vi.fn()} />);
+
+	expect(await screen.findByRole('button', {name: '封面恢复待接入'})).toBeDisabled();
+	expect(screen.getByRole('deletion')).toHaveTextContent('JPEG · 1200×1200');
+	expect(screen.getByRole('insertion')).toHaveTextContent('JPEG · 600×600');
   });
 });

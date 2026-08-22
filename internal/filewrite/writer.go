@@ -1,6 +1,7 @@
 package filewrite
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/scanner"
@@ -20,11 +22,14 @@ import (
 )
 
 var (
-	ErrRevisionConflict  = errors.New("revision conflict")
-	ErrPathOutsideRoot   = errors.New("path outside library root")
-	ErrInvalidPatch      = errors.New("invalid tag patch")
-	ErrVerification      = errors.New("write verification failed")
-	ErrUnsupportedFormat = errors.New("unwritable format")
+	ErrRevisionConflict   = errors.New("revision conflict")
+	ErrPathOutsideRoot    = errors.New("path outside library root")
+	ErrInvalidPatch       = errors.New("invalid tag patch")
+	ErrVerification       = errors.New("write verification failed")
+	ErrUnsupportedFormat  = errors.New("unwritable format")
+	ErrArtworkUnavailable = errors.New("artwork operations unavailable")
+	ErrArtworkNotFound    = errors.New("artwork not found")
+	ErrArtworkIndex       = errors.New("invalid artwork index")
 )
 
 type RevisionConflictError struct {
@@ -47,6 +52,19 @@ type Result struct {
 	Changed         bool                `json:"changed"`
 	Diff            []FieldDiff         `json:"diff"`
 	Warnings        []string            `json:"warnings"`
+	BeforeTags      map[string][]string `json:"-"`
+	AfterTags       map[string][]string `json:"-"`
+}
+
+type ArtworkResult struct {
+	BaseRevision    string              `json:"baseRevision"`
+	CurrentRevision string              `json:"currentRevision"`
+	DryRun          bool                `json:"dryRun"`
+	Changed         bool                `json:"changed"`
+	Diff            []FieldDiff         `json:"diff"`
+	Warnings        []string            `json:"warnings"`
+	Before          *artwork.Asset      `json:"before,omitempty"`
+	After           *artwork.Asset      `json:"after,omitempty"`
 	BeforeTags      map[string][]string `json:"-"`
 	AfterTags       map[string][]string `json:"-"`
 }
@@ -93,6 +111,178 @@ func (w *Writer) Restore(ctx context.Context, ref library.FileRef, baseRevision 
 	}
 	result.Warnings = append(result.Warnings, "恢复仅覆盖 Tagger 管理的标准字段；未知或格式私有标签保持当前值")
 	return result, nil
+}
+
+func (w *Writer) ReadArtwork(ctx context.Context, ref library.FileRef, index int) (artwork.Asset, error) {
+	if index < 0 || index > 31 {
+		return artwork.Asset{}, ErrArtworkIndex
+	}
+	engine, ok := w.engine.(tags.ArtworkEngine)
+	if !ok {
+		return artwork.Asset{}, ErrArtworkUnavailable
+	}
+	path, err := w.containedPath(ref)
+	if err != nil {
+		return artwork.Asset{}, err
+	}
+	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+	data, err := engine.ReadArtwork(ctx, path, index)
+	if err != nil {
+		return artwork.Asset{}, err
+	}
+	if len(data) == 0 {
+		return artwork.Asset{}, ErrArtworkNotFound
+	}
+	asset, err := artwork.Describe(data)
+	if err != nil {
+		return artwork.Asset{}, fmt.Errorf("describe embedded artwork: %w", err)
+	}
+	return asset, nil
+}
+
+func (w *Writer) WriteArtwork(ctx context.Context, ref library.FileRef, baseRevision string, index int, target *artwork.Asset, dryRun bool) (ArtworkResult, error) {
+	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+		return ArtworkResult{}, ErrUnsupportedFormat
+	}
+	if index < 0 || index > 31 {
+		return ArtworkResult{}, ErrArtworkIndex
+	}
+	engine, ok := w.engine.(tags.ArtworkEngine)
+	if !ok {
+		return ArtworkResult{}, ErrArtworkUnavailable
+	}
+	path, err := w.containedPath(ref)
+	if err != nil {
+		return ArtworkResult{}, err
+	}
+	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return ArtworkResult{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("stat source file: %w", err)
+	}
+	beforeSnapshot, err := w.engine.Read(ctx, path)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("read source before artwork write: %w", err)
+	}
+	currentRevision := scanner.FileRevision(ref.RelativePath, info, beforeSnapshot.Raw)
+	if baseRevision == "" || baseRevision != currentRevision {
+		return ArtworkResult{}, &RevisionConflictError{Expected: baseRevision, Current: currentRevision}
+	}
+	beforeData, err := engine.ReadArtwork(ctx, path, index)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("read current artwork: %w", err)
+	}
+	var beforeAsset *artwork.Asset
+	if len(beforeData) > 0 {
+		described, err := artwork.Describe(beforeData)
+		if err != nil {
+			return ArtworkResult{}, fmt.Errorf("describe current artwork: %w", err)
+		}
+		beforeAsset = &described
+	}
+	changed := (beforeAsset == nil) != (target == nil)
+	if beforeAsset != nil && target != nil {
+		changed = beforeAsset.Hash != target.Hash
+	}
+	operation := domain.OperationSet
+	if target == nil {
+		operation = domain.OperationDelete
+	}
+	result := ArtworkResult{
+		BaseRevision: baseRevision, CurrentRevision: currentRevision, DryRun: dryRun, Changed: changed,
+		Diff: []FieldDiff{}, Warnings: []string{}, Before: beforeAsset, After: cloneArtworkAsset(target),
+		BeforeTags: cloneRawTags(beforeSnapshot.Raw), AfterTags: cloneRawTags(beforeSnapshot.Raw),
+	}
+	if changed {
+		result.Diff = append(result.Diff, FieldDiff{Field: "artwork", Operation: operation, Before: beforeAsset, After: target})
+	}
+	if dryRun || !changed {
+		return result, nil
+	}
+
+	tempPath, err := copyToTemporary(path, info)
+	if err != nil {
+		return ArtworkResult{}, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if ownershipErr := preserveOwnership(tempPath, info); ownershipErr != nil {
+		result.Warnings = append(result.Warnings, "无法保留原文件所有者信息："+ownershipErr.Error())
+	}
+	var targetData []byte
+	var targetMIME string
+	if target != nil {
+		targetData, targetMIME = target.Data, target.MIME
+	}
+	if err := engine.WriteArtwork(ctx, tempPath, index, targetData, targetMIME); err != nil {
+		return ArtworkResult{}, fmt.Errorf("write temporary artwork: %w", err)
+	}
+	afterSnapshot, err := w.engine.Read(ctx, tempPath)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("verify artwork properties: %w", err)
+	}
+	afterData, err := engine.ReadArtwork(ctx, tempPath, index)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("verify artwork bytes: %w", err)
+	}
+	if target != nil && !bytes.Equal(afterData, target.Data) {
+		return ArtworkResult{}, fmt.Errorf("%w: embedded artwork bytes differ after write", ErrVerification)
+	}
+	if target == nil && afterSnapshot.ArtworkCount != max(0, beforeSnapshot.ArtworkCount-1) {
+		return ArtworkResult{}, fmt.Errorf("%w: artwork count is %d, want %d", ErrVerification, afterSnapshot.ArtworkCount, max(0, beforeSnapshot.ArtworkCount-1))
+	}
+	var afterAsset *artwork.Asset
+	if len(afterData) > 0 {
+		described, err := artwork.Describe(afterData)
+		if err != nil {
+			return ArtworkResult{}, fmt.Errorf("describe written artwork: %w", err)
+		}
+		afterAsset = &described
+	}
+	if err := syncFile(tempPath); err != nil {
+		return ArtworkResult{}, fmt.Errorf("sync temporary copy: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return ArtworkResult{}, err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return ArtworkResult{}, fmt.Errorf("atomically replace source: %w", err)
+	}
+	committed = true
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		result.Warnings = append(result.Warnings, "目录同步失败："+err.Error())
+	}
+	finalInfo, err := os.Stat(path)
+	if err != nil {
+		return ArtworkResult{}, fmt.Errorf("stat written file: %w", err)
+	}
+	result.CurrentRevision = scanner.FileRevision(ref.RelativePath, finalInfo, afterSnapshot.Raw)
+	result.After = afterAsset
+	result.AfterTags = cloneRawTags(afterSnapshot.Raw)
+	return result, nil
+}
+
+func cloneArtworkAsset(asset *artwork.Asset) *artwork.Asset {
+	if asset == nil {
+		return nil
+	}
+	clone := *asset
+	clone.Data = append([]byte(nil), asset.Data...)
+	return &clone
 }
 
 type updateCompiler func(raw map[string][]string) (map[string][]string, []FieldDiff, error)

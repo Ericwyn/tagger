@@ -182,3 +182,26 @@ export interface RestoreResult {
   restoredRevisionId: string;
   target: 'before' | 'after';
 }
+
+export interface ArtworkAsset {
+  mime: 'image/jpeg' | 'image/png' | 'image/webp';
+  format: string;
+  width: number;
+  height: number;
+  size: number;
+  hash: string;
+}
+
+export interface ArtworkWriteResult {
+  track: Track;
+  write: {
+    baseRevision: string;
+    currentRevision: string;
+    dryRun: boolean;
+    changed: boolean;
+    diff: RevisionDiff[];
+    warnings: string[];
+    before?: ArtworkAsset;
+    after?: ArtworkAsset;
+  };
+}

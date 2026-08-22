@@ -16,7 +16,7 @@ import {CandidateDrawer} from '@/components/library/CandidateDrawer';
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
-import {apiReadMode, getLibrary, listTracks, rescanLibrary, searchCandidates, updateTrack} from '@/api';
+import {apiReadMode, getLibrary, listTracks, rescanLibrary, searchCandidates, updateArtwork, updateTrack} from '@/api';
 import type {LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LibraryPageProps {
@@ -147,6 +147,20 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     } finally {
       setCandidateLoading(false);
     }
+  };
+
+  const changeArtwork = async (file: File | null) => {
+	if (!activeTrack) return;
+	setSaving(true);
+	try {
+	  const updated = await updateArtwork(activeTrack.id, file);
+	  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+	  onNotice(file ? '封面已验证并安全写入音乐文件' : '当前封面已安全删除并记录历史');
+	} catch (error) {
+	  onNotice(error instanceof Error ? error.message : '封面操作失败');
+	} finally {
+	  setSaving(false);
+	}
   };
 
   const toggleTrack = (id: string) => {
@@ -286,6 +300,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         onCloseMobile={() => setMobileInspector(false)}
         onSearch={openCandidateSearch}
         onSave={saveTrack}
+		onArtworkChange={changeArtwork}
       />
 
       {selectedIds.size > 0 && (

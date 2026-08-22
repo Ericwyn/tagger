@@ -147,4 +147,25 @@ describe('real API client', () => {
 	  expect(JSON.parse(String((init as RequestInit).body))).toEqual({baseRevision: 'current-rev', target: 'before'});
 	}
   });
+
+  it('uploads and deletes embedded artwork using raw image bytes and revision guards', async () => {
+	const fullTrack = {...track, revision: 'art-rev-1'} as Track;
+	const uploadedTrack = {...fullTrack, artworkCount: 1, revision: 'art-rev-2'};
+	const deletedTrack = {...uploadedTrack, artworkCount: 0, revision: 'art-rev-3'};
+	const fetcher = vi.fn()
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: {track: uploadedTrack, write: {changed: true}}}), {status: 200}))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: {track: deletedTrack, write: {changed: true}}}), {status: 200}));
+	const api = createRealAPI(fetcher);
+	const file = new File([new Uint8Array([137, 80, 78, 71])], 'cover.png', {type: 'image/png'});
+
+	await expect(api.writeArtwork(fullTrack, file)).resolves.toEqual(expect.objectContaining({track: uploadedTrack}));
+	await expect(api.deleteArtwork(uploadedTrack)).resolves.toEqual(expect.objectContaining({track: deletedTrack}));
+	const uploadInit = fetcher.mock.calls[0][1] as RequestInit;
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/artwork/0');
+	expect(uploadInit).toEqual(expect.objectContaining({method: 'PUT', body: file}));
+	expect(uploadInit.headers).toEqual(expect.objectContaining({'Content-Type': 'image/png', 'If-Match': '"art-rev-1"'}));
+	const deleteInit = fetcher.mock.calls[1][1] as RequestInit;
+	expect(deleteInit.method).toBe('DELETE');
+	expect(deleteInit.headers).toEqual(expect.objectContaining({'If-Match': '"art-rev-2"'}));
+  });
 });

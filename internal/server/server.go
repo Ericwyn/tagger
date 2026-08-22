@@ -5,14 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"mime"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	hserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
@@ -34,7 +37,7 @@ type Server struct {
 func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, dataStore *store.Store, frontend fs.FS, version, tagEngineInfo string) *Server {
 	h := hserver.Default(
 		hserver.WithHostPorts(listen),
-		hserver.WithMaxRequestBodySize(1<<20),
+		hserver.WithMaxRequestBodySize(artwork.MaxBytes+1<<20),
 	)
 	s := &Server{
 		h:             h,
@@ -65,6 +68,9 @@ func (s *Server) routes() {
 	api.GET("/tracks", s.handleTracks)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
+	api.GET("/tracks/:id/artwork/:index", s.handleReadArtwork)
+	api.PUT("/tracks/:id/artwork/:index", s.handleWriteArtwork)
+	api.DELETE("/tracks/:id/artwork/:index", s.handleDeleteArtwork)
 	api.GET("/providers", s.handleProviders)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.GET("/revisions", s.handleRevisions)
@@ -419,9 +425,123 @@ func (s *Server) handleWriteError(c *app.RequestContext, err error) {
 		s.writeError(c, consts.StatusUnprocessableEntity, "unwritable_format", "当前格式不支持写入")
 	case errors.Is(err, filewrite.ErrVerification):
 		s.writeError(c, consts.StatusInternalServerError, "write_verification_failed", err.Error())
+	case errors.Is(err, filewrite.ErrArtworkUnavailable):
+		s.writeError(c, consts.StatusServiceUnavailable, "artwork_unavailable", "当前标签引擎不支持封面操作")
+	case errors.Is(err, filewrite.ErrArtworkNotFound):
+		s.writeError(c, consts.StatusNotFound, "artwork_not_found", "嵌入封面不存在")
+	case errors.Is(err, filewrite.ErrArtworkIndex):
+		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_index", "封面序号无效")
 	default:
 		s.writeError(c, consts.StatusInternalServerError, "write_failed", err.Error())
 	}
+}
+
+func (s *Server) handleReadArtwork(ctx context.Context, c *app.RequestContext) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "artwork_unavailable", "封面读取服务尚未启用")
+		return
+	}
+	index, err := strconv.Atoi(c.Param("index"))
+	if err != nil || index < 0 || index > 31 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_index", "封面序号无效")
+		return
+	}
+	ref, err := s.library.FileRef(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	asset, err := s.writer.ReadArtwork(ctx, ref, index)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	c.Header("ETag", `"`+ref.Revision+`"`)
+	c.Header("Cache-Control", "private, max-age=31536000, immutable")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Tagger-Artwork-Hash", asset.Hash)
+	c.Header("X-Tagger-Artwork-Size", fmt.Sprintf("%dx%d", asset.Width, asset.Height))
+	c.Data(consts.StatusOK, asset.MIME, asset.Data)
+}
+
+func (s *Server) handleWriteArtwork(ctx context.Context, c *app.RequestContext) {
+	asset, err := artwork.Validate(c.Request.Body(), string(c.Request.Header.ContentType()))
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_artwork", err.Error())
+		return
+	}
+	s.handleArtworkMutation(ctx, c, &asset)
+}
+
+func (s *Server) handleDeleteArtwork(ctx context.Context, c *app.RequestContext) {
+	s.handleArtworkMutation(ctx, c, nil)
+}
+
+func (s *Server) handleArtworkMutation(ctx context.Context, c *app.RequestContext, target *artwork.Asset) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "artwork_unavailable", "封面写入服务尚未启用")
+		return
+	}
+	index, err := strconv.Atoi(c.Param("index"))
+	if err != nil || index < 0 || index > 31 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_index", "封面序号无效")
+		return
+	}
+	baseRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if baseRevision == "" {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "If-Match 不能为空")
+		return
+	}
+	ref, err := s.library.FileRef(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	dryRun := strings.EqualFold(c.Query("dry_run"), "true")
+	result, err := s.writer.WriteArtwork(ctx, ref, baseRevision, index, target, dryRun)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	if dryRun {
+		s.writeData(c, map[string]any{"preview": result})
+		return
+	}
+	if result.Changed {
+		if err := s.library.Rescan(ctx); err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "封面已写入，但重新索引失败："+err.Error())
+			return
+		}
+	}
+	track, err := s.library.Track(ref.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "封面已写入，但曲目索引不可用")
+		return
+	}
+	if result.Changed && s.store != nil {
+		action, source := "替换封面", "手工上传"
+		if target == nil {
+			action, source = "删除封面", "手工操作"
+		}
+		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
+			LibraryID: s.library.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
+			Action: action, Source: source, BaseRevision: result.BaseRevision, ResultRevision: track.Revision,
+			Diff: result.Diff, CoverTone: track.CoverTone, BeforeTags: result.BeforeTags, AfterTags: result.AfterTags,
+		})
+		if historyErr != nil {
+			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
+		}
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, map[string]any{"track": track, "write": result})
 }
 
 func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {

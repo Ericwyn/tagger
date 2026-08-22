@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"io/fs"
 	"os"
@@ -117,6 +119,42 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	if staleRestore.Code != 409 || !containsJSON(staleRestore.Body.Bytes(), `"code":"revision_conflict"`) {
 		t.Fatalf("stale restore = %d %s", staleRestore.Code, staleRestore.Body.String())
 	}
+	restoredTrack, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cover bytes.Buffer
+	if err := png.Encode(&cover, image.NewRGBA(image.Rect(0, 0, 4, 3))); err != nil {
+		t.Fatal(err)
+	}
+	coverBytes := cover.Bytes()
+	coverWrite := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/artwork/0",
+		&ut.Body{Body: bytes.NewReader(coverBytes), Len: len(coverBytes)},
+		ut.Header{Key: "content-type", Value: "image/png"},
+		ut.Header{Key: "If-Match", Value: `"` + restoredTrack.Revision + `"`})
+	if coverWrite.Code != 200 || !containsJSON(coverWrite.Body.Bytes(), `"field":"artwork"`) ||
+		!containsJSON(coverWrite.Body.Bytes(), `"width":4`) {
+		t.Fatalf("cover write = %d %s", coverWrite.Code, coverWrite.Body.String())
+	}
+	coverRead := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/artwork/0", nil)
+	if coverRead.Code != 200 || coverRead.Result().Header.Get("Content-Type") != "image/png" ||
+		coverRead.Result().Header.Get("X-Tagger-Artwork-Size") != "4x3" || !bytes.Equal(coverRead.Body.Bytes(), coverBytes) {
+		t.Fatalf("cover read = %d type=%q size=%q bytes=%d", coverRead.Code,
+			coverRead.Result().Header.Get("Content-Type"), coverRead.Result().Header.Get("X-Tagger-Artwork-Size"), coverRead.Body.Len())
+	}
+	coveredTrack, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverDelete := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/artwork/0", nil,
+		ut.Header{Key: "If-Match", Value: `"` + coveredTrack.Revision + `"`})
+	if coverDelete.Code != 200 || !containsJSON(coverDelete.Body.Bytes(), `"artworkCount":0`) {
+		t.Fatalf("cover delete = %d %s", coverDelete.Code, coverDelete.Body.String())
+	}
+	missingCover := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/artwork/0", nil)
+	if missingCover.Code != 404 || !containsJSON(missingCover.Body.Bytes(), `"code":"artwork_not_found"`) {
+		t.Fatalf("missing cover = %d %s", missingCover.Code, missingCover.Body.String())
+	}
 	if err := dataStore.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -127,12 +165,13 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	}
 	defer reopened.Close()
 	revisions, err = reopened.ListRevisions(context.Background(), 10)
-	if err != nil || len(revisions) != 2 || revisions[0].Action != "恢复到修订前" ||
-		revisions[0].Source != "历史修订 "+revisions[1].ID || revisions[0].Diff[0].After != track.Title {
+	if err != nil || len(revisions) != 4 || revisions[0].Action != "删除封面" || revisions[1].Action != "替换封面" ||
+		revisions[2].Action != "恢复到修订前" || revisions[2].Source != "历史修订 "+revisions[3].ID ||
+		revisions[2].Diff[0].After != track.Title {
 		t.Fatalf("reopened history = %#v err=%v", revisions, err)
 	}
 	loaded, found, err := reopened.LoadScan(context.Background(), root)
-	if err != nil || !found || len(loaded.Tracks) != 1 || loaded.Tracks[0].Title != track.Title {
+	if err != nil || !found || len(loaded.Tracks) != 1 || loaded.Tracks[0].Title != track.Title || loaded.Tracks[0].ArtworkCount != 0 {
 		t.Fatalf("reopened scan = %#v found=%v err=%v", loaded, found, err)
 	}
 }

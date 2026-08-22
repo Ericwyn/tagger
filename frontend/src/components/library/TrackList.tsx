@@ -2,6 +2,7 @@ import {memo} from 'react';
 import {Virtuoso} from 'react-virtuoso';
 import {AlertCircle, Check, ChevronDown, ListFilter, MoreHorizontal} from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
+import {artworkURL} from '@/api';
 import {cn, formatDuration} from '@/lib/utils';
 import type {Track} from '@/types';
 
@@ -63,6 +64,7 @@ const TrackRow = memo(function TrackRow({
         artist={track.artists[0]}
         tone={track.coverTone}
         missing={track.artworkCount === 0}
+		imageUrl={artworkURL(track)}
         size="xs"
       />
       <div className="track-primary">

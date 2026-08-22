@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/scanner"
@@ -27,6 +30,66 @@ type memoryEngine struct {
 	byPath         map[string]map[string][]string
 	writes         int
 	breakVerifyKey string
+}
+
+type artworkMemoryEngine struct {
+	*memoryEngine
+	artMu    sync.Mutex
+	initial  []byte
+	latest   []byte
+	artworks map[string][]byte
+}
+
+func newArtworkMemoryEngine(raw map[string][]string, initial []byte) *artworkMemoryEngine {
+	return &artworkMemoryEngine{
+		memoryEngine: newMemoryEngine(raw), initial: append([]byte(nil), initial...), artworks: make(map[string][]byte),
+	}
+}
+
+func (e *artworkMemoryEngine) Read(ctx context.Context, path string) (tags.Snapshot, error) {
+	snapshot, err := e.memoryEngine.Read(ctx, path)
+	if err != nil {
+		return tags.Snapshot{}, err
+	}
+	imageData, err := e.ReadArtwork(ctx, path, 0)
+	if err != nil {
+		return tags.Snapshot{}, err
+	}
+	if len(imageData) == 0 {
+		snapshot.ArtworkCount = 0
+	} else {
+		snapshot.ArtworkCount = 1
+	}
+	return snapshot, nil
+}
+
+func (e *artworkMemoryEngine) ReadArtwork(_ context.Context, path string, _ int) ([]byte, error) {
+	e.artMu.Lock()
+	defer e.artMu.Unlock()
+	data, exists := e.artworks[path]
+	if !exists {
+		data = e.latest
+	}
+	if data == nil && e.latest == nil {
+		data = e.initial
+	}
+	return append([]byte(nil), data...), nil
+}
+
+func (e *artworkMemoryEngine) WriteArtwork(_ context.Context, path string, _ int, image []byte, _ string) error {
+	e.artMu.Lock()
+	defer e.artMu.Unlock()
+	e.latest = append([]byte{}, image...)
+	e.artworks[path] = append([]byte{}, image...)
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write([]byte{byte(len(image) % 251)}); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func newMemoryEngine(raw map[string][]string) *memoryEngine {
@@ -173,6 +236,52 @@ func TestWriterRestoresManagedSnapshotAndPreservesPrivateTags(t *testing.T) {
 	}
 }
 
+func TestWriterReplacesAndDeletesArtworkThroughVerifiedCopy(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "song.mp3")
+	if err := os.WriteFile(path, []byte("fake audio"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	initial := testPNG(t, 1, 1)
+	target, err := artwork.Validate(testPNG(t, 3, 2), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := newArtworkMemoryEngine(map[string][]string{"TITLE": {"Song"}}, initial)
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatMP3, engine)
+	read, err := writer.ReadArtwork(context.Background(), ref, 0)
+	if err != nil || read.Width != 1 || read.Height != 1 {
+		t.Fatalf("read artwork = %#v err=%v", read, err)
+	}
+	preview, err := writer.WriteArtwork(context.Background(), ref, ref.Revision, 0, &target, true)
+	if err != nil || !preview.DryRun || !preview.Changed || len(preview.Diff) != 1 {
+		t.Fatalf("preview = %#v err=%v", preview, err)
+	}
+	result, err := writer.WriteArtwork(context.Background(), ref, ref.Revision, 0, &target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.After == nil || result.After.Hash != target.Hash || result.CurrentRevision == ref.Revision {
+		t.Fatalf("write result = %#v", result)
+	}
+
+	deleteRef := testFileRef(t, root, path, domain.FormatMP3, engine)
+	deleted, err := writer.WriteArtwork(context.Background(), deleteRef, deleteRef.Revision, 0, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Changed || deleted.After != nil {
+		t.Fatalf("delete result = %#v", deleted)
+	}
+	if _, err := writer.ReadArtwork(context.Background(), deleteRef, 0); !errors.Is(err, ErrArtworkNotFound) {
+		t.Fatalf("read deleted artwork error = %v", err)
+	}
+}
+
 func TestWriterDoesNotReplaceSourceWhenVerificationFails(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "song.flac")
@@ -301,6 +410,78 @@ func TestWriterWithCopiedTestMusicMP3AndFLAC(t *testing.T) {
 				t.Fatalf("source corpus was modified: %q", got)
 			}
 		})
+	}
+}
+
+func TestWriterWithCopiedTestMusicArtwork(t *testing.T) {
+	corpus := os.Getenv("TAGGER_TEST_MUSIC_DIR")
+	if corpus == "" {
+		corpus = "/home/ericwyn/Downloads/TestMusic"
+	}
+	if _, err := os.Stat(corpus); err != nil {
+		t.Skipf("TestMusic corpus unavailable: %v", err)
+	}
+	for _, extension := range []string{".mp3", ".flac"} {
+		t.Run(strings.TrimPrefix(extension, "."), func(t *testing.T) {
+			source := findAudio(t, corpus, extension)
+			root := t.TempDir()
+			destination := filepath.Join(root, "artwork-fixture"+extension)
+			copyFixture(t, source, destination)
+			verifyArtworkRoundTrip(t, root, destination, domain.TrackFormat(strings.TrimPrefix(extension, ".")))
+		})
+	}
+	t.Run("wav", func(t *testing.T) {
+		root := t.TempDir()
+		destination := filepath.Join(root, "artwork-fixture.wav")
+		writeSilentWAV(t, destination)
+		verifyArtworkRoundTrip(t, root, destination, domain.FormatWAV)
+	})
+}
+
+func verifyArtworkRoundTrip(t *testing.T, root, destination string, format domain.TrackFormat) {
+	t.Helper()
+	engine := taglibwasm.New()
+	before, err := engine.Read(context.Background(), destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := artwork.Validate(testPNG(t, 4, 3), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, destination, format, engine)
+	written, err := writer.WriteArtwork(context.Background(), ref, ref.Revision, 0, &asset, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written.After == nil || written.After.Hash != asset.Hash {
+		t.Fatalf("written artwork = %#v", written)
+	}
+	read, err := writer.ReadArtwork(context.Background(), ref, 0)
+	if err != nil || read.Hash != asset.Hash || read.Width != 4 || read.Height != 3 {
+		t.Fatalf("read artwork = %#v err=%v", read, err)
+	}
+	afterWrite, err := engine.Read(context.Background(), destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterWrite.ArtworkCount != max(1, before.ArtworkCount) || afterWrite.DurationSeconds != before.DurationSeconds {
+		t.Fatalf("properties after artwork write = %#v, before=%#v", afterWrite, before)
+	}
+	deleteRef := testFileRef(t, root, destination, domain.FormatMP3, engine)
+	if _, err := writer.WriteArtwork(context.Background(), deleteRef, deleteRef.Revision, 0, nil, false); err != nil {
+		t.Fatal(err)
+	}
+	afterDelete, err := engine.Read(context.Background(), destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterDelete.ArtworkCount != afterWrite.ArtworkCount-1 || afterDelete.DurationSeconds != before.DurationSeconds {
+		t.Fatalf("properties after artwork delete = %#v", afterDelete)
 	}
 }
 
@@ -458,4 +639,13 @@ func writeSilentWAV(t *testing.T, path string) {
 	if err := os.WriteFile(path, buffer.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func testPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }

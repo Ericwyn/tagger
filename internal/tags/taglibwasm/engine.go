@@ -66,6 +66,27 @@ func (e *Engine) Write(ctx context.Context, path string, updates map[string][]st
 	return nil
 }
 
+func (e *Engine) ReadArtwork(ctx context.Context, path string, index int) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	image, err := taglib.ReadImageOptions(path, index)
+	if err != nil {
+		return nil, fmt.Errorf("read artwork: %w", err)
+	}
+	return image, nil
+}
+
+func (e *Engine) WriteArtwork(ctx context.Context, path string, index int, image []byte, mimeType string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := taglib.WriteImageOptions(path, image, index, "Front Cover", "Managed by Tagger", mimeType); err != nil {
+		return fmt.Errorf("write artwork: %w", err)
+	}
+	return nil
+}
+
 func (e *Engine) Version() string { return "go-taglib/v0.14.0 (TagLib 2.1.1)" }
 
 func normalizeContainer(format string) string {
