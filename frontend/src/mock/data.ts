@@ -279,6 +279,30 @@ export const providerConfigs: ProviderConfig[] = [
     accent: '#e0a000',
     quotaLabel: '未启用',
   },
+  {
+    id: 'kugou',
+    name: '酷狗音乐',
+    shortName: 'KG',
+    description: '中文曲库、LRC 歌词与歌曲封面',
+    capabilities: ['歌曲', '歌词', '同步歌词', '封面'],
+    health: 'disabled',
+    enabled: false,
+    experimental: true,
+    accent: '#14a86b',
+    quotaLabel: '实验性 · 默认关闭',
+  },
+  {
+    id: 'lrcapi',
+    name: 'LrcApi 聚合',
+    shortName: 'LA',
+    description: '可自托管的歌词与封面聚合接口',
+    capabilities: ['歌词', '同步歌词', '封面'],
+    health: 'disabled',
+    enabled: false,
+    experimental: true,
+    accent: '#8067d8',
+    quotaLabel: '实验性 · 可配置地址',
+  },
 ];
 
 export const jobs: Job[] = [

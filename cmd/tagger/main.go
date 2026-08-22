@@ -23,6 +23,7 @@ import (
 	"github.com/ericwyn/tagger/internal/providers/itunes"
 	"github.com/ericwyn/tagger/internal/providers/kugou"
 	"github.com/ericwyn/tagger/internal/providers/kuwo"
+	"github.com/ericwyn/tagger/internal/providers/lrcapi"
 	"github.com/ericwyn/tagger/internal/providers/lrclib"
 	"github.com/ericwyn/tagger/internal/providers/musicbrainz"
 	"github.com/ericwyn/tagger/internal/providers/netease"
@@ -79,6 +80,7 @@ func main() {
 		netease.New(netease.Config{}),
 		kugou.New(kugou.Config{}),
 		kuwo.New(kuwo.Config{}),
+		lrcapi.New(lrcapi.Config{BaseURL: os.Getenv("TAGGER_LRCAPI_URL"), CoverURL: os.Getenv("TAGGER_LRCAPI_COVER_URL"), Auth: os.Getenv("TAGGER_LRCAPI_AUTH")}),
 	)
 	if err := providerRegistry.SetPersistence(context.Background(), dataStore); err != nil {
 		logger.Error("load provider persistence", "error", err)

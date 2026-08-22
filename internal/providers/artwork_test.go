@@ -28,6 +28,7 @@ func TestValidateArtworkURLUsesProviderAllowlist(t *testing.T) {
 		{"kuwo", "https://img1.kuwo.cn/cover.jpg"},
 		{"kuwo", "https://img1.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg"},
 		{"kugou", "https://imge.kugou.com/cover.jpg"},
+		{"lrcapi", "https://api.lrc.cx/cover?title=Song"},
 	}
 	for _, item := range allowed {
 		if _, err := validateArtworkURL(item.provider, item.url); err != nil {

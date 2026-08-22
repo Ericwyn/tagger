@@ -21,5 +21,6 @@ describe('mock music archive', () => {
   it('marks unofficial providers as experimental', () => {
     expect(providerConfigs.find((provider) => provider.id === 'netease')?.experimental).toBe(true);
     expect(providerConfigs.find((provider) => provider.id === 'kuwo')?.enabled).toBe(false);
+    expect(providerConfigs.find((provider) => provider.id === 'lrcapi')?.experimental).toBe(true);
   });
 });
