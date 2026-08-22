@@ -73,6 +73,14 @@ describe('real API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
   });
 
+  it('probes a candidate library directory without changing the active library', async () => {
+    const probe = {path: '/music', name: 'music', readable: true, writable: true, audioFiles: 3, folders: 1, formats: {mp3: 1, flac: 1, wav: 1}};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: probe}), {status: 200}));
+    const api = createRealAPI(fetcher);
+    await expect(api.probeLibrary('/music')).resolves.toEqual(probe);
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({path: '/music'});
+  });
+
   it('rescans only the selected track', async () => {
     const refreshed = {...track, title: 'Refreshed', composers: [], artists: ['Artist']} as Track;
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: refreshed}), {status: 200}));

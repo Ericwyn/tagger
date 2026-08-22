@@ -127,6 +127,29 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	}
 }
 
+func TestLibraryDirectoryProbeAPI(t *testing.T) {
+	s := newTestServer(t)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "Album"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"one.mp3", filepath.Join("Album", "two.flac"), "cover.jpg"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := []byte(`{"path":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/probe", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"audioFiles":2`) || !containsJSON(response.Body.Bytes(), `"folders":1`) {
+		t.Fatalf("probe = %d %s", response.Code, response.Body.String())
+	}
+	badBody := []byte(`{"path":"` + filepath.Join(root, "missing") + `"}`)
+	bad := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/probe", &ut.Body{Body: bytes.NewReader(badBody), Len: len(badBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if bad.Code != 422 || !containsJSON(bad.Body.Bytes(), `"code":"directory_probe_failed"`) {
+		t.Fatalf("bad probe = %d %s", bad.Code, bad.Body.String())
+	}
+}
+
 func TestOptionalBearerTokenProtection(t *testing.T) {
 	s := newTestServer(t)
 	s.SetAuthToken("secret-token")

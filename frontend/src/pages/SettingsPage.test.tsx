@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from '@testing-library/react';
+import {render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import type {LibrarySummary, MatchCandidate, ProviderConfig} from '@/types';
@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   updateProvider: vi.fn(),
   testProvider: vi.fn(),
   getLibrary: vi.fn(),
+  probeLibrary: vi.fn(),
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
   getSystem: vi.fn(),
@@ -49,6 +50,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.listProviders.mockResolvedValue([provider]);
     api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
     api.getLibrary.mockResolvedValue(library);
+    api.probeLibrary.mockResolvedValue({path: '/home/ericwyn/Downloads/TestMusic', name: 'TestMusic', readable: true, writable: true, audioFiles: 24, folders: 3, formats: {mp3: 9, flac: 15, wav: 0}, warnings: []});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
     api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090'});
@@ -123,6 +125,22 @@ describe('SettingsPage provider diagnostics', () => {
     await waitFor(() => expect(api.rescanLibrary).toHaveBeenCalledWith('lib-test'));
     expect(api.waitForJob).toHaveBeenCalledWith('job-scan');
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('曲库扫描完成'));
+  });
+
+  it('probes a directory from the library settings panel', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', {name: /音乐目录/}));
+    await screen.findByRole('heading', {name: '音乐目录'});
+    await user.click(screen.getByRole('button', {name: '验证目录'}));
+    expect(screen.getByRole('dialog', {name: '目录探测'})).toBeInTheDocument();
+    const path = screen.getByRole('textbox', {name: '目录路径'});
+    await user.clear(path);
+    await user.type(path, '/home/ericwyn/Downloads/TestMusic');
+    await user.click(screen.getByRole('button', {name: '开始探测'}));
+    await waitFor(() => expect(api.probeLibrary).toHaveBeenCalledWith('/home/ericwyn/Downloads/TestMusic'));
+    expect(within(screen.getByRole('dialog', {name: '目录探测'})).getByText('24')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', {name: '目录探测'})).getByText(/探测结果仅用于确认目录状态/)).toBeInTheDocument();
   });
 
   it('shows the startup HTTP listener as read-only and exposes history retention choices', async () => {

@@ -4978,6 +4978,64 @@ button:disabled {
   font-size: 11px;
 }
 
+.directory-probe-result {
+  display: grid;
+  gap: 11px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.directory-probe-path {
+  display: grid;
+  gap: 3px;
+}
+
+.directory-probe-path strong {
+  font-family: var(--display);
+  font-size: 15px;
+}
+
+.directory-probe-path code,
+.directory-probe-result > small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.directory-probe-stats,
+.directory-probe-formats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.directory-probe-stats span,
+.directory-probe-formats span {
+  padding: 5px 7px;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.directory-probe-stats .is-good { color: var(--success); }
+.directory-probe-stats .is-bad { color: var(--danger); }
+
+.directory-probe-warnings {
+  display: grid;
+  gap: 4px;
+  color: var(--warning);
+  font-size: 11px;
+}
+
+.directory-probe-warnings p {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  line-height: 1.45;
+}
+
 .provider-test-head {
   display: flex;
   align-items: flex-start;

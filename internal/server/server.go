@@ -91,6 +91,7 @@ func (s *Server) routes() {
 	api.GET("/system", s.handleSystem)
 	api.PATCH("/system/settings", s.handleSystemSettings)
 	api.GET("/libraries", s.handleLibraries)
+	api.POST("/libraries/probe", s.handleLibraryProbe)
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
 	api.POST("/tracks/:id/scan", s.handleTrackScan)
@@ -209,6 +210,24 @@ func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext
 
 func (s *Server) handleLibraries(_ context.Context, c *app.RequestContext) {
 	s.writeData(c, []domain.LibrarySummary{s.library.Library()})
+}
+
+type libraryProbeRequest struct {
+	Path string `json:"path"`
+}
+
+func (s *Server) handleLibraryProbe(_ context.Context, c *app.RequestContext) {
+	var request libraryProbeRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "目录探测 JSON 无效")
+		return
+	}
+	probe, err := library.ProbeRoot(request.Path)
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "directory_probe_failed", err.Error())
+		return
+	}
+	s.writeData(c, probe)
 }
 
 func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {

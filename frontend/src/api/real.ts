@@ -1,5 +1,6 @@
 import type {
-  LibrarySummary,
+	LibrarySummary,
+	DirectoryProbe,
 	Job,
   MatchCandidate,
 	MatchItem,
@@ -177,6 +178,12 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       const libraries = await request<LibrarySummary[]>('/api/v1/libraries');
       if (!libraries[0]) throw new APIError(404, 'library_not_found', '尚未配置音乐曲库');
       return libraries[0];
+    },
+
+    probeLibrary(path: string): Promise<DirectoryProbe> {
+      return request<DirectoryProbe>('/api/v1/libraries/probe', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path}),
+      });
     },
 
 	async listTracks(): Promise<Track[]> {

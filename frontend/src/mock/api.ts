@@ -1,5 +1,5 @@
 import {candidatesFor, jobs, library, providerConfigs, revisions, seedTracks} from '@/mock/data';
-import type {CandidateSearchQuery, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch} from '@/types';
+import type {CandidateSearchQuery, DirectoryProbe, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch} from '@/types';
 
 let tracks = structuredClone(seedTracks);
 
@@ -10,6 +10,21 @@ function wait(ms = 90): Promise<void> {
 export async function getLibrary(): Promise<LibrarySummary> {
   await wait();
   return structuredClone(library);
+}
+
+export async function probeLibrary(path: string): Promise<DirectoryProbe> {
+  await wait();
+  const normalized = path.trim() || library.rootLabel;
+  return {
+    path: normalized,
+    name: normalized.split('/').filter(Boolean).pop() || 'TestMusic',
+    readable: true,
+    writable: true,
+    audioFiles: library.trackCount,
+    folders: library.folderCount,
+    formats: {mp3: seedTracks.filter((track) => track.format === 'mp3').length, flac: seedTracks.filter((track) => track.format === 'flac').length, wav: seedTracks.filter((track) => track.format === 'wav').length},
+    warnings: [],
+  };
 }
 
 export async function listTracks(): Promise<Track[]> {

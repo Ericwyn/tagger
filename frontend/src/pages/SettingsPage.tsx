@@ -22,9 +22,9 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, probeLibrary, rescanLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
-import {historyRetentionOptions, type CandidateSearchQuery, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
+import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
@@ -99,6 +99,11 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryScanning, setLibraryScanning] = useState(false);
   const [libraryError, setLibraryError] = useState('');
+  const [directoryProbeOpen, setDirectoryProbeOpen] = useState(false);
+  const [directoryPath, setDirectoryPath] = useState('');
+  const [directoryProbe, setDirectoryProbe] = useState<DirectoryProbe>();
+  const [directoryProbeError, setDirectoryProbeError] = useState('');
+  const [directoryProbing, setDirectoryProbing] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>();
   const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
 
@@ -126,6 +131,31 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
       setLibraryError(error instanceof Error ? error.message : '曲库信息读取失败');
     } finally {
       setLibraryLoading(false);
+    }
+  };
+
+  const openDirectoryProbe = () => {
+    setDirectoryPath(library?.rootLabel ?? '');
+    setDirectoryProbe(undefined);
+    setDirectoryProbeError('');
+    setDirectoryProbeOpen(true);
+  };
+
+  const executeDirectoryProbe = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!directoryPath.trim()) {
+      setDirectoryProbeError('请输入要探测的目录路径');
+      return;
+    }
+    setDirectoryProbing(true);
+    setDirectoryProbeError('');
+    try {
+      setDirectoryProbe(await probeLibrary(directoryPath));
+    } catch (error) {
+      setDirectoryProbe(undefined);
+      setDirectoryProbeError(error instanceof Error ? error.message : '目录探测失败');
+    } finally {
+      setDirectoryProbing(false);
     }
   };
 
@@ -174,12 +204,6 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     } finally {
       setLibraryScanning(false);
     }
-  };
-
-  const explainDirectoryConfiguration = () => {
-    onNotice(apiReadMode === 'real'
-      ? '当前单二进制通过 --music-dir 或 TAGGER_MUSIC_DIR 配置曲库；修改后请重启服务'
-      : 'Mock 原型暂不切换真实目录；连接 Go 后端后由 --music-dir 配置受控根目录');
   };
 
   const toggleProvider = async (provider: ProviderConfig) => {
@@ -377,6 +401,42 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     );
   })() : null;
 
+  const directoryProbePanel = directoryProbeOpen ? createPortal(
+    <div className="provider-test-overlay">
+      <button className="provider-test-backdrop" aria-label="关闭目录探测" onClick={() => setDirectoryProbeOpen(false)} />
+      <section className="provider-config-panel directory-probe-panel" role="dialog" aria-modal="true" aria-label="目录探测">
+        <div className="provider-test-head">
+          <div>
+            <span className="eyebrow">LIBRARY DIRECTORY PROBE</span>
+            <h3>验证音乐目录</h3>
+            <p>只读取目录权限和音频样本，不会切换当前曲库或修改文件。</p>
+          </div>
+          <button className="icon-button" title="关闭目录探测" onClick={() => setDirectoryProbeOpen(false)}><X size={17} /></button>
+        </div>
+        <form className="provider-config-form" onSubmit={(event) => void executeDirectoryProbe(event)}>
+          <label><span>目录路径</span><input aria-label="目录路径" value={directoryPath} onChange={(event) => setDirectoryPath(event.target.value)} placeholder="/home/user/Music" autoFocus /></label>
+          <button className="primary-button" type="submit" disabled={directoryProbing}>{directoryProbing ? <LoaderCircle size={14} className="spin" /> : <FolderCog size={14} />} {directoryProbing ? '探测中…' : '开始探测'}</button>
+          {directoryProbeError && <div className="provider-test-error"><CircleAlert size={14} /> {directoryProbeError}</div>}
+          {directoryProbe && (
+            <div className="directory-probe-result">
+              <div className="directory-probe-path"><strong>{directoryProbe.name}</strong><code>{directoryProbe.path}</code></div>
+              <div className="directory-probe-stats">
+                <span className={directoryProbe.readable ? 'is-good' : 'is-bad'}>{directoryProbe.readable ? '可读取' : '不可读取'}</span>
+                <span className={directoryProbe.writable ? 'is-good' : 'is-bad'}>{directoryProbe.writable ? '权限位可写' : '权限位只读'}</span>
+                <span><strong>{directoryProbe.audioFiles}</strong> 首音频</span>
+                <span><strong>{directoryProbe.folders}</strong> 个子目录</span>
+              </div>
+              <div className="directory-probe-formats">{Object.entries(directoryProbe.formats).map(([format, count]) => <span key={format}>{format.toUpperCase()} <strong>{count}</strong></span>)}</div>
+              {(directoryProbe.warnings?.length ?? 0) > 0 && <div className="directory-probe-warnings">{directoryProbe.warnings!.map((warning) => <p key={warning}><CircleAlert size={13} /> {warning}</p>)}</div>}
+              <small>探测结果仅用于确认目录状态；要切换曲库，请使用启动参数 <code>--music-dir</code> 或环境变量并重启。</small>
+            </div>
+          )}
+        </form>
+      </section>
+    </div>,
+    document.body,
+  ) : null;
+
   return (
     <div className="section-page settings-page">
       <header className="section-hero">
@@ -460,7 +520,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <>
               <div className="settings-content-head">
                 <div><h2>音乐目录</h2><p>后端只允许访问这里注册的根目录。</p></div>
-                <button className="primary-button" onClick={explainDirectoryConfiguration}><Plus size={15} /> 添加目录</button>
+                <button className="primary-button" onClick={openDirectoryProbe}><Plus size={15} /> 验证目录</button>
               </div>
               {libraryError && <div className="provider-test-error"><CircleAlert size={14} /> {libraryError}</div>}
               <article className="library-setting-card" aria-busy={libraryLoading}>
@@ -488,6 +548,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <FolderCog size={18} />
 				<div><strong>{apiReadMode === 'real' ? '当前使用真实曲库索引' : '当前使用 Mock 数据'}</strong><span>{apiReadMode === 'real' ? '目录权限、索引和扫描任务由 Go 后端管理。' : '连接 Go 后端后，这里会读取真实目录权限。'}</span></div>
               </div>
+              {directoryProbePanel}
             </>
           )}
 

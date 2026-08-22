@@ -87,6 +87,17 @@ export interface LibrarySummary {
   folders: FolderNode[];
 }
 
+export interface DirectoryProbe {
+  path: string;
+  name: string;
+  readable: boolean;
+  writable: boolean;
+  audioFiles: number;
+  folders: number;
+  formats: Record<string, number>;
+  warnings?: string[];
+}
+
 export interface CandidateField<T = string | number | string[]> {
   value: T;
   source: string;
