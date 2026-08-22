@@ -111,6 +111,32 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<Job>(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
 	},
 
+	cancelJob(jobId: string): Promise<Job> {
+	  return request<Job>(`/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'});
+	},
+
+	retryJob(jobId: string): Promise<Job> {
+	  return request<Job>(`/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, {method: 'POST'});
+	},
+
+	subscribeJobEvents(jobId: string, onJob: (job: Job) => void): () => void {
+	  if (typeof EventSource === 'undefined') return () => undefined;
+	  const source = new EventSource(`/api/v1/jobs/${encodeURIComponent(jobId)}/events`);
+	  const handler = (event: Event) => {
+		try {
+		  const job = JSON.parse((event as MessageEvent<string>).data) as Job;
+		  onJob(job);
+		} catch {
+		  // A malformed event is ignored; the regular GET refresh remains authoritative.
+		}
+	  };
+	  source.addEventListener('job', handler);
+	  return () => {
+		source.removeEventListener('job', handler);
+		source.close();
+	  };
+	},
+
 	createMatchJob(trackIds: string[], providerIds: string[] = []): Promise<Job> {
 	  return request<Job>('/api/v1/matches/tracks/batch', {
 		method: 'POST', headers: {'Content-Type': 'application/json'},

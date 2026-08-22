@@ -9,9 +9,10 @@ import {
   RefreshCw,
   ScanSearch,
   Sparkles,
+  X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {apiReadMode, listJobs} from '@/api';
+import {apiReadMode, cancelJob, listJobs, retryJob, subscribeJobEvents} from '@/api';
 import type {Job} from '@/types';
 
 interface JobsPageProps {
@@ -25,6 +26,7 @@ const stateMeta: Record<Job['state'], {label: string; icon: typeof Check}> = {
   succeeded: {label: '已完成', icon: Check},
   partial: {label: '部分完成', icon: CircleAlert},
 	failed: {label: '失败', icon: CircleAlert},
+	cancelled: {label: '已取消', icon: CircleAlert},
 };
 
 const kindIcon = {
@@ -36,11 +38,16 @@ const kindIcon = {
 export function JobsPage({onOpenReview}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
+	const [actionError, setActionError] = useState('');
 
 	const refresh = () => listJobs().then((next) => {
 	  setJobs(next);
 	  setSelectedId((current) => next.some((job) => job.id === current) ? current : next[0]?.id);
-	});
+	  });
+
+	const updateJob = (next: Job) => {
+	  setJobs((current) => current.map((job) => job.id === next.id ? next : job));
+	};
 
   useEffect(() => {
 	void refresh();
@@ -48,6 +55,11 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 	const timer = window.setInterval(() => void refresh(), 1000);
 	return () => window.clearInterval(timer);
   }, []);
+
+	useEffect(() => {
+	  if (apiReadMode === 'mock' || !selectedId) return;
+	  return subscribeJobEvents(selectedId, updateJob);
+	}, [selectedId]);
 
   const active = jobs.find((job) => job.id === selectedId);
 
@@ -127,9 +139,23 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
                 <Sparkles size={15} /> 打开审核页
               </button>
             )}
-            {active.state === 'partial' && (
-              <button className="secondary-button full-button"><RefreshCw size={15} /> 重试失败项</button>
-            )}
+			{(active.state === 'running' || active.state === 'waiting') && apiReadMode === 'real' && (
+			  <button className="danger-quiet full-button" onClick={() => {
+				setActionError('');
+				void cancelJob(active.id).then((next) => { if (next) updateJob(next); }).catch((error) => setActionError(error instanceof Error ? error.message : '取消任务失败'));
+			  }}>
+				<X size={15} /> 取消任务
+			  </button>
+			)}
+			{(active.state === 'partial' || active.state === 'failed' || active.state === 'cancelled') && apiReadMode === 'real' && (
+			  <button className="secondary-button full-button" onClick={() => {
+				setActionError('');
+				void retryJob(active.id).then((next) => { if (next) updateJob(next); }).catch((error) => setActionError(error instanceof Error ? error.message : '重试任务失败'));
+			  }}>
+				<RefreshCw size={15} /> 重试失败项
+			  </button>
+			)}
+			{actionError && <p className="restore-error">{actionError}</p>}
           </aside>
         )}
       </div>

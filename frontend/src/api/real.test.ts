@@ -58,6 +58,47 @@ describe('real API client', () => {
 	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/jobs/job%2Fa');
   });
 
+  it('cancels and retries persistent jobs through explicit endpoints', async () => {
+	const cancelled = {id: 'job-1', kind: 'scan', state: 'cancelled', title: 'Scan', detail: 'Cancelled', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
+	const retried = {...cancelled, state: 'waiting', detail: 'Waiting for retry'};
+	const fetcher = vi.fn()
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: cancelled}), {status: 200}))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: retried}), {status: 202}));
+	const api = createRealAPI(fetcher);
+	await expect(api.cancelJob('job/a')).resolves.toEqual(cancelled);
+	await expect(api.retryJob('job/a')).resolves.toEqual(retried);
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/jobs/job%2Fa/cancel');
+	expect(fetcher.mock.calls[0][1]).toEqual(expect.objectContaining({method: 'POST'}));
+	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/jobs/job%2Fa/retry');
+  });
+
+  it('subscribes to job SSE snapshots and closes on cleanup', () => {
+	class FakeEventSource {
+	  static last: FakeEventSource | undefined;
+	  readonly listeners = new Map<string, (event: Event) => void>();
+	  readonly close = vi.fn();
+	  constructor(readonly url: string) { FakeEventSource.last = this; }
+	  addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+		if (typeof listener === 'function') this.listeners.set(type, listener);
+	  }
+	  removeEventListener(type: string) { this.listeners.delete(type); }
+	  emit(type: string, data: string) { this.listeners.get(type)?.({data} as MessageEvent<string>); }
+	}
+	vi.stubGlobal('EventSource', FakeEventSource);
+	try {
+	  const api = createRealAPI(vi.fn());
+	  const onJob = vi.fn();
+	  const unsubscribe = api.subscribeJobEvents('job/a', onJob);
+	  expect(FakeEventSource.last?.url).toBe('/api/v1/jobs/job%2Fa/events');
+	  FakeEventSource.last?.emit('job', JSON.stringify({id: 'job-1', state: 'running'}));
+	  expect(onJob).toHaveBeenCalledWith(expect.objectContaining({id: 'job-1', state: 'running'}));
+	  unsubscribe();
+	  expect(FakeEventSource.last?.close).toHaveBeenCalledOnce();
+	} finally {
+	  vi.unstubAllGlobals();
+	}
+  });
+
   it('creates a write job from reviewed candidate selections', async () => {
 	const job = {id: 'job-write', kind: 'write', state: 'waiting', title: 'Write', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
 	const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));

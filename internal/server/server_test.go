@@ -168,6 +168,51 @@ func TestRescanQueuesPersistentJobAndExposesStatus(t *testing.T) {
 	}
 }
 
+func TestJobCancelAPIImmediatelyCancelsWaitingJob(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	created, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobScan, LibraryID: s.library.Library().ID, Title: "Cancelable", Detail: "waiting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+created.ID+"/cancel", nil)
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"state":"cancelled"`) {
+		t.Fatalf("cancel = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestJobRetryAPIOnlyResubmitsFailedMatchItems(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	payload := `{"trackIds":["trk-failed","trk-ok"],"providerIds":[],"limit":5}`
+	created, err := manager.Enqueue(context.Background(), domain.Job{ID: "job-retry-match", Kind: domain.JobMatch, LibraryID: s.library.Library().ID, Title: "Match", Detail: "partial", State: domain.JobPartial, Payload: payload, Total: 2, Processed: 2, Succeeded: 1, Failed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: created.ID, TrackID: "trk-failed", State: "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: created.ID, TrackID: "trk-ok", State: "review"}); err != nil {
+		t.Fatal(err)
+	}
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+created.ID+"/retry", nil)
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"state":"waiting"`) {
+		t.Fatalf("retry = %d %s", response.Code, response.Body.String())
+	}
+	retried, err := s.store.Job(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var filtered struct {
+		TrackIDs []string `json:"trackIds"`
+	}
+	if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.TrackIDs) != 1 || filtered.TrackIDs[0] != "trk-failed" {
+		t.Fatalf("retry payload = %q", retried.Payload)
+	}
+}
+
 func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {
 	s := newTestServer(t)
 	allTracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)

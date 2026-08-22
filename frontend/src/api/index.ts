@@ -101,6 +101,18 @@ export function listJobs(): Promise<Job[]> {
 	return apiReadMode === 'mock' ? mock.listJobs() : real.listJobs();
 }
 
+export function cancelJob(jobId: string): Promise<Job | null> {
+  return apiReadMode === 'mock' ? Promise.resolve(null) : real.cancelJob(jobId);
+}
+
+export function retryJob(jobId: string): Promise<Job | null> {
+  return apiReadMode === 'mock' ? Promise.resolve(null) : real.retryJob(jobId);
+}
+
+export function subscribeJobEvents(jobId: string, onJob: (job: Job) => void): () => void {
+  return apiReadMode === 'mock' ? () => undefined : real.subscribeJobEvents(jobId, onJob);
+}
+
 export function listRevisions(): Promise<Revision[]> {
   return apiReadMode === 'mock' ? mock.listRevisions() : real.listRevisions();
 }

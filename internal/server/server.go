@@ -11,10 +11,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	hserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/cloudwego/hertz/pkg/protocol/sse"
 	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
@@ -88,6 +90,9 @@ func (s *Server) routes() {
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/jobs", s.handleJobs)
 	api.GET("/jobs/:id", s.handleJob)
+	api.POST("/jobs/:id/cancel", s.handleCancelJob)
+	api.POST("/jobs/:id/retry", s.handleRetryJob)
+	api.GET("/jobs/:id/events", s.handleJobEvents)
 	api.GET("/jobs/:id/matches", s.handleJobMatches)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
@@ -198,6 +203,181 @@ func (s *Server) handleJob(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, toJobResponse(job))
+}
+
+func (s *Server) handleCancelJob(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	job, err := s.jobs.Cancel(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	if errors.Is(err, jobs.ErrJobNotCancellable) {
+		s.writeError(c, consts.StatusConflict, "job_not_cancellable", "当前任务状态不允许取消")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_cancel_failed", err.Error())
+		return
+	}
+	s.writeData(c, toJobResponse(job))
+}
+
+func (s *Server) handleRetryJob(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil || s.store == nil {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	job, err := s.jobs.Get(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	payload, err := s.retryPayload(ctx, job)
+	if errors.Is(err, jobs.ErrJobNotRetryable) {
+		s.writeError(c, consts.StatusConflict, "job_not_retryable", "当前任务没有可重试的失败项")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_retry_failed", err.Error())
+		return
+	}
+	retried, err := s.jobs.Retry(ctx, job.ID, payload)
+	if errors.Is(err, jobs.ErrJobNotRetryable) {
+		s.writeError(c, consts.StatusConflict, "job_not_retryable", "当前任务状态不允许重试")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_retry_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(retried)})
+}
+
+func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, error) {
+	switch job.Kind {
+	case domain.JobScan:
+		return "", nil
+	case domain.JobMatch:
+		var payload matchBatchRequest
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return "", fmt.Errorf("decode match retry payload: %w", err)
+		}
+		items, err := s.store.ListMatchItems(ctx, job.ID)
+		if err != nil {
+			return "", err
+		}
+		failed := make(map[string]struct{}, len(items))
+		for _, item := range items {
+			if item.State == "failed" || item.State == "no_match" {
+				failed[item.TrackID] = struct{}{}
+			}
+		}
+		trackIDs := make([]string, 0, len(payload.TrackIDs))
+		for _, trackID := range payload.TrackIDs {
+			if _, ok := failed[trackID]; ok {
+				trackIDs = append(trackIDs, trackID)
+			}
+		}
+		if len(trackIDs) == 0 {
+			return "", jobs.ErrJobNotRetryable
+		}
+		payload.TrackIDs = trackIDs
+		encoded, err := json.Marshal(payload)
+		return string(encoded), err
+	case domain.JobWrite:
+		var payload struct {
+			MatchJobID string           `json:"matchJobId"`
+			Items      []writeSelection `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return "", fmt.Errorf("decode write retry payload: %w", err)
+		}
+		failedItems, err := s.store.ListMatchItems(ctx, payload.MatchJobID)
+		if err != nil {
+			return "", err
+		}
+		failed := make(map[string]struct{}, len(failedItems))
+		for _, item := range failedItems {
+			if item.State == "write_failed" {
+				failed[item.TrackID] = struct{}{}
+			}
+		}
+		items := make([]writeSelection, 0, len(payload.Items))
+		for _, item := range payload.Items {
+			if _, ok := failed[item.TrackID]; ok {
+				items = append(items, item)
+			}
+		}
+		if len(items) == 0 {
+			return "", jobs.ErrJobNotRetryable
+		}
+		payload.Items = items
+		encoded, err := json.Marshal(payload)
+		return string(encoded), err
+	default:
+		return "", jobs.ErrJobNotRetryable
+	}
+}
+
+func (s *Server) handleJobEvents(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	}
+	jobID := c.Param("id")
+	if _, err := s.jobs.Get(ctx, jobID); errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "任务不存在")
+		return
+	} else if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	events, unsubscribe := s.jobs.Subscribe(jobID)
+	defer unsubscribe()
+	writer := sse.NewWriter(c)
+	defer writer.Close()
+	current, err := s.jobs.Get(ctx, jobID)
+	if err != nil {
+		return
+	}
+	if err := writeJobEvent(writer, jobs.Event{ID: "snapshot", Job: current}); err != nil {
+		return
+	}
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			if err := writeJobEvent(writer, event); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if err := writer.WriteKeepAlive(); err != nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func writeJobEvent(writer *sse.Writer, event jobs.Event) error {
+	payload, err := json.Marshal(toJobResponse(event.Job))
+	if err != nil {
+		return err
+	}
+	return writer.WriteEvent(event.ID, "job", payload)
 }
 
 type matchBatchRequest struct {

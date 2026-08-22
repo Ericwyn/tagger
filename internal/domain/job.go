@@ -16,6 +16,7 @@ const (
 	JobSucceeded JobState = "succeeded"
 	JobPartial   JobState = "partial"
 	JobFailed    JobState = "failed"
+	JobCancelled JobState = "cancelled"
 )
 
 type Job struct {

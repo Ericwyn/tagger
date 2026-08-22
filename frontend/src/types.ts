@@ -92,7 +92,7 @@ export interface MatchCandidate {
   matchReasons: string[];
 }
 
-export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial' | 'failed';
+export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 
 export interface Job {
   id: string;

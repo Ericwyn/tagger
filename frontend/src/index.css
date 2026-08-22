@@ -2946,6 +2946,8 @@ button:disabled {
 .job-state.state-partial { color: var(--warning); }
 .job-state.state-succeeded { color: var(--success); }
 .job-state.state-running { color: var(--accent); }
+.job-state.state-failed { color: var(--danger); }
+.job-state.state-cancelled { color: var(--muted); }
 
 .job-detail {
   min-height: 0;
