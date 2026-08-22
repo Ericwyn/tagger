@@ -33,10 +33,21 @@ describe('real API client', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {historyRetention: 3}}), {status: 200}));
     const api = createRealAPI(fetcher);
 
-    await expect(api.updateSystemSettings(3)).resolves.toEqual({historyRetention: 3});
+    await expect(api.updateSystemSettings({historyRetention: 3})).resolves.toEqual({historyRetention: 3});
     expect(fetcher).toHaveBeenCalledWith('/api/v1/system/settings', expect.objectContaining({
       method: 'PATCH',
       body: JSON.stringify({historyRetention: 3}),
+    }));
+  });
+
+  it('updates the server-side write-history switch', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {historyRetention: 20, writeHistory: false}}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.updateSystemSettings({writeHistory: false})).resolves.toEqual({historyRetention: 20, writeHistory: false});
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/system/settings', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({writeHistory: false}),
     }));
   });
 

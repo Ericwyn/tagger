@@ -33,18 +33,20 @@ import (
 )
 
 type Server struct {
-	h               *hserver.Hertz
-	library         *library.Service
-	writer          *filewrite.Writer
-	providers       *providers.Registry
-	store           *store.Store
-	jobs            *jobs.Manager
-	frontend        fs.FS
-	listen          string
-	version         string
-	tagEngineInfo   string
-	authToken       string
-	downloadArtwork func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
+	h                *hserver.Hertz
+	library          *library.Service
+	writer           *filewrite.Writer
+	providers        *providers.Registry
+	store            *store.Store
+	jobs             *jobs.Manager
+	frontend         fs.FS
+	listen           string
+	version          string
+	tagEngineInfo    string
+	authToken        string
+	downloadArtwork  func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
+	artworkCache     *artwork.Cache
+	stopArtworkCache context.CancelFunc
 }
 
 const authCookieName = "tagger_auth_token"
@@ -74,7 +76,37 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 
 func (s *Server) Spin() { s.h.Spin() }
 
-func (s *Server) Shutdown(ctx context.Context) error { return s.h.Shutdown(ctx) }
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.stopArtworkCache != nil {
+		s.stopArtworkCache()
+	}
+	return s.h.Shutdown(ctx)
+}
+
+// SetArtworkCache lets the command package share one cache with background
+// write workers. Passing nil disables caching for that server instance.
+func (s *Server) SetArtworkCache(cache *artwork.Cache) {
+	if s.stopArtworkCache != nil {
+		s.stopArtworkCache()
+		s.stopArtworkCache = nil
+	}
+	s.artworkCache = cache
+	if cache == nil {
+		return
+	}
+	cacheContext, cancel := context.WithCancel(context.Background())
+	s.stopArtworkCache = cancel
+	cache.Start(cacheContext, artwork.DefaultCacheTTL/2)
+}
+
+func (s *Server) fetchArtwork(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+	if s.artworkCache == nil {
+		return s.downloadArtwork(ctx, reference)
+	}
+	return s.artworkCache.Get(ctx, reference.URL, func() (artwork.Asset, error) {
+		return s.downloadArtwork(ctx, reference)
+	})
+}
 
 func (s *Server) SetJobManager(manager *jobs.Manager) { s.jobs = manager }
 
@@ -179,19 +211,23 @@ func (s *Server) handleHealth(_ context.Context, c *app.RequestContext) {
 
 func (s *Server) handleSystem(ctx context.Context, c *app.RequestContext) {
 	historyRetention := 20
+	writeHistory := true
 	if s.store != nil {
 		historyRetention = s.store.HistoryRetention(ctx)
+		writeHistory = s.store.WriteHistory(ctx)
 	}
 	s.writeData(c, map[string]any{
 		"version":          s.version,
 		"tag_engine":       s.tagEngineInfo,
 		"listen":           s.listen,
 		"historyRetention": historyRetention,
+		"writeHistory":     writeHistory,
 	})
 }
 
 type systemSettingsRequest struct {
-	HistoryRetention *int `json:"historyRetention"`
+	HistoryRetention *int  `json:"historyRetention"`
+	WriteHistory     *bool `json:"writeHistory"`
 }
 
 func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext) {
@@ -200,15 +236,27 @@ func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext
 		return
 	}
 	var request systemSettingsRequest
-	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || request.HistoryRetention == nil {
-		s.writeError(c, consts.StatusBadRequest, "invalid_request", "需要提供 historyRetention")
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || (request.HistoryRetention == nil && request.WriteHistory == nil) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "需要提供 historyRetention 或 writeHistory")
 		return
 	}
-	if err := s.store.SetHistoryRetention(ctx, *request.HistoryRetention); err != nil {
-		s.writeError(c, consts.StatusBadRequest, "invalid_history_retention", err.Error())
-		return
+	if request.HistoryRetention != nil {
+		if err := s.store.SetHistoryRetention(ctx, *request.HistoryRetention); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_history_retention", err.Error())
+			return
+		}
 	}
-	s.writeData(c, map[string]any{"historyRetention": s.store.HistoryRetention(ctx)})
+	if request.WriteHistory != nil {
+		if err := s.store.SetWriteHistory(ctx, *request.WriteHistory); err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "settings_failed", err.Error())
+			return
+		}
+	}
+	s.writeData(c, map[string]any{"historyRetention": s.store.HistoryRetention(ctx), "writeHistory": s.store.WriteHistory(ctx)})
+}
+
+func (s *Server) historyEnabled(ctx context.Context) bool {
+	return s.store != nil && s.store.WriteHistory(ctx)
 }
 
 func (s *Server) handleLibraries(ctx context.Context, c *app.RequestContext) {
@@ -1291,7 +1339,7 @@ func (s *Server) handleLyricsSidecarMutation(ctx context.Context, c *app.Request
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "sidecar 已写入，但曲目索引不可用")
 		return
 	}
-	if result.Changed && s.store != nil {
+	if result.Changed && s.historyEnabled(ctx) {
 		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
 			LibraryID: s.library.Library().ID, TrackID: updated.ID, TrackTitle: updated.Title, FileName: updated.FileName,
 			Action: sidecarAction(sidecarOperation(result)), Source: "手工编辑", BaseRevision: result.BaseRevision,
@@ -1557,7 +1605,7 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但曲目索引不可用")
 		return
 	}
-	if s.store != nil {
+	if s.historyEnabled(ctx) {
 		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
 			LibraryID:      s.library.Library().ID,
 			TrackID:        track.ID,
@@ -1811,7 +1859,7 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已恢复，但曲目索引不可用")
 		return
 	}
-	if result.Changed {
+	if result.Changed && s.historyEnabled(ctx) {
 		action := "恢复到修订前"
 		if request.Target == "after" {
 			action = "恢复到修订后"
@@ -2059,7 +2107,7 @@ func (s *Server) finishArtworkMutation(ctx context.Context, c *app.RequestContex
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "封面已写入，但曲目索引不可用")
 		return
 	}
-	if result.Changed && s.store != nil {
+	if result.Changed && s.historyEnabled(ctx) {
 		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
 			LibraryID: s.library.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
 			Action: action, Source: source, BaseRevision: result.BaseRevision, ResultRevision: track.Revision,
@@ -2127,7 +2175,7 @@ func (s *Server) handleMatchArtwork(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusNotFound, "provider_not_found", "数据来源不存在")
 		return
 	}
-	asset, err := s.downloadArtwork(ctx, reference)
+	asset, err := s.fetchArtwork(ctx, reference)
 	if errors.Is(err, providers.ErrUnsafeArtworkURL) || errors.Is(err, artwork.ErrInvalid) {
 		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_provider_artwork", err.Error())
 		return
@@ -2178,7 +2226,7 @@ func (s *Server) handleCandidateArtwork(ctx context.Context, c *app.RequestConte
 		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	asset, err := s.downloadArtwork(ctx, reference)
+	asset, err := s.fetchArtwork(ctx, reference)
 	if errors.Is(err, providers.ErrUnsafeArtworkURL) || errors.Is(err, artwork.ErrInvalid) {
 		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_provider_artwork", err.Error())
 		return
@@ -2384,7 +2432,7 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 			logs = append(logs, providerTestLog{Level: "warning", Stage: "artwork", Message: "候选封面引用不存在", Details: map[string]any{"candidateId": candidate.ID}})
 			continue
 		}
-		asset, artworkErr := s.downloadArtwork(ctx, reference)
+		asset, artworkErr := s.fetchArtwork(ctx, reference)
 		if artworkErr != nil {
 			logs = append(logs, providerTestLog{Level: "error", Stage: "artwork", Message: "封面探测失败", Details: map[string]any{"candidateId": candidate.ID, "error": artworkErr.Error()}})
 			continue

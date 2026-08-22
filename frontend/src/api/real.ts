@@ -62,6 +62,7 @@ export interface SystemInfo {
   tag_engine: string;
   listen?: string;
   historyRetention?: number;
+  writeHistory?: boolean;
 }
 
 interface FieldOperation<T> {
@@ -180,11 +181,11 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return request<SystemInfo>('/api/v1/system');
     },
 
-    updateSystemSettings(historyRetention: number): Promise<{historyRetention: number}> {
-      return request<{historyRetention: number}>('/api/v1/system/settings', {
+    updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
+      return request<{historyRetention: number; writeHistory: boolean}>('/api/v1/system/settings', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({historyRetention}),
+        body: JSON.stringify(settings),
       });
     },
 

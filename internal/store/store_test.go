@@ -218,6 +218,34 @@ func TestHistoryRetentionPrunesPerTrackAndPersists(t *testing.T) {
 	}
 }
 
+func TestWriteHistorySettingDefaultsOnAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history-toggle.db")
+	first, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.WriteHistory(context.Background()) {
+		t.Fatal("write history should default to enabled")
+	}
+	if err := first.SetWriteHistory(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if first.WriteHistory(context.Background()) {
+		t.Fatal("write history should be disabled immediately")
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if second.WriteHistory(context.Background()) {
+		t.Fatal("write history setting did not persist across reopen")
+	}
+}
+
 func TestJobsClaimInOrderAndRecoverAfterRestart(t *testing.T) {
 	dataStore := openTestStore(t)
 	first, err := dataStore.CreateJob(context.Background(), domain.Job{Kind: domain.JobScan, Title: "first"})

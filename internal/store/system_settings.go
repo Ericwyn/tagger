@@ -11,8 +11,10 @@ import (
 
 const (
 	historyRetentionSetting = "history_retention"
+	writeHistorySetting     = "write_history"
 	libraryRootSetting      = "library_root"
 	defaultHistoryRetention = 20
+	defaultWriteHistory     = true
 )
 
 func (s *Store) LibraryRoot(ctx context.Context) (string, bool, error) {
@@ -98,6 +100,47 @@ func (s *Store) HistoryRetention(_ context.Context) int {
 		return defaultHistoryRetention
 	}
 	return value
+}
+
+func (s *Store) loadWriteHistory(ctx context.Context) (bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key=?`, writeHistorySetting).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return defaultWriteHistory, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load write history: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true, nil
+	case "0", "false", "no", "off":
+		return false, nil
+	default:
+		return defaultWriteHistory, nil
+	}
+}
+
+// WriteHistory reports whether successful file mutations should create audit
+// revisions. It is cached so write paths do not query SQLite for every file.
+func (s *Store) WriteHistory(_ context.Context) bool {
+	return s.writeHistory.Load()
+}
+
+// SetWriteHistory persists the audit switch and updates the in-memory write
+// path immediately. Existing revisions are intentionally retained when the
+// switch is turned off; disabling future history must not destroy recovery
+// data the user already created.
+func (s *Store) SetWriteHistory(ctx context.Context, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO system_settings(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+		writeHistorySetting, strconv.FormatBool(enabled), formatTime(s.now().UTC()))
+	if err != nil {
+		return fmt.Errorf("save write history: %w", err)
+	}
+	s.writeHistory.Store(enabled)
+	return nil
 }
 
 // SetHistoryRetention persists the limit and immediately removes older

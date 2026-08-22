@@ -59,8 +59,8 @@ describe('SettingsPage provider diagnostics', () => {
     api.switchLibrary.mockResolvedValue({id: 'job-switch', state: 'waiting', kind: 'scan', title: '切换曲库', detail: '等待', processed: 0, total: 24, succeeded: 0, failed: 0, startedAt: '刚刚'});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
-    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090'});
-    api.updateSystemSettings.mockResolvedValue({historyRetention: 20});
+    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true});
+    api.updateSystemSettings.mockResolvedValue({historyRetention: 20, writeHistory: true});
     api.testProvider.mockResolvedValue({
       provider,
       result: {status: 'ok', count: 1, latencyMs: 42},
@@ -140,7 +140,9 @@ describe('SettingsPage provider diagnostics', () => {
     const onNotice = vi.fn();
     render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
     await user.click(await screen.findByRole('button', {name: '配置'}));
-    await user.click(screen.getByRole('button', {name: '恢复默认配置'}));
+    const resetButton = screen.getByRole('button', {name: '恢复默认配置'});
+    expect(resetButton).toHaveClass('provider-config-reset-button');
+    await user.click(resetButton);
     expect(screen.getByText('会清除自定义地址和鉴权')).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '确认恢复'}));
     await waitFor(() => expect(api.resetProvider).toHaveBeenCalledWith(provider));
@@ -206,6 +208,11 @@ describe('SettingsPage provider diagnostics', () => {
     expect([...retention.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['最近 3 次', '最近 5 次', '最近 10 次', '最近 20 次']);
     await user.selectOptions(retention, '5');
     expect(localStorage.getItem('tagger-history-retention')).toBe('5');
-    await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith({historyRetention: 5}));
+    const historySwitch = screen.getByRole('switch', {name: '启用写前历史'});
+    expect(historySwitch).toBeChecked();
+    await user.click(historySwitch);
+    await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith({writeHistory: false}));
+    expect(historySwitch).not.toBeChecked();
   });
 });

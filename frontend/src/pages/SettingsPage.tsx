@@ -117,6 +117,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [directorySwitching, setDirectorySwitching] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>();
   const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
+  const [writeHistory, setWriteHistory] = useState(true);
 
   useEffect(() => {
     listProviders().then(setProviders);
@@ -227,6 +228,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
         setHistoryRetention(info.historyRetention as HistoryRetention);
         localStorage.setItem(historyRetentionKey, String(info.historyRetention));
       }
+      if (typeof info.writeHistory === 'boolean') setWriteHistory(info.writeHistory);
     }).catch(() => setSystemInfo(undefined));
   }, [tab]);
 
@@ -234,10 +236,22 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     setHistoryRetention(value);
     localStorage.setItem(historyRetentionKey, String(value));
     try {
-      await updateSystemSettings(value);
+      await updateSystemSettings({historyRetention: value});
       onNotice(`历史保留策略已更新：每首曲目最近 ${value} 次修订`);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : '历史保留策略保存失败');
+    }
+  };
+
+  const updateWriteHistory = async (value: boolean) => {
+    const previous = writeHistory;
+    setWriteHistory(value);
+    try {
+      await updateSystemSettings({writeHistory: value});
+      onNotice(value ? '已启用写前历史' : '已关闭写前历史；后续写入不会创建新修订');
+    } catch (error) {
+      setWriteHistory(previous);
+      onNotice(error instanceof Error ? error.message : '写前历史设置保存失败');
     }
   };
 
@@ -467,11 +481,11 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             {configError && <div className="provider-test-error"><CircleAlert size={14} /> {configError}</div>}
             <div className="provider-config-actions">
               {!configResetPending ? (
-                <button className="danger-quiet" type="button" onClick={() => setConfigResetPending(true)} disabled={configSaving || configResetting}>恢复默认配置</button>
+                <button className="provider-config-reset-button" type="button" onClick={() => setConfigResetPending(true)} disabled={configSaving || configResetting}>恢复默认配置</button>
               ) : (
                 <span className="provider-config-reset-confirm">
                   <small>会清除自定义地址和鉴权</small>
-                  <button className="danger-quiet" type="button" onClick={() => void resetProviderConfig()} disabled={configSaving || configResetting}>{configResetting ? '恢复中…' : '确认恢复'}</button>
+                  <button className="provider-config-reset-button" type="button" onClick={() => void resetProviderConfig()} disabled={configSaving || configResetting}>{configResetting ? '恢复中…' : '确认恢复'}</button>
                   <button className="secondary-button" type="button" onClick={() => setConfigResetPending(false)} disabled={configResetting}>保留当前</button>
                 </span>
               )}
@@ -690,7 +704,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <div className="system-icon"><ShieldCheck size={19} /></div>
                   <div><strong>安全写入</strong><p>临时副本、重读校验、原子替换和标签历史。</p></div>
                   <label className="switch-control">
-                    <input type="checkbox" defaultChecked role="switch" aria-label="启用写前历史" />
+                    <input type="checkbox" checked={writeHistory} role="switch" aria-label="启用写前历史" onChange={(event) => void updateWriteHistory(event.target.checked)} />
                     <span className="switch-track" aria-hidden="true"><span /></span>
                     <span>启用写前历史</span>
                   </label>

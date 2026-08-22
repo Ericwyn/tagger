@@ -924,6 +924,13 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	if settings.Code != 200 || !containsJSON(settings.Body.Bytes(), `"historyRetention":3`) {
 		t.Fatalf("system settings = %d %s", settings.Code, settings.Body.String())
 	}
+	historyOffBody := []byte(`{"writeHistory":false}`)
+	historyOff := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/system/settings",
+		&ut.Body{Body: bytes.NewReader(historyOffBody), Len: len(historyOffBody)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if historyOff.Code != 200 || !containsJSON(historyOff.Body.Bytes(), `"writeHistory":false`) || s.store.WriteHistory(context.Background()) {
+		t.Fatalf("write history setting = %d %s enabled=%v", historyOff.Code, historyOff.Body.String(), s.store.WriteHistory(context.Background()))
+	}
 	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/"+created.ID, nil)
 	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"resultRevision":"after"`) {
 		t.Fatalf("revision detail = %d %s", detail.Code, detail.Body.String())

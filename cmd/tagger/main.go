@@ -157,6 +157,20 @@ func main() {
 		logger.Error("load provider persistence", "error", err)
 		os.Exit(1)
 	}
+	var artworkCache *artwork.Cache
+	if cache, cacheErr := artwork.NewCache(filepath.Join(filepath.Dir(dataStore.Path()), "artwork-cache"), artwork.DefaultCacheTTL); cacheErr != nil {
+		logger.Warn("initialize artwork cache; remote images will not be cached", "error", cacheErr)
+	} else {
+		artworkCache = cache
+	}
+	cachedArtworkDownloader := defaultArtworkDownloader
+	if artworkCache != nil {
+		cachedArtworkDownloader = func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+			return artworkCache.Get(ctx, reference.URL, func() (artwork.Asset, error) {
+				return defaultArtworkDownloader(ctx, reference)
+			})
+		}
+	}
 	jobManager := jobs.New(dataStore)
 	jobManager.Register(domain.JobScan, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
 		var payload struct {
@@ -282,7 +296,7 @@ func main() {
 			}
 			var artworkTarget *artwork.Asset
 			if err == nil && item.Artwork {
-				artworkTarget, err = prepareCandidateArtwork(ctx, providerRegistry, candidate, defaultArtworkDownloader)
+				artworkTarget, err = prepareCandidateArtwork(ctx, providerRegistry, candidate, cachedArtworkDownloader)
 				if err == nil && item.ArtworkMaxSize > 0 {
 					resized, resizeErr := artwork.ResizeSquare(*artworkTarget, item.ArtworkMaxSize)
 					if resizeErr != nil {
@@ -381,6 +395,9 @@ func main() {
 	defer jobManager.Close()
 
 	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, dataStore, web.Dist(), version.Version, engine.Version())
+	if artworkCache != nil {
+		srv.SetArtworkCache(artworkCache)
+	}
 	srv.SetAuthToken(cfg.AuthToken)
 	srv.SetJobManager(jobManager)
 	logger.Info("tagger started",
