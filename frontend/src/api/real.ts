@@ -11,7 +11,9 @@ import type {
   Track,
   TrackPatch,
 	WriteSelection,
-  UpdateProvenance,
+	BatchEditItem,
+	BatchEditOperation,
+	UpdateProvenance,
 } from '@/types';
 
 interface DataEnvelope<T> {
@@ -151,6 +153,13 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job> {
 	  return request<Job>(`/api/v1/matches/jobs/${encodeURIComponent(matchJobId)}/write`, {
 		method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({items}),
+	  });
+	},
+
+	createBatchEditJob(items: BatchEditItem[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job> {
+	  return request<Job>('/api/v1/tracks/batch-edit', {
+		method: 'POST', headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({items, operations, sequenceTracks}),
 	  });
 	},
 

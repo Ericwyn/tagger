@@ -9,6 +9,7 @@ import {
   RefreshCw,
   ScanSearch,
   Sparkles,
+  Tags,
   X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
@@ -33,6 +34,7 @@ const kindIcon = {
   scan: ScanSearch,
   match: Sparkles,
   write: FilePenLine,
+  batch_edit: Tags,
 };
 
 export function JobsPage({onOpenReview}: JobsPageProps) {
@@ -122,7 +124,7 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 			  <div><span style={{width: `${active.total ? (active.processed / active.total) * 100 : 0}%`}} /></div>
             </div>
             <dl>
-              <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : '安全写入'}</dd></div>
+              <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : active.kind === 'write' ? '安全写入' : '批量编辑'}</dd></div>
               <div><dt>当前状态</dt><dd>{stateMeta[active.state].label}</dd></div>
               <div><dt>已处理</dt><dd>{active.processed} / {active.total}</dd></div>
               <div><dt>成功</dt><dd>{active.succeeded}</dd></div>

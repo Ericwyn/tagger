@@ -96,7 +96,7 @@ export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial
 
 export interface Job {
   id: string;
-  kind: 'scan' | 'match' | 'write';
+  kind: 'scan' | 'match' | 'write' | 'batch_edit';
   title: string;
   detail: string;
   state: JobState;
@@ -125,6 +125,19 @@ export interface WriteSelection {
   baseRevision: string;
   fields: string[];
   artwork?: boolean;
+}
+
+export type BatchEditMode = 'set' | 'append' | 'delete';
+
+export interface BatchEditOperation {
+  field: 'album' | 'albumArtists' | 'year' | 'genres';
+  mode: BatchEditMode;
+  value: string;
+}
+
+export interface BatchEditItem {
+  trackId: string;
+  baseRevision: string;
 }
 
 export interface Revision {

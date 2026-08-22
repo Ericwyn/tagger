@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ericwyn/tagger/internal/artwork"
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/providers"
 )
 
@@ -65,3 +66,25 @@ func TestPrepareCandidateArtworkUsesRegistryReference(t *testing.T) {
 		t.Fatalf("missing reference error = %v", err)
 	}
 }
+
+func TestPatchFromBatchEditBuildsExplicitOperations(t *testing.T) {
+	track := domain.Track{Album: "旧专辑", AlbumArtists: []string{"原艺人"}, Genres: []string{"Pop"}, Year: ptr(2020)}
+	patch := patchFromBatchEdit(track, []domain.BatchEditOperation{
+		{Field: "album", Mode: domain.BatchEditSet, Value: "新专辑"},
+		{Field: "albumArtists", Mode: domain.BatchEditAppend, Value: "制作人"},
+		{Field: "genres", Mode: domain.BatchEditAppend, Value: "Live, Pop"},
+	}, true, 2, 5)
+	if patch.Album == nil || patch.Album.Value != "新专辑" || patch.AlbumArtists == nil || len(patch.AlbumArtists.Value) != 2 ||
+		patch.Genres == nil || len(patch.Genres.Value) != 2 || patch.TrackNumber == nil || patch.TrackNumber.Value != 3 || patch.TrackTotal == nil || patch.TrackTotal.Value != 5 {
+		t.Fatalf("batch patch = %#v", patch)
+	}
+	deleted := patchFromBatchEdit(track, []domain.BatchEditOperation{
+		{Field: "genres", Mode: domain.BatchEditDelete},
+		{Field: "year", Mode: domain.BatchEditDelete},
+	}, false, 0, 1)
+	if deleted.Genres == nil || deleted.Genres.Op != domain.OperationDelete || deleted.Year == nil || deleted.Year.Op != domain.OperationDelete {
+		t.Fatalf("delete batch patch = %#v", deleted)
+	}
+}
+
+func ptr(value int) *int { return &value }

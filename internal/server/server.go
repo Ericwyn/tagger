@@ -77,6 +77,7 @@ func (s *Server) routes() {
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
+	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 	api.GET("/tracks/:id/artwork/:index", s.handleReadArtwork)
@@ -95,6 +96,7 @@ func (s *Server) routes() {
 	api.POST("/jobs/:id/retry", s.handleRetryJob)
 	api.GET("/jobs/:id/events", s.handleJobEvents)
 	api.GET("/jobs/:id/matches", s.handleJobMatches)
+	api.GET("/jobs/:id/batch-edit-items", s.handleBatchEditItems)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
 	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
@@ -334,6 +336,39 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		payload.Items = items
 		encoded, err := json.Marshal(payload)
 		return string(encoded), err
+	case domain.JobBatchEdit:
+		var payload domain.BatchEditPayload
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return "", fmt.Errorf("decode batch edit retry payload: %w", err)
+		}
+		failedItems, err := s.store.ListBatchEditItems(ctx, job.ID)
+		if err != nil {
+			return "", err
+		}
+		failed := make(map[string]struct{}, len(failedItems))
+		for _, item := range failedItems {
+			if item.State == "failed" {
+				failed[item.TrackID] = struct{}{}
+			}
+		}
+		items := make([]domain.BatchEditItem, 0, len(payload.Items))
+		for _, item := range payload.Items {
+			if _, ok := failed[item.TrackID]; !ok {
+				continue
+			}
+			track, trackErr := s.library.Track(item.TrackID)
+			if trackErr != nil {
+				return "", trackErr
+			}
+			item.BaseRevision = track.Revision
+			items = append(items, item)
+		}
+		if len(items) == 0 {
+			return "", jobs.ErrJobNotRetryable
+		}
+		payload.Items = items
+		encoded, err := json.Marshal(payload)
+		return string(encoded), err
 	default:
 		return "", jobs.ErrJobNotRetryable
 	}
@@ -434,6 +469,19 @@ func (s *Server) handleJobMatches(ctx context.Context, c *app.RequestContext) {
 	s.writeData(c, items)
 }
 
+func (s *Server) handleBatchEditItems(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeData(c, []store.BatchEditItem{})
+		return
+	}
+	items, err := s.store.ListBatchEditItems(ctx, c.Param("id"))
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "batch_edit_items_failed", err.Error())
+		return
+	}
+	s.writeData(c, items)
+}
+
 type writeSelection struct {
 	TrackID      string   `json:"trackId"`
 	CandidateID  string   `json:"candidateId"`
@@ -493,6 +541,93 @@ func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {
 		"tracks": tracks,
 		"total":  len(tracks),
 	})
+}
+
+func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "任务队列尚未启用")
+		return
+	}
+	var payload domain.BatchEditPayload
+	if err := json.Unmarshal(c.Request.Body(), &payload); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	if err := s.validateBatchEditPayload(&payload); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobBatchEdit, LibraryID: s.library.Library().ID, Title: "批量编辑标签", Detail: "等待批量编辑 worker", Total: len(payload.Items), Payload: mustJSON(payload)})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
+}
+
+func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) error {
+	if len(payload.Items) == 0 || len(payload.Items) > 1000 {
+		return fmt.Errorf("items 必须在 1 到 1000 之间")
+	}
+	if len(payload.Operations) == 0 && !payload.SequenceTracks {
+		return fmt.Errorf("至少选择一个字段操作或音轨序号操作")
+	}
+	allowed := map[string]bool{"album": true, "albumArtists": true, "year": true, "genres": true}
+	seenOperations := make(map[string]struct{}, len(payload.Operations))
+	for _, operation := range payload.Operations {
+		if !allowed[operation.Field] {
+			return fmt.Errorf("不支持的批量字段：%s", operation.Field)
+		}
+		if operation.Mode != domain.BatchEditSet && operation.Mode != domain.BatchEditAppend && operation.Mode != domain.BatchEditDelete {
+			return fmt.Errorf("不支持的批量操作：%s", operation.Mode)
+		}
+		if operation.Field == "album" && operation.Mode == domain.BatchEditAppend {
+			return fmt.Errorf("专辑不支持追加操作")
+		}
+		if operation.Field == "year" && operation.Mode == domain.BatchEditAppend {
+			return fmt.Errorf("年份不支持追加操作")
+		}
+		if operation.Mode != domain.BatchEditDelete && strings.TrimSpace(operation.Value) == "" {
+			return fmt.Errorf("字段 %s 的设置值不能为空", operation.Field)
+		}
+		if operation.Field == "year" && operation.Mode != domain.BatchEditDelete {
+			year, err := strconv.Atoi(strings.TrimSpace(operation.Value))
+			if err != nil || year <= 0 {
+				return fmt.Errorf("年份必须是正整数")
+			}
+		}
+		if _, exists := seenOperations[operation.Field]; exists {
+			return fmt.Errorf("字段 %s 重复操作", operation.Field)
+		}
+		seenOperations[operation.Field] = struct{}{}
+	}
+	seenTracks := make(map[string]struct{}, len(payload.Items))
+	for index := range payload.Items {
+		item := &payload.Items[index]
+		if item.TrackID == "" {
+			return fmt.Errorf("trackId 不能为空")
+		}
+		if _, exists := seenTracks[item.TrackID]; exists {
+			return fmt.Errorf("trackId 重复：%s", item.TrackID)
+		}
+		seenTracks[item.TrackID] = struct{}{}
+		track, err := s.library.Track(item.TrackID)
+		if errors.Is(err, library.ErrTrackNotFound) {
+			return fmt.Errorf("曲目不存在：%s", item.TrackID)
+		}
+		if err != nil {
+			return err
+		}
+		if item.BaseRevision == "" {
+			item.BaseRevision = track.Revision
+		}
+	}
+	return nil
+}
+
+func mustJSON(value any) string {
+	payload, _ := json.Marshal(value)
+	return string(payload)
 }
 
 func (s *Server) handleTrack(_ context.Context, c *app.RequestContext) {

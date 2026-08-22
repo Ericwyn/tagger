@@ -20,6 +20,7 @@ import {TrackList} from '@/components/library/TrackList';
 import {
   apiReadMode,
   applyCandidateArtwork,
+  createBatchEditJob,
   getLibrary,
   listTracks,
   rescanLibrary,
@@ -227,6 +228,19 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     const failed = new Set<string>();
     let succeeded = 0;
     setSaving(true);
+    if (apiReadMode === 'real') {
+      try {
+        const job = await createBatchEditJob(selectedTracks.map((track) => ({trackId: track.id, baseRevision: track.revision})), operations, sequenceTracks);
+        setBatchEditOpen(false);
+        setSelectedIds(new Set());
+        onNotice(job ? `批量编辑任务已创建：${job.id}` : '批量编辑任务已创建');
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : '批量编辑任务创建失败');
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     try {
       for (const [index, track] of selectedTracks.entries()) {
         if (!track.writable) {

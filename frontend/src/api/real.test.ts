@@ -108,6 +108,18 @@ describe('real API client', () => {
 	expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({items: [{trackId: 'trk-1', candidateId: 'cand-1', baseRevision: 'rev-1', fields: ['title'], artwork: true}]});
   });
 
+  it('creates a persistent batch edit job with revision guards', async () => {
+	const job = {id: 'job-edit', kind: 'batch_edit', state: 'waiting', title: 'Edit', detail: 'Waiting', processed: 0, total: 2, succeeded: 0, failed: 0, startedAt: 'now'};
+	const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));
+	const api = createRealAPI(fetcher);
+	await expect(api.createBatchEditJob([{trackId: 'trk-1', baseRevision: 'rev-1'}], [{field: 'genres', mode: 'append', value: 'Live'}], true)).resolves.toEqual(job);
+	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/batch-edit');
+	expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({
+		items: [{trackId: 'trk-1', baseRevision: 'rev-1'}],
+		operations: [{field: 'genres', mode: 'append', value: 'Live'}], sequenceTracks: true,
+	});
+  });
+
   it('writes an explicit patch guarded by the indexed revision', async () => {
     const fullTrack = {
       ...track,

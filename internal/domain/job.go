@@ -6,9 +6,10 @@ type JobKind string
 type JobState string
 
 const (
-	JobScan  JobKind = "scan"
-	JobMatch JobKind = "match"
-	JobWrite JobKind = "write"
+	JobScan      JobKind = "scan"
+	JobMatch     JobKind = "match"
+	JobWrite     JobKind = "write"
+	JobBatchEdit JobKind = "batch_edit"
 
 	JobWaiting   JobState = "waiting"
 	JobRunning   JobState = "running"

@@ -1,16 +1,12 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Check, ChevronDown, LoaderCircle, Wand2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
-import type {Track, TrackPatch} from '@/types';
+import type {BatchEditOperation, Track, TrackPatch} from '@/types';
 
 type EditableField = 'album' | 'albumArtists' | 'year' | 'genres';
 type OperationMode = '' | 'set' | 'append' | 'delete';
 
-export interface BatchOperation {
-  field: EditableField;
-  mode: Exclude<OperationMode, ''>;
-  value: string;
-}
+export type BatchOperation = BatchEditOperation;
 
 interface OperationState {
   mode: OperationMode;

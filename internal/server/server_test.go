@@ -254,6 +254,50 @@ func TestJobRetryAPIResubmitsArtworkFailureWithCurrentRevision(t *testing.T) {
 	}
 }
 
+func TestBatchEditAPIQueuesRevisionGuardedJob(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	body := []byte(`{"items":[{"trackId":"` + track.ID + `","baseRevision":"` + track.Revision + `"}],"operations":[{"field":"genres","mode":"append","value":"Live"}],"sequenceTracks":true}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"kind":"batch_edit"`) || !containsJSON(response.Body.Bytes(), `"total":1`) {
+		t.Fatalf("batch edit = %d %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data jobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	job, err := s.store.Job(context.Background(), envelope.Data.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload domain.BatchEditPayload
+	if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil || len(payload.Items) != 1 || payload.Items[0].BaseRevision != track.Revision {
+		t.Fatalf("batch payload = %#v err=%v", payload, err)
+	}
+	itemsResponse := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+envelope.Data.ID+"/batch-edit-items", nil)
+	if itemsResponse.Code != 200 || !containsJSON(itemsResponse.Body.Bytes(), "[]") {
+		t.Fatalf("batch edit items = %d %s", itemsResponse.Code, itemsResponse.Body.String())
+	}
+	invalid := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader([]byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[],"sequenceTracks":false}`)), Len: len([]byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[],"sequenceTracks":false}`))},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `"code":"invalid_request"`) {
+		t.Fatalf("invalid batch edit = %d %s", invalid.Code, invalid.Body.String())
+	}
+	invalidYearBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"year","mode":"set","value":"20x"}],"sequenceTracks":false}`)
+	invalidYear := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(invalidYearBody), Len: len(invalidYearBody)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if invalidYear.Code != 400 || !containsJSON(invalidYear.Body.Bytes(), `"年份必须是正整数"`) {
+		t.Fatalf("invalid year batch edit = %d %s", invalidYear.Code, invalidYear.Body.String())
+	}
+}
+
 func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {
 	s := newTestServer(t)
 	allTracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)

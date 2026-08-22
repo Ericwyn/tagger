@@ -244,6 +244,20 @@ func TestRevisionStoresDeduplicatedArtworkBlobAndHydratesOnRead(t *testing.T) {
 	}
 }
 
+func TestBatchEditItemsPersistIndependentResults(t *testing.T) {
+	dataStore := openTestStore(t)
+	if err := dataStore.UpsertBatchEditItem(context.Background(), BatchEditItem{JobID: "job-1", TrackID: "track-1", State: "failed", Error: "revision conflict", Diff: []byte(`[]`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.UpsertBatchEditItem(context.Background(), BatchEditItem{JobID: "job-1", TrackID: "track-2", State: "written", Diff: []byte(`[{"field":"genres"}]`)}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := dataStore.ListBatchEditItems(context.Background(), "job-1")
+	if err != nil || len(items) != 2 || items[0].State != "failed" || items[1].State != "written" {
+		t.Fatalf("batch edit items = %#v err=%v", items, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	dataStore, err := Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))

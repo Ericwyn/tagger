@@ -7,6 +7,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/artwork"
@@ -261,6 +264,7 @@ func main() {
 		}
 		return nil
 	})
+	jobManager.Register(domain.JobBatchEdit, newBatchEditHandler(libraryService, tagWriter, dataStore))
 	if err := jobManager.Start(context.Background()); err != nil {
 		logger.Error("start persistent job worker", "error", err)
 		os.Exit(1)
@@ -277,6 +281,157 @@ func main() {
 		"version", version.Version,
 	)
 	srv.Spin()
+}
+
+func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.Writer, dataStore *store.Store) jobs.Handler {
+	return func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
+		var payload domain.BatchEditPayload
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return err
+		}
+		completed := make([]struct {
+			track  domain.Track
+			result filewrite.Result
+		}, 0, len(payload.Items))
+		failed := 0
+		for index, item := range payload.Items {
+			track, err := libraryService.Track(item.TrackID)
+			var result filewrite.Result
+			if err == nil {
+				ref, refErr := libraryService.FileRef(item.TrackID)
+				if refErr != nil {
+					err = refErr
+				} else {
+					baseRevision := item.BaseRevision
+					if baseRevision == "" {
+						baseRevision = track.Revision
+					}
+					result, err = tagWriter.Write(ctx, ref, baseRevision, patchFromBatchEdit(track, payload.Operations, payload.SequenceTracks, index, len(payload.Items)), false)
+				}
+			}
+			state := "written"
+			if err != nil {
+				failed++
+				state = "failed"
+			}
+			diff, marshalErr := json.Marshal(result.Diff)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if persistErr := dataStore.UpsertBatchEditItem(ctx, store.BatchEditItem{JobID: job.ID, TrackID: item.TrackID, State: state, Error: errorText(err), Diff: diff}); persistErr != nil {
+				return fmt.Errorf("persist batch edit item %s: %w", item.TrackID, persistErr)
+			}
+			if err == nil {
+				completed = append(completed, struct {
+					track  domain.Track
+					result filewrite.Result
+				}{track: track, result: result})
+			}
+			if progressErr := progress(index+1, len(payload.Items), len(completed), failed, fmt.Sprintf("已编辑 %d/%d 首曲目", index+1, len(payload.Items))); progressErr != nil {
+				return progressErr
+			}
+		}
+		if len(completed) == 0 {
+			return nil
+		}
+		if err := libraryService.Rescan(ctx); err != nil {
+			return err
+		}
+		for _, item := range completed {
+			if !item.result.Changed {
+				continue
+			}
+			track, err := libraryService.Track(item.track.ID)
+			if err != nil {
+				return err
+			}
+			if _, err := dataStore.CreateRevision(ctx, domain.Revision{
+				LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
+				Action: "批量编辑标签", Source: "批量编辑", BaseRevision: item.result.BaseRevision,
+				ResultRevision: track.Revision, Diff: item.result.Diff, CoverTone: track.CoverTone,
+				BeforeTags: item.result.BeforeTags, AfterTags: item.result.AfterTags,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func patchFromBatchEdit(track domain.Track, operations []domain.BatchEditOperation, sequence bool, index, total int) domain.TagPatch {
+	patch := domain.TagPatch{}
+	for _, operation := range operations {
+		switch operation.Field {
+		case "album":
+			patch.Album = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+		case "albumArtists":
+			patch.AlbumArtists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.AlbumArtists, operation.Value)}
+		case "genres":
+			patch.Genres = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Genres, operation.Value)}
+		case "year":
+			if operation.Mode == domain.BatchEditDelete {
+				patch.Year = &domain.IntFieldPatch{Op: domain.OperationDelete}
+				continue
+			}
+			if year, err := strconv.Atoi(strings.TrimSpace(operation.Value)); err == nil && year > 0 {
+				patch.Year = &domain.IntFieldPatch{Op: domain.OperationSet, Value: year}
+			}
+		}
+	}
+	if sequence {
+		patch.TrackNumber = &domain.IntFieldPatch{Op: domain.OperationSet, Value: index + 1}
+		patch.TrackTotal = &domain.IntFieldPatch{Op: domain.OperationSet, Value: total}
+	}
+	return patch
+}
+
+func batchStringOperation(mode domain.BatchEditMode) domain.Operation {
+	if mode == domain.BatchEditDelete {
+		return domain.OperationDelete
+	}
+	return domain.OperationSet
+}
+
+func batchStringsOperation(mode domain.BatchEditMode) domain.Operation {
+	if mode == domain.BatchEditDelete {
+		return domain.OperationDelete
+	}
+	return domain.OperationSet
+}
+
+func batchListValue(mode domain.BatchEditMode, current []string, value string) []string {
+	if mode == domain.BatchEditDelete {
+		return nil
+	}
+	next := splitBatchValues(value)
+	if mode != domain.BatchEditAppend {
+		return next
+	}
+	result := append([]string(nil), current...)
+	for _, item := range next {
+		if !slices.Contains(result, item) {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func splitBatchValues(value string) []string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '，' || r == '\n' })
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 type artworkDownloader func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
