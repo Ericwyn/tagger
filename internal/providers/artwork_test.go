@@ -28,6 +28,8 @@ func TestValidateArtworkURLUsesProviderAllowlist(t *testing.T) {
 		{"kuwo", "https://img1.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg"},
 		{"kugou", "https://imge.kugou.com/cover.jpg"},
 		{"lrcapi", "https://api.lrc.cx/cover?title=Song"},
+		{"lrcapi", "https://is1-ssl.mzstatic.com/image/thumb/cover.jpg"},
+		{"lrcapi", "https://p1.music.126.net/cover.jpg"},
 	}
 	for _, item := range allowed {
 		if _, err := validateArtworkURL(item.provider, item.url); err != nil {
@@ -39,6 +41,7 @@ func TestValidateArtworkURLUsesProviderAllowlist(t *testing.T) {
 		{"apple", "https://mzstatic.com.evil.test/image.jpg"},
 		{"musicbrainz", "https://127.0.0.1/cover.jpg"},
 		{"unknown", "https://coverartarchive.org/cover.jpg"},
+		{"lrcapi", "https://images.example.com/cover.jpg"},
 	}
 	for _, item := range blocked {
 		if _, err := validateArtworkURL(item.provider, item.url); !errors.Is(err, ErrUnsafeArtworkURL) {

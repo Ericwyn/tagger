@@ -47,25 +47,39 @@ func validateArtworkURL(providerID, value string) (*url.URL, error) {
 		return nil, fmt.Errorf("%w: HTTPS provider URL required", ErrUnsafeArtworkURL)
 	}
 	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
-	allowed := false
-	switch providerID {
-	case "musicbrainz":
-		allowed = host == "coverartarchive.org" || host == "archive.org" || strings.HasSuffix(host, ".archive.org")
-	case "apple":
-		allowed = host == "mzstatic.com" || strings.HasSuffix(host, ".mzstatic.com")
-	case "netease":
-		allowed = host == "music.126.net" || strings.HasSuffix(host, ".music.126.net")
-	case "kuwo":
-		allowed = host == "kuwo.cn" || strings.HasSuffix(host, ".kuwo.cn")
-	case "kugou":
-		allowed = host == "kugou.com" || strings.HasSuffix(host, ".kugou.com")
-	case "lrcapi":
-		allowed = host == "lrc.cx" || strings.HasSuffix(host, ".lrc.cx")
-	}
+	allowed := artworkHostAllowed(providerID, host)
 	if !allowed {
 		return nil, fmt.Errorf("%w: host %q is not allowed for %s", ErrUnsafeArtworkURL, host, providerID)
 	}
 	return parsed, nil
+}
+
+func artworkHostAllowed(providerID, host string) bool {
+	switch providerID {
+	case "musicbrainz":
+		return host == "coverartarchive.org" || host == "archive.org" || strings.HasSuffix(host, ".archive.org")
+	case "apple":
+		return host == "mzstatic.com" || strings.HasSuffix(host, ".mzstatic.com")
+	case "netease":
+		return host == "music.126.net" || strings.HasSuffix(host, ".music.126.net")
+	case "kuwo":
+		return host == "kuwo.cn" || strings.HasSuffix(host, ".kuwo.cn")
+	case "kugou":
+		return host == "kugou.com" || strings.HasSuffix(host, ".kugou.com")
+	case "lrcapi":
+		// LrcApi is an aggregator and may return the original artwork URL
+		// from one of the supported music catalogs. Keep this an explicit
+		// union of known provider CDNs; never treat an arbitrary LrcApi URL
+		// as safe merely because it came from the aggregator.
+		return host == "lrc.cx" || strings.HasSuffix(host, ".lrc.cx") ||
+			artworkHostAllowed("apple", host) ||
+			artworkHostAllowed("netease", host) ||
+			artworkHostAllowed("kuwo", host) ||
+			artworkHostAllowed("kugou", host) ||
+			artworkHostAllowed("musicbrainz", host)
+	default:
+		return false
+	}
 }
 
 func safeArtworkClient(providerID string) *http.Client {

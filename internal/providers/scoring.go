@@ -11,8 +11,19 @@ import (
 	"github.com/ericwyn/tagger/internal/domain"
 )
 
+const noArtworkConfidenceCap = 0.89
+
 func toView(query Query, descriptor Descriptor, candidate Candidate) MatchCandidate {
 	score, reasons := scoreCandidate(query, candidate)
+	if strings.TrimSpace(candidate.ArtworkURL) == "" {
+		// Metadata similarity alone is not enough for this product's primary
+		// completion flow: a candidate without a usable artwork reference
+		// should be reviewed after candidates that can complete the cover.
+		// Capping (rather than hiding) the score keeps the comparison useful
+		// while preventing automatic high-confidence acceptance.
+		score = math.Min(score, noArtworkConfidenceCap)
+		reasons = append(reasons, "来源未提供封面")
+	}
 	source := descriptor.Name
 	albumArtists := candidate.AlbumArtists
 	if len(albumArtists) == 0 {

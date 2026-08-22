@@ -491,6 +491,7 @@ export function candidatesFor(track: Track): MatchCandidate[] {
       discTotal: {value: 1, source: '网易云音乐'},
       durationSeconds: {value: track.durationSeconds, source: '网易云音乐'},
       genres: {value: ['华语', '流行'], source: '网易云音乐'},
+      lyrics: {value: '[00:18.00] Mock 网易云歌词\n[00:26.00] 这一行用于审核预览', source: '网易云音乐'},
       hasLyrics: true,
       hasArtwork: true,
       coverTone: track.coverTone === 'vermilion' ? 'charcoal' : 'vermilion',

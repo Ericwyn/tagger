@@ -160,11 +160,41 @@ func TestSimilarityHandlesPunctuationAndCJK(t *testing.T) {
 func TestAlternateTitlesImproveCandidateScore(t *testing.T) {
 	registry := NewRegistry(fakeStrategy{descriptor: Descriptor{ID: "alias", Name: "Alias", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
 		ExternalID: "alias-1", Title: "现场版", AlternateTitles: []string{"原曲名"}, Artists: []string{"歌手"},
+		ArtworkURL: "https://images.example.test/cover.jpg",
 	}}})
 	result, err := registry.Search(context.Background(), Query{Title: "原曲名", Artists: []string{"歌手"}}, []string{"alias"}, 1)
 	if err != nil || len(result.Candidates) != 1 || result.Candidates[0].Score < 0.9 {
 		t.Fatalf("alias score = %#v err=%v", result, err)
 	}
+}
+
+func TestRegistryRanksCandidatesWithArtworkAheadOfMetadataOnlyMatches(t *testing.T) {
+	registry := NewRegistry(fakeStrategy{descriptor: Descriptor{ID: "source", Name: "Source", Enabled: true, Health: HealthReady}, candidates: []Candidate{
+		{ExternalID: "no-artwork", Title: "最佳歌手", Artists: []string{"许嵩"}},
+		{ExternalID: "with-artwork", Title: "最佳歌手", Artists: []string{"许嵩"}, ArtworkURL: "https://images.example.test/cover.jpg"},
+	}})
+	result, err := registry.Search(context.Background(), Query{Title: "最佳歌手", Artists: []string{"许嵩"}}, []string{"source"}, 5)
+	if err != nil || len(result.Candidates) != 2 {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if result.Candidates[0].ExternalID != "with-artwork" {
+		t.Fatalf("candidate order = %#v", result.Candidates)
+	}
+	if result.Candidates[1].Score > noArtworkConfidenceCap || result.Candidates[1].ScoreLabel == "高度匹配" {
+		t.Fatalf("metadata-only candidate retained high confidence: %#v", result.Candidates[1])
+	}
+	if !containsString(result.Candidates[1].MatchReasons, "来源未提供封面") {
+		t.Fatalf("metadata-only reasons = %#v", result.Candidates[1].MatchReasons)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRegistryCacheAndSettingsSurviveReopen(t *testing.T) {

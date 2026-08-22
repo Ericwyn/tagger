@@ -41,6 +41,12 @@ interface ReviewItem {
   error?: string;
 }
 
+interface ReviewAssetPreview {
+  kind: 'lyrics' | 'artwork';
+  track: Track;
+  candidate: MatchCandidate;
+}
+
 const standardFields = [
   'title',
   'artists',
@@ -176,6 +182,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 	const [rematchError, setRematchError] = useState('');
 	const [job, setJob] = useState<Job>();
 	const [candidatePickerOpen, setCandidatePickerOpen] = useState(false);
+	const [assetPreview, setAssetPreview] = useState<ReviewAssetPreview>();
+	const [assetArtworkInfo, setAssetArtworkInfo] = useState<{width: number; height: number}>();
 
   useEffect(() => {
     let active = true;
@@ -280,16 +288,25 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
 	useEffect(() => {
 	  setCandidatePickerOpen(false);
+	  setAssetPreview(undefined);
+	  setAssetArtworkInfo(undefined);
 	}, [active?.track.id]);
 
 	useEffect(() => {
-	  if (!candidatePickerOpen) return;
+	  if (!candidatePickerOpen && !assetPreview) return;
 	  const onKeyDown = (event: KeyboardEvent) => {
-	    if (event.key === 'Escape') setCandidatePickerOpen(false);
+	    if (event.key !== 'Escape') return;
+	    setCandidatePickerOpen(false);
+	    closeAssetPreview();
 	  };
 	  window.addEventListener('keydown', onKeyDown);
 	  return () => window.removeEventListener('keydown', onKeyDown);
-	}, [candidatePickerOpen]);
+	}, [candidatePickerOpen, assetPreview]);
+
+	const closeAssetPreview = () => {
+	  setAssetPreview(undefined);
+	  setAssetArtworkInfo(undefined);
+	};
 
   const setItemState = (trackId: string, state: ReviewState) => {
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, state} : item));
@@ -562,8 +579,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               {active.candidate.musicbrainzArtistIds?.value.length ? <ReviewDiff field="musicbrainzArtistIds" label="MB Artist ID" current={active.track.musicbrainzArtistIds.join(' / ') || '空'} next={active.candidate.musicbrainzArtistIds.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzArtistIds')} onToggle={() => toggleField(active.track.id, 'musicbrainzArtistIds')} /> : null}
               {active.candidate.acoustidId?.value && <ReviewDiff field="acoustidId" label="AcoustID" current={active.track.acoustidId || '空'} next={active.candidate.acoustidId.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidId')} onToggle={() => toggleField(active.track.id, 'acoustidId')} />}
               {active.candidate.acoustidFingerprint?.value && <ReviewDiff field="acoustidFingerprint" label="AcoustID 指纹" current={active.track.acoustidFingerprint || '空'} next={active.candidate.acoustidFingerprint.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidFingerprint')} onToggle={() => toggleField(active.track.id, 'acoustidFingerprint')} />}
-              {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="内嵌歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} />}
-              {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} />}
+              {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="内嵌歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} inspectLabel="查看歌词" onInspect={() => setAssetPreview({kind: 'lyrics', track: active.track, candidate: active.candidate!})} />}
+              {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} inspectLabel="查看封面" onInspect={() => setAssetPreview({kind: 'artwork', track: active.track, candidate: active.candidate!})} />}
             </div>
 			<div className="review-fields-actions">
 			  <span>已选择 {active.fields.filter((field) => activeAvailableFields.includes(field)).length} / {activeAvailableFields.length} 个可用字段</span>
@@ -577,31 +594,20 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
             {active.candidate.hasArtwork && (
               <div className="review-artwork-size-control">
-                <div className="review-artwork-control-head">
-                  <label className="review-artwork-toggle">
-                    <input
-                      type="checkbox"
-                      aria-label="审核是否写入候选封面"
-                      checked={active.includeArtwork}
-                      onChange={() => toggleArtwork(active.track.id)}
-                    />
-                    <span>同时写入候选封面</span>
-                  </label>
-                  <label className="review-artwork-size-select">
-                    <span>写入尺寸</span>
-                    <select
-                      aria-label="审核封面写入尺寸"
-                      value={active.artworkMaxSize}
-                      disabled={!active.includeArtwork}
-                      onChange={(event) => setArtworkMaxSize(active.track.id, Number(event.target.value))}
-                    >
-                      <option value={0}>保留原图</option>
-                      <option value={1000}>居中裁剪至 1000×1000</option>
-                      <option value={500}>居中裁剪至 500×500</option>
-                    </select>
-                  </label>
-                </div>
-                <small>勾选后才会写入候选封面；小于目标尺寸的图片不会被放大。</small>
+                <label className="review-artwork-size-select">
+                  <span>封面写入尺寸</span>
+                  <select
+                    aria-label="审核封面写入尺寸"
+                    value={active.artworkMaxSize}
+                    disabled={!active.includeArtwork}
+                    onChange={(event) => setArtworkMaxSize(active.track.id, Number(event.target.value))}
+                  >
+                    <option value={0}>保留原图</option>
+                    <option value={1000}>居中裁剪至 1000×1000</option>
+                    <option value={500}>居中裁剪至 500×500</option>
+                  </select>
+                </label>
+                <small>请先在上方“替换封面”行勾选采用；小于目标尺寸的图片不会被放大。</small>
               </div>
             )}
 
@@ -628,7 +634,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 		)}
 	      </div>
 
-	      {active && active.candidate && active.candidates.length > 1 && candidatePickerOpen && typeof document !== 'undefined' && createPortal(
+      {active && active.candidate && active.candidates.length > 1 && candidatePickerOpen && typeof document !== 'undefined' && createPortal(
 		  <div className="candidate-picker-overlay">
 			<button className="candidate-picker-backdrop" type="button" aria-label="关闭候选列表" onClick={() => setCandidatePickerOpen(false)} />
 			<section className="candidate-picker-modal" role="dialog" aria-modal="true" aria-label="候选列表">
@@ -655,6 +661,39 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 				  </button>
 				))}
 			  </div>
+			</section>
+		  </div>,
+		  document.body,
+		)}
+
+	      {assetPreview && typeof document !== 'undefined' && createPortal(
+		  <div className="review-asset-overlay">
+			<button className="review-asset-backdrop" type="button" aria-label="关闭详情预览" onClick={closeAssetPreview} />
+			<section className="review-asset-modal" role="dialog" aria-modal="true" aria-label={assetPreview.kind === 'lyrics' ? '歌词详情' : '封面详情'}>
+			  <header className="review-asset-head">
+				<div>
+				  <span className="eyebrow">{assetPreview.kind === 'lyrics' ? 'LYRICS PREVIEW' : 'ARTWORK PREVIEW'}</span>
+				  <h3>{assetPreview.kind === 'lyrics' ? '候选歌词详情' : '候选封面详情'}</h3>
+				  <p>{assetPreview.track.title} · {assetPreview.candidate.providerName} / {assetPreview.candidate.externalId}</p>
+				</div>
+				<button className="icon-button" type="button" title="关闭详情预览" aria-label="关闭详情预览" onClick={closeAssetPreview}><X size={17} /></button>
+			  </header>
+			  {assetPreview.kind === 'lyrics' ? (
+				<div className="review-lyrics-preview">
+				  <section><strong>当前内嵌歌词</strong><pre>{assetPreview.track.lyrics || '当前没有歌词'}</pre></section>
+				  <section><strong>候选歌词 · {assetPreview.candidate.lyrics?.value.length ?? 0} 字符</strong><pre>{assetPreview.candidate.lyrics?.value || '来源没有返回歌词'}</pre></section>
+				</div>
+			  ) : (
+				<div className="review-artwork-preview">
+				  <div><strong>当前封面</strong><CoverArt title={assetPreview.track.title} artist={assetPreview.track.artists[0]} tone={assetPreview.track.coverTone} missing={!showGeneratedCovers && assetPreview.track.artworkCount === 0} imageUrl={artworkURL(assetPreview.track)} blankOnImageError={!showGeneratedCovers} size="lg" /></div>
+				  <div>
+					<strong>候选封面</strong>
+					<CoverArt title={assetPreview.candidate.title.value} artist={assetPreview.candidate.artists.value[0]} tone={assetPreview.candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(assetPreview.candidate)} imageUrl={candidateArtworkURL(assetPreview.candidate)} blankOnImageError={!showGeneratedCovers} size="lg" onImageInfo={setAssetArtworkInfo} />
+					{assetArtworkInfo ? <small>{assetArtworkInfo.width} × {assetArtworkInfo.height}px</small> : <small>{candidateArtworkURL(assetPreview.candidate) ? '正在读取图片尺寸…' : '来源声明有封面，但当前没有可预览地址'}</small>}
+				  </div>
+				</div>
+			  )}
+			  <footer className="review-asset-foot"><span>详情预览不会自动写入文件。</span><button className="secondary-button" type="button" onClick={closeAssetPreview}>关闭</button></footer>
 			</section>
 		  </div>,
 		  document.body,
@@ -702,6 +741,8 @@ function ReviewDiff({
   next,
   source,
   changed = false,
+  inspectLabel,
+  onInspect,
 }: {
   field: string;
   checked: boolean;
@@ -711,6 +752,8 @@ function ReviewDiff({
   next: string;
   source: string;
   changed?: boolean;
+  inspectLabel?: string;
+  onInspect?: () => void;
 }) {
   return (
     <div className={cn('review-diff-row', !checked && 'is-disabled')} data-field={field}>
@@ -719,7 +762,10 @@ function ReviewDiff({
       </button>
       <strong>{label}</strong>
       <span>{current}</span>
-      <span className={cn(changed && 'is-changed')}>{next}</span>
+      <span className={cn(changed && 'is-changed')}>
+        {next}
+        {onInspect && <button type="button" className="review-diff-inspect" onClick={onInspect}>{inspectLabel || '查看详情'}</button>}
+      </span>
       <em>{source}</em>
     </div>
   );

@@ -3763,6 +3763,133 @@ button:disabled {
   font-size: 11px;
 }
 
+.review-diff-inspect {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+  color: var(--accent);
+  font-size: 10px;
+  vertical-align: 1px;
+}
+
+.review-asset-overlay {
+  position: fixed;
+  z-index: 65;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(24, 25, 22, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.review-asset-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: default;
+}
+
+.review-asset-modal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(920px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+}
+
+.review-asset-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 17px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-asset-head h3 {
+  margin: 4px 0 0;
+  font-family: var(--display);
+  font-size: 21px;
+}
+
+.review-asset-head p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.review-lyrics-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding: 14px 17px;
+}
+
+.review-lyrics-preview section,
+.review-artwork-preview > div {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.review-lyrics-preview strong,
+.review-artwork-preview strong {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+
+.review-lyrics-preview pre {
+  max-height: 430px;
+  overflow: auto;
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--ink);
+  font: 12px/1.75 var(--mono);
+}
+
+.review-artwork-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding: 14px 17px;
+}
+
+.review-artwork-preview > div > .cover-art {
+  margin: 0 auto;
+}
+
+.review-artwork-preview small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.review-asset-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 17px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .candidate-footer {
   display: flex;
   align-items: center;
@@ -4161,8 +4288,10 @@ button:disabled {
   position: relative;
   z-index: 1;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(680px, 100%);
   max-height: min(720px, calc(100vh - 48px));
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--line-strong);
   background: var(--paper-2);
@@ -4211,6 +4340,7 @@ button:disabled {
 .candidate-picker {
   display: grid;
   gap: 5px;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px;
   border-top: 1px solid var(--line);
@@ -4307,6 +4437,13 @@ button:disabled {
 
 .review-diff-row > span:nth-child(3) {
   color: var(--muted);
+}
+
+.review-diff-row > span:nth-child(4) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .review-diff-row .is-changed {
@@ -5363,9 +5500,17 @@ button:disabled {
 
 .provider-config-actions {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 7px;
   padding-top: 2px;
+}
+
+.provider-config-actions > button,
+.provider-config-reset-confirm button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .provider-config-reset-confirm {
@@ -6589,6 +6734,21 @@ button:disabled {
   .candidate-layer {
     top: 62px;
     bottom: 57px;
+  }
+
+  .candidate-picker-overlay,
+  .review-asset-overlay {
+    padding: 12px;
+  }
+
+  .candidate-picker-modal,
+  .review-asset-modal {
+    max-height: calc(100vh - 88px);
+  }
+
+  .review-lyrics-preview,
+  .review-artwork-preview {
+    grid-template-columns: 1fr;
   }
 
   .candidate-drawer {

@@ -19,7 +19,7 @@ describe('ReviewPage field selection', () => {
 	expect(screen.getByRole('button', {name: '取消采用标题'})).toHaveClass('is-checked');
 	await user.click(screen.getByRole('button', {name: '全部取消字段'}));
 	expect(screen.getByRole('button', {name: '采用标题'})).not.toHaveClass('is-checked');
-	const artworkToggle = screen.getByRole('checkbox', {name: '审核是否写入候选封面'});
+	const artworkToggle = screen.getByRole('button', {name: '采用替换封面'});
 	await user.click(artworkToggle);
 	expect(screen.getByRole('button', {name: '取消采用替换封面'})).toHaveClass('is-checked');
 	const artworkSize = screen.getByRole('combobox', {name: '审核封面写入尺寸'});
@@ -39,6 +39,15 @@ describe('ReviewPage field selection', () => {
     expect(screen.getByRole('listbox', {name: '候选列表'})).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', {name: '候选列表'})).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: /更换候选/}));
+    await user.click(screen.getByRole('option', {name: /网易云音乐.*song-186001/}));
+    await user.click(screen.getByRole('button', {name: '查看歌词'}));
+    expect(screen.getByRole('dialog', {name: '歌词详情'})).toBeInTheDocument();
+    expect(screen.getByText(/Mock 网易云歌词/)).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    await user.click(screen.getByRole('button', {name: '查看封面'}));
+    expect(screen.getByRole('dialog', {name: '封面详情'})).toBeInTheDocument();
+    await user.keyboard('{Escape}');
     await user.click(screen.getByRole('button', {name: /更换候选/}));
     await user.click(screen.getByRole('option', {name: /Apple Music.*apple-182911/}));
     expect(screen.getByText(/Apple Music \/ apple-182911/)).toBeInTheDocument();
