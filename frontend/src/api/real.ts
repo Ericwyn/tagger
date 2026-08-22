@@ -1,4 +1,4 @@
-import type {LibrarySummary, Track} from '@/types';
+import type {LibrarySummary, Track, TrackPatch} from '@/types';
 
 interface DataEnvelope<T> {
   data: T;
@@ -24,6 +24,21 @@ export interface ScanReport {
 export interface ScanResult {
   library: LibrarySummary;
   report: ScanReport;
+}
+
+interface FieldOperation<T> {
+  op: 'set' | 'delete';
+  value?: T;
+}
+
+export interface WriteResult {
+  track: Track;
+  write: {
+    baseRevision: string;
+    currentRevision: string;
+    changed: boolean;
+    warnings: string[];
+  };
 }
 
 export class APIError extends Error {
@@ -73,5 +88,54 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
     async rescanLibrary(libraryId: string): Promise<ScanResult> {
       return request<ScanResult>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
     },
+
+    async updateTrack(track: Track, patch: TrackPatch): Promise<WriteResult> {
+      return request<WriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/tags`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'If-Match': `"${track.revision}"`,
+        },
+        body: JSON.stringify({
+          baseRevision: track.revision,
+          patch: serializePatch(track, patch),
+          dryRun: false,
+        }),
+      });
+    },
   };
+}
+
+function serializePatch(track: Track, patch: TrackPatch) {
+  const result: Record<string, FieldOperation<string | string[] | number>> = {};
+  if (patch.title !== track.title) result.title = stringOperation(patch.title);
+  if (!arraysEqual(patch.artists, track.artists)) result.artists = stringsOperation(patch.artists);
+  if (patch.album !== track.album) result.album = stringOperation(patch.album);
+  if (!arraysEqual(patch.albumArtists, track.albumArtists)) result.albumArtists = stringsOperation(patch.albumArtists);
+  if (patch.trackNumber !== track.trackNumber) result.trackNumber = numberOperation(patch.trackNumber);
+  if (patch.trackTotal !== track.trackTotal) result.trackTotal = numberOperation(patch.trackTotal);
+  if (patch.discNumber !== track.discNumber) result.discNumber = numberOperation(patch.discNumber);
+  if (patch.discTotal !== track.discTotal) result.discTotal = numberOperation(patch.discTotal);
+  if (patch.year !== track.year) result.year = numberOperation(patch.year);
+  if (!arraysEqual(patch.genres, track.genres)) result.genres = stringsOperation(patch.genres);
+  if (patch.lyrics !== track.lyrics) result.lyrics = stringOperation(patch.lyrics);
+  return result;
+}
+
+function stringOperation(value: string): FieldOperation<string> {
+  const normalized = value.trim();
+  return normalized ? {op: 'set', value: normalized} : {op: 'delete'};
+}
+
+function stringsOperation(value: string[]): FieldOperation<string[]> {
+  const normalized = value.map((item) => item.trim()).filter(Boolean);
+  return normalized.length > 0 ? {op: 'set', value: normalized} : {op: 'delete'};
+}
+
+function numberOperation(value?: number): FieldOperation<number> {
+  return value === undefined ? {op: 'delete'} : {op: 'set', value};
+}
+
+function arraysEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

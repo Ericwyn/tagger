@@ -123,7 +123,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
 
   const saveTrack = async (
     patch: TrackPatch,
-    notice = apiReadMode === 'real' ? '修改已保存为浏览器草稿，尚未写入音乐文件' : '标签草稿已写入 Mock 数据层',
+    notice = apiReadMode === 'real' ? '标签已通过安全写入流程保存到音乐文件' : '标签草稿已写入 Mock 数据层',
   ) => {
     if (!activeTrack) return;
     setSaving(true);
@@ -274,7 +274,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         <div className="workspace-foot">
           <span>显示 {visibleTracks.length} / {tracks.length} 首</span>
           <span><i className="status-dot healthy" /> 索引健康</span>
-          <span>{apiReadMode === 'real' ? 'Go API · 只读索引' : 'Mock API · rev 0.1'}</span>
+          <span>{apiReadMode === 'real' ? 'Go API · 安全写入' : 'Mock API · rev 0.1'}</span>
         </div>
       </section>
 
@@ -311,7 +311,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         onApply={(patch, candidate) => saveTrack(
           patch,
           apiReadMode === 'real'
-            ? `已采用 ${candidate.providerName} 候选并保存为浏览器草稿`
+            ? `已采用 ${candidate.providerName} 候选并安全写入音乐文件`
             : `已采用 ${candidate.providerName} 候选，Mock 修订已更新`,
         )}
       />

@@ -33,15 +33,9 @@ export async function updateTrack(trackId: string, patch: TrackPatch): Promise<T
   if (apiReadMode === 'mock') return mock.updateTrack(trackId, patch);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
-  const updated: Track = {
-    ...current,
-    ...patch,
-    revision: `draft-${trackId}-${Date.now()}`,
-    modifiedAt: '浏览器草稿 · 刚刚',
-    syncState: 'draft',
-  };
-  realTrackCache.set(trackId, updated);
-  return structuredClone(updated);
+  const result = await real.updateTrack(current, patch);
+  realTrackCache.set(trackId, result.track);
+  return result.track;
 }
 
 // Provider, job and revision views remain intentionally backed by the mock

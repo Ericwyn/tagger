@@ -157,6 +157,8 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 	}, nil
 }
 
+func (s *Scanner) Root() string { return s.opts.Root }
+
 func (s *Scanner) discover(ctx context.Context) ([]string, []string, error) {
 	paths := make([]string, 0, 256)
 	warnings := make([]string, 0)
@@ -175,6 +177,12 @@ func (s *Scanner) discover(ctx context.Context) ([]string, []string, error) {
 			return fs.SkipDir
 		}
 		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+			return nil
+		}
+		// Safe writers use hidden same-directory files such as
+		// .song.tagger-123.mp3. Hidden files are never library entries, so a
+		// concurrent scan cannot accidentally index an in-flight copy.
+		if strings.HasPrefix(entry.Name(), ".") {
 			return nil
 		}
 		if isSupportedAudio(path) {
@@ -208,7 +216,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	if statErr != nil {
 		track.Health = domain.HealthParseError
 		track.ParseError = statErr.Error()
-		track.Revision = revisionFor(relativePath, info, nil)
+		track.Revision = FileRevision(relativePath, info, nil)
 		return track, statErr
 	}
 
@@ -216,7 +224,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	if readErr != nil {
 		track.Health = domain.HealthParseError
 		track.ParseError = readErr.Error()
-		track.Revision = revisionFor(relativePath, info, nil)
+		track.Revision = FileRevision(relativePath, info, nil)
 		return track, readErr
 	}
 	applySnapshot(&track, snapshot)
@@ -225,7 +233,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	}
 	track.DurationSeconds = snapshotDurationSeconds(snapshot)
 	track.Health = healthFor(track)
-	track.Revision = revisionFor(relativePath, info, snapshot.Raw)
+	track.Revision = FileRevision(relativePath, info, snapshot.Raw)
 	return track, nil
 }
 
@@ -418,7 +426,9 @@ func readSidecarLyrics(path string) string {
 	return string(content)
 }
 
-func revisionFor(relativePath string, info fs.FileInfo, raw map[string][]string) string {
+// FileRevision binds the indexed path, file identity and normalized raw tags.
+// Writers recompute it immediately before editing to detect external changes.
+func FileRevision(relativePath string, info fs.FileInfo, raw map[string][]string) string {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte(relativePath))
 	if info != nil {

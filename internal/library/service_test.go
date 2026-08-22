@@ -25,6 +25,8 @@ func (serviceEngine) Read(_ context.Context, path string) (tags.Snapshot, error)
 	}, nil
 }
 
+func (serviceEngine) Write(context.Context, string, map[string][]string) error { return nil }
+
 func (serviceEngine) Version() string { return "test" }
 
 func TestServiceFiltersAndReturnsDefensiveCopies(t *testing.T) {

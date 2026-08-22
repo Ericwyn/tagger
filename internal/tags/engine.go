@@ -19,5 +19,8 @@ type Snapshot struct {
 // property names. Write operations will be added behind the same boundary.
 type Engine interface {
 	Read(ctx context.Context, path string) (Snapshot, error)
+	// Write updates only the provided property-map keys. An empty value list
+	// deletes that key; unknown and unmentioned keys must be preserved.
+	Write(ctx context.Context, path string, updates map[string][]string) error
 	Version() string
 }

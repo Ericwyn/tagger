@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/tags"
@@ -25,6 +27,8 @@ func (serverEngine) Read(_ context.Context, path string) (tags.Snapshot, error) 
 		ArtworkCount:    1,
 	}, nil
 }
+
+func (serverEngine) Write(context.Context, string, map[string][]string) error { return nil }
 
 func (serverEngine) Version() string { return "test-engine" }
 
@@ -96,6 +100,36 @@ func TestRescanRejectsUnknownLibrary(t *testing.T) {
 	}
 }
 
+func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {
+	s := newTestServer(t)
+	allTracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)
+	var listEnvelope struct {
+		Data struct {
+			Tracks []struct {
+				ID       string `json:"id"`
+				Revision string `json:"revision"`
+			} `json:"tracks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(allTracks.Body.Bytes(), &listEnvelope); err != nil || len(listEnvelope.Data.Tracks) == 0 {
+		t.Fatalf("decode tracks: %v body=%s", err, allTracks.Body.String())
+	}
+	track := listEnvelope.Data.Tracks[0]
+	body := []byte(`{"baseRevision":"` + track.Revision + `","patch":{"title":{"op":"set","value":"Changed"}},"dryRun":true}`)
+	preview := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/tracks/"+track.ID+"/tags", &ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+		ut.Header{Key: "content-type", Value: "application/json"}, ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if preview.Code != 200 || !containsJSON(preview.Body.Bytes(), `"changed":true`) || !containsJSON(preview.Body.Bytes(), `"field":"title"`) {
+		t.Fatalf("preview = %d %s", preview.Code, preview.Body.String())
+	}
+
+	conflictBody := []byte(`{"baseRevision":"stale","patch":{"title":{"op":"set","value":"Changed"}},"dryRun":true}`)
+	conflict := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/tracks/"+track.ID+"/tags", &ut.Body{Body: bytes.NewReader(conflictBody), Len: len(conflictBody)},
+		ut.Header{Key: "content-type", Value: "application/json"}, ut.Header{Key: "If-Match", Value: `"stale"`})
+	if conflict.Code != 409 || !containsJSON(conflict.Body.Bytes(), `"code":"revision_conflict"`) {
+		t.Fatalf("conflict = %d %s", conflict.Code, conflict.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	root := t.TempDir()
@@ -112,11 +146,15 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+	writer, err := filewrite.New(root, serverEngine{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	frontend := fstest.MapFS{
 		"index.html":    &fstest.MapFile{Data: []byte("<main>Tagger</main>")},
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('tagger')")},
 	}
-	return New("127.0.0.1:0", service, fs.FS(frontend), "test-version", serverEngine{}.Version())
+	return New("127.0.0.1:0", service, writer, fs.FS(frontend), "test-version", serverEngine{}.Version())
 }
 
 func containsJSON(body []byte, fragment string) bool {

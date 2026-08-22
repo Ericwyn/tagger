@@ -56,6 +56,16 @@ func (e *Engine) Read(ctx context.Context, path string) (tags.Snapshot, error) {
 	}, nil
 }
 
+func (e *Engine) Write(ctx context.Context, path string, updates map[string][]string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := taglib.WriteTags(path, updates, 0); err != nil {
+		return fmt.Errorf("write tags: %w", err)
+	}
+	return nil
+}
+
 func (e *Engine) Version() string { return "go-taglib/v0.14.0 (TagLib 2.1.1)" }
 
 func normalizeContainer(format string) string {

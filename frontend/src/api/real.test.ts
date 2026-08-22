@@ -45,4 +45,51 @@ describe('real API client', () => {
     await expect(api.rescanLibrary('lib/a')).resolves.toEqual(result);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
   });
+
+  it('writes an explicit patch guarded by the indexed revision', async () => {
+    const fullTrack = {
+      ...track,
+      title: 'Old title',
+      artists: ['Artist'],
+      album: 'Album',
+      albumArtists: ['Artist'],
+      genres: ['Pop'],
+      lyrics: 'Lyrics',
+      trackNumber: 1,
+      revision: 'rev-1',
+    } as Track;
+    const updated = {...fullTrack, title: 'New title', revision: 'rev-2'};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: {track: updated, write: {baseRevision: 'rev-1', currentRevision: 'rev-2', changed: true, warnings: []}},
+    }), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.updateTrack(fullTrack, {
+      title: 'New title',
+      artists: ['Artist'],
+      album: '',
+      albumArtists: [],
+      genres: ['Pop'],
+      lyrics: '',
+      trackNumber: 1,
+    })).resolves.toEqual(expect.objectContaining({track: updated}));
+
+    const init = fetcher.mock.calls[0][1] as RequestInit;
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/tags');
+    expect(init.method).toBe('PATCH');
+    expect(init.headers).toEqual(expect.objectContaining({'If-Match': '"rev-1"'}));
+    expect(JSON.parse(String(init.body))).toEqual(expect.objectContaining({
+      baseRevision: 'rev-1',
+      patch: expect.objectContaining({
+        title: {op: 'set', value: 'New title'},
+        album: {op: 'delete'},
+        albumArtists: {op: 'delete'},
+        lyrics: {op: 'delete'},
+      }),
+    }));
+    const serialized = JSON.parse(String(init.body)).patch;
+    expect(serialized).not.toHaveProperty('artists');
+    expect(serialized).not.toHaveProperty('trackNumber');
+    expect(serialized).not.toHaveProperty('trackTotal');
+  });
 });

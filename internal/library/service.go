@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -12,6 +13,14 @@ import (
 )
 
 var ErrTrackNotFound = errors.New("track not found")
+
+type FileRef struct {
+	ID           string
+	RelativePath string
+	AbsolutePath string
+	Revision     string
+	Format       domain.TrackFormat
+}
 
 type TrackFilter struct {
 	FolderID string
@@ -107,6 +116,20 @@ func (s *Service) Track(id string) (domain.Track, error) {
 		return domain.Track{}, ErrTrackNotFound
 	}
 	return cloneTrack(track), nil
+}
+
+func (s *Service) FileRef(id string) (FileRef, error) {
+	track, err := s.Track(id)
+	if err != nil {
+		return FileRef{}, err
+	}
+	return FileRef{
+		ID:           track.ID,
+		RelativePath: track.RelativePath,
+		AbsolutePath: filepath.Join(s.scanner.Root(), filepath.FromSlash(track.RelativePath)),
+		Revision:     track.Revision,
+		Format:       track.Format,
+	}, nil
 }
 
 func trackMatches(track domain.Track, query string) bool {

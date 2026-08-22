@@ -30,6 +30,8 @@ func (f fakeEngine) Read(_ context.Context, path string) (tags.Snapshot, error) 
 	return tags.Snapshot{}, nil
 }
 
+func (f fakeEngine) Write(context.Context, string, map[string][]string) error { return nil }
+
 func (f fakeEngine) Version() string { return "fake" }
 
 func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
@@ -40,6 +42,8 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "root-artist.wav"), nil)
 	mustWriteFile(t, filepath.Join(root, "notes.txt"), nil)
 	mustWriteFile(t, filepath.Join(root, ".hidden", "ignored.mp3"), nil)
+	mustWriteFile(t, filepath.Join(root, ".song.tagger-inflight.mp3"), nil)
+	mustWriteFile(t, filepath.Join(root, ".hidden-file.flac"), nil)
 
 	engine := fakeEngine{
 		snapshots: map[string]tags.Snapshot{

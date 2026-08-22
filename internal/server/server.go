@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"mime"
@@ -12,18 +13,20 @@ import (
 	hserver "github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/ericwyn/tagger/internal/domain"
+	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 )
 
 type Server struct {
 	h             *hserver.Hertz
 	library       *library.Service
+	writer        *filewrite.Writer
 	frontend      fs.FS
 	version       string
 	tagEngineInfo string
 }
 
-func New(listen string, libraryService *library.Service, frontend fs.FS, version, tagEngineInfo string) *Server {
+func New(listen string, libraryService *library.Service, writer *filewrite.Writer, frontend fs.FS, version, tagEngineInfo string) *Server {
 	h := hserver.Default(
 		hserver.WithHostPorts(listen),
 		hserver.WithMaxRequestBodySize(1<<20),
@@ -31,6 +34,7 @@ func New(listen string, libraryService *library.Service, frontend fs.FS, version
 	s := &Server{
 		h:             h,
 		library:       libraryService,
+		writer:        writer,
 		frontend:      frontend,
 		version:       version,
 		tagEngineInfo: tagEngineInfo,
@@ -53,6 +57,7 @@ func (s *Server) routes() {
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
 	api.GET("/tracks/:id", s.handleTrack)
+	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
@@ -116,6 +121,85 @@ func (s *Server) handleTrack(_ context.Context, c *app.RequestContext) {
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, track)
+}
+
+type tagWriteRequest struct {
+	BaseRevision string          `json:"baseRevision"`
+	Patch        domain.TagPatch `json:"patch"`
+	DryRun       bool            `json:"dryRun"`
+}
+
+func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "write_unavailable", "标签写入服务尚未启用")
+		return
+	}
+	var request tagWriteRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	headerRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if request.BaseRevision == "" {
+		request.BaseRevision = headerRevision
+	}
+	if request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "baseRevision 与 If-Match 必须一致且不能为空")
+		return
+	}
+	ref, err := s.library.FileRef(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	result, err := s.writer.Write(ctx, ref, request.BaseRevision, request.Patch, request.DryRun)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	if request.DryRun || !result.Changed {
+		s.writeData(c, map[string]any{"preview": result})
+		return
+	}
+	if err := s.library.Rescan(ctx); err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但重新索引失败："+err.Error())
+		return
+	}
+	track, err := s.library.Track(ref.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但曲目索引不可用")
+		return
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, map[string]any{"track": track, "write": result})
+}
+
+func (s *Server) handleWriteError(c *app.RequestContext, err error) {
+	var conflict *filewrite.RevisionConflictError
+	switch {
+	case errors.As(err, &conflict):
+		c.JSON(consts.StatusConflict, map[string]any{
+			"error": map[string]any{
+				"code":    "revision_conflict",
+				"message": "文件已被其他操作修改",
+				"details": map[string]string{"current_revision": conflict.Current},
+			},
+		})
+	case errors.Is(err, filewrite.ErrInvalidPatch):
+		s.writeError(c, consts.StatusBadRequest, "invalid_patch", err.Error())
+	case errors.Is(err, filewrite.ErrPathOutsideRoot):
+		s.writeError(c, consts.StatusForbidden, "forbidden", "文件路径不在曲库安全边界内")
+	case errors.Is(err, filewrite.ErrUnsupportedFormat):
+		s.writeError(c, consts.StatusUnprocessableEntity, "unwritable_format", "当前格式不支持写入")
+	case errors.Is(err, filewrite.ErrVerification):
+		s.writeError(c, consts.StatusInternalServerError, "write_verification_failed", err.Error())
+	default:
+		s.writeError(c, consts.StatusInternalServerError, "write_failed", err.Error())
+	}
 }
 
 func (s *Server) handleIndex(_ context.Context, c *app.RequestContext) {
