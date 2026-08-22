@@ -24,21 +24,18 @@ import {
   apiReadMode,
   applyCandidateArtwork,
   createBatchEditJob,
-  deleteLyricsSidecar,
   getLibrary,
   listTracks,
   rescanLibrary,
   searchCandidates,
   updateArtwork,
-  updateTrack,
-	writeLyricsSidecar,
+	updateTrack,
 	waitForJob,
 } from '@/api';
 import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
-  writeSidecar?: boolean;
 }
 
 interface LibraryPageProps {
@@ -165,31 +162,19 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
   ): Promise<Track | undefined> => {
 	if (!activeTrack) return undefined;
     const writeTag = options.writeTag ?? true;
-    const writeSidecar = options.writeSidecar ?? false;
-    const lyricsChanged = patch.lyrics !== activeTrack.lyrics;
-    if (!writeTag && !(writeSidecar && lyricsChanged)) {
-      onNotice('未选择可写入的歌词目标，文件未修改');
+    if (!writeTag) {
+      onNotice('未选择“写入音频标签”，文件未修改');
       return activeTrack;
     }
     setSaving(true);
     let updated = activeTrack;
-    let tagsWritten = false;
-    let sidecarWritten = false;
     try {
-	  if (writeTag) {
-		updated = await updateTrack(activeTrack.id, patch, provenance);
-		tagsWritten = true;
-		setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
-	  }
-	  if (writeSidecar && lyricsChanged) {
-		updated = patch.lyrics.trim() ? await writeLyricsSidecar(updated.id, patch.lyrics) : await deleteLyricsSidecar(updated.id);
-		sidecarWritten = true;
-		setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
-	  }
-	  onNotice(tagsWritten && sidecarWritten ? `${notice}，同名 .lrc 也已安全保存` : sidecarWritten ? '同名 .lrc 已安全保存；音频标签保持不变' : notice);
+	  updated = await updateTrack(activeTrack.id, patch, provenance);
+	  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+	  onNotice(notice);
 	  return updated;
 	} catch (error) {
-	  onNotice(tagsWritten && sidecarWritten ? `音频标签已写入，但 .lrc 保存失败：${error instanceof Error ? error.message : '未知错误'}` : error instanceof Error ? error.message : '标签保存失败');
+	  onNotice(error instanceof Error ? error.message : '标签保存失败');
 	  return undefined;
     } finally {
       setSaving(false);

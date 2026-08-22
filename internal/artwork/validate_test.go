@@ -37,6 +37,19 @@ func TestValidateJPEGAndPNG(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsCommonCDNMIMEAliases(t *testing.T) {
+	var data bytes.Buffer
+	if err := jpeg.Encode(&data, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, declared := range []string{"image/jpg", "image/pjpeg", "image/jpeg; charset=binary"} {
+		asset, err := Validate(data.Bytes(), declared)
+		if err != nil || asset.MIME != "image/jpeg" {
+			t.Fatalf("declared %q: asset=%#v err=%v", declared, asset, err)
+		}
+	}
+}
+
 func TestValidateRejectsMIMEConfusionAndInvalidData(t *testing.T) {
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {

@@ -42,7 +42,6 @@ interface TrackInspectorProps {
 
 export interface TrackSaveOptions {
   writeTag: boolean;
-  writeSidecar: boolean;
 }
 
 const tabs: Array<{id: InspectorTab; label: string}> = [
@@ -136,7 +135,6 @@ export function TrackInspector({
   const [fallbackPlaying, setFallbackPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
   const [writeTag, setWriteTag] = useState(true);
-  const [writeSidecar, setWriteSidecar] = useState(true);
   const [extendedOpen, setExtendedOpen] = useState(false);
   const [rawTags, setRawTags] = useState<Record<string, string[]> | null>(null);
   const [rawTagsOpen, setRawTagsOpen] = useState(false);
@@ -150,7 +148,6 @@ export function TrackInspector({
 	setFallbackPlaying(false);
 	setDeleteArtworkArmed(false);
 	setWriteTag(true);
-	setWriteSidecar(true);
 	setExtendedOpen(false);
 	setRawTags(null);
 	setRawTagsOpen(false);
@@ -543,14 +540,13 @@ export function TrackInspector({
               spellCheck={false}
             />
             <div className="lyrics-options">
-              <label><input type="checkbox" checked={writeTag} onChange={(event) => setWriteTag(event.target.checked)} /> 写入音频标签</label>
               <label>
-                <input type="checkbox" checked={writeSidecar} onChange={(event) => setWriteSidecar(event.target.checked)} />
-                同时保存 .lrc
-                <small>{track.lyricsSidecar?.exists ? '已存在同名文件' : '未发现同名文件'}</small>
+                <input type="checkbox" checked={writeTag} onChange={(event) => setWriteTag(event.target.checked)} />
+                写入音频标签（内嵌）
+                <small>歌词只写入当前音乐文件，不再生成或覆盖同名 .lrc</small>
               </label>
             </div>
-            <p className="format-note">保存时会写入同目录临时副本，重读验证成功后再原子替换原文件。</p>
+            <p className="format-note">保存时会写入同目录临时副本，重读验证成功后再原子替换原文件；已有同名 .lrc 仅作为兼容信息读取。</p>
           </div>
         )}
 
@@ -644,7 +640,7 @@ export function TrackInspector({
                 className="primary-button"
                 disabled={saving}
                 onClick={async () => {
-                  await onSave(draft, {writeTag, writeSidecar});
+                  await onSave(draft, {writeTag});
                   setShowPreview(false);
                 }}
               >

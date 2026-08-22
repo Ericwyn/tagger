@@ -39,11 +39,11 @@ func Validate(data []byte, declaredMIME string) (Asset, error) {
 	if len(data) > MaxBytes {
 		return Asset{}, fmt.Errorf("%w: image exceeds %d MiB", ErrInvalid, MaxBytes>>20)
 	}
-	detectedMIME := strings.ToLower(strings.TrimSpace(strings.Split(http.DetectContentType(data), ";")[0]))
+	detectedMIME := normalizeMIME(http.DetectContentType(data))
 	if detectedMIME != "image/jpeg" && detectedMIME != "image/png" && detectedMIME != "image/webp" {
 		return Asset{}, fmt.Errorf("%w: unsupported image type %q", ErrInvalid, detectedMIME)
 	}
-	declaredMIME = strings.ToLower(strings.TrimSpace(strings.Split(declaredMIME, ";")[0]))
+	declaredMIME = normalizeMIME(declaredMIME)
 	if declaredMIME != "" && declaredMIME != "application/octet-stream" && declaredMIME != detectedMIME {
 		return Asset{}, fmt.Errorf("%w: declared MIME %q does not match %q", ErrInvalid, declaredMIME, detectedMIME)
 	}
@@ -59,6 +59,21 @@ func Validate(data []byte, declaredMIME string) (Asset, error) {
 		Data: append([]byte(nil), data...), MIME: detectedMIME, Format: strings.ToUpper(format),
 		Width: config.Width, Height: config.Height, Size: len(data), Hash: hex.EncodeToString(digest[:]),
 	}, nil
+}
+
+// normalizeMIME handles the aliases commonly returned by image CDNs. In
+// particular, NetEase currently responds with image/jpg even though the
+// payload is a regular JPEG and Go detects it as image/jpeg.
+func normalizeMIME(value string) string {
+	value = strings.ToLower(strings.TrimSpace(strings.Split(value, ";")[0]))
+	switch value {
+	case "image/jpg", "image/pjpeg":
+		return "image/jpeg"
+	case "image/x-png":
+		return "image/png"
+	default:
+		return value
+	}
 }
 
 func Describe(data []byte) (Asset, error) {

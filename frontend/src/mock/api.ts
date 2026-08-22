@@ -1,5 +1,5 @@
 import {candidatesFor, jobs, library, providerConfigs, revisions, seedTracks} from '@/mock/data';
-import type {Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, Revision, SidecarInfo, Track, TrackPatch} from '@/types';
+import type {CandidateSearchQuery, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch} from '@/types';
 
 let tracks = structuredClone(seedTracks);
 
@@ -104,8 +104,36 @@ export async function deleteLyricsSidecar(trackId: string): Promise<LyricsSideca
 }
 
 export async function searchCandidates(track: Track): Promise<MatchCandidate[]> {
-  await wait(520);
-  return structuredClone(candidatesFor(track));
+	await wait(520);
+	return structuredClone(candidatesFor(track));
+}
+
+export async function testProvider(provider: ProviderConfig, query?: CandidateSearchQuery): Promise<ProviderTestResponse> {
+	await wait(260);
+	const demo = {...seedTracks[0], ...(query ? {
+		title: query.title,
+		artists: query.artists,
+		album: query.album,
+		durationSeconds: query.durationSeconds || seedTracks[0].durationSeconds,
+	} : {})};
+	const candidates = candidatesFor(demo).filter((candidate) => candidate.providerId === provider.id);
+	const logs = [
+		{level: 'info' as const, stage: 'request', message: 'Mock 已接收测试查询', details: {title: demo.title, provider: provider.id}},
+		{level: 'success' as const, stage: 'search', message: `Mock 搜索完成，返回 ${candidates.length} 个候选`, details: {count: candidates.length, latencyMs: 260, cached: false}},
+		...candidates.map((candidate) => ({
+			level: 'success' as const,
+			stage: 'candidate',
+			message: `收到候选：${candidate.title.value}`,
+			details: {candidateId: candidate.id, hasArtwork: candidate.hasArtwork, hasLyrics: candidate.hasLyrics},
+		})),
+	];
+	return {
+		provider: structuredClone(provider),
+		result: {status: 'ok', count: candidates.length, latencyMs: 260},
+		query: query ? structuredClone(query) : undefined,
+		candidates: structuredClone(candidates),
+		logs,
+	};
 }
 
 export async function listProviders(): Promise<ProviderConfig[]> {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"mime"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1900,7 +1901,46 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusUnprocessableEntity, "provider_disabled", "请先启用数据来源")
 		return
 	}
-	result, err := s.providers.Search(ctx, providers.Query{Title: "Imagine", Artists: []string{"John Lennon"}}, []string{descriptor.ID}, 1)
+	query := providers.Query{Title: "Imagine", Artists: []string{"John Lennon"}}
+	limit := 1
+	probeArtwork := false
+	logs := []providerTestLog{{Level: "info", Stage: "request", Message: "开始数据源测试"}}
+	body := c.Request.Body()
+	if len(strings.TrimSpace(string(body))) > 0 {
+		var request struct {
+			Query struct {
+				Title           string   `json:"title"`
+				Artists         []string `json:"artists"`
+				Album           string   `json:"album"`
+				DurationSeconds int64    `json:"durationSeconds"`
+			} `json:"query"`
+			Limit        int  `json:"limit"`
+			ProbeArtwork bool `json:"probeArtwork"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "测试查询 JSON 无效")
+			return
+		}
+		if strings.TrimSpace(request.Query.Title) == "" {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "测试查询需要歌曲名")
+			return
+		}
+		query = providers.Query{
+			Title: strings.TrimSpace(request.Query.Title), Artists: request.Query.Artists,
+			Album: strings.TrimSpace(request.Query.Album), DurationSeconds: request.Query.DurationSeconds,
+		}
+		if request.Limit > 0 {
+			limit = request.Limit
+		}
+		probeArtwork = request.ProbeArtwork
+	}
+	if limit > 10 {
+		limit = 10
+	}
+	logs = append(logs, providerTestLog{Level: "info", Stage: "query", Message: "已提交搜索查询", Details: map[string]any{
+		"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds, "limit": limit,
+	}})
+	result, err := s.providers.Search(ctx, query, []string{descriptor.ID}, limit)
 	if err != nil {
 		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", err.Error())
 		return
@@ -1910,7 +1950,59 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", outcome.Error)
 		return
 	}
-	s.writeData(c, map[string]any{"provider": descriptor, "result": outcome})
+	logs = append(logs, providerTestLog{Level: "success", Stage: "search", Message: "数据源搜索完成", Details: map[string]any{
+		"status": outcome.Status, "count": outcome.Count, "latencyMs": outcome.LatencyMS, "cached": outcome.Cached,
+	}})
+	for _, candidate := range result.Candidates {
+		lyricsChars := 0
+		if candidate.Lyrics != nil {
+			lyricsChars = len([]rune(candidate.Lyrics.Value))
+		}
+		details := map[string]any{
+			"candidateId": candidate.ID, "externalId": candidate.ExternalID, "score": candidate.Score,
+			"hasArtwork": candidate.HasArtwork, "hasLyrics": candidate.HasLyrics, "lyricsChars": lyricsChars,
+		}
+		if reference, referenceErr := s.providers.ArtworkReference(candidate.ID); referenceErr == nil {
+			if parsed, parseErr := url.Parse(reference.URL); parseErr == nil {
+				details["artworkHost"] = parsed.Hostname()
+				details["artworkPath"] = parsed.EscapedPath()
+			}
+			details["artworkExpiresAt"] = reference.ExpiresAt.Format(time.RFC3339)
+		}
+		logs = append(logs, providerTestLog{Level: "info", Stage: "candidate", Message: "收到候选：" + candidate.Title.Value, Details: details})
+		if !probeArtwork || !candidate.HasArtwork {
+			continue
+		}
+		reference, referenceErr := s.providers.ArtworkReference(candidate.ID)
+		if referenceErr != nil {
+			logs = append(logs, providerTestLog{Level: "warning", Stage: "artwork", Message: "候选封面引用不存在", Details: map[string]any{"candidateId": candidate.ID}})
+			continue
+		}
+		asset, artworkErr := s.downloadArtwork(ctx, reference)
+		if artworkErr != nil {
+			logs = append(logs, providerTestLog{Level: "error", Stage: "artwork", Message: "封面探测失败", Details: map[string]any{"candidateId": candidate.ID, "error": artworkErr.Error()}})
+			continue
+		}
+		logs = append(logs, providerTestLog{Level: "success", Stage: "artwork", Message: "封面探测成功", Details: map[string]any{
+			"candidateId": candidate.ID, "mime": asset.MIME, "format": asset.Format, "width": asset.Width, "height": asset.Height, "size": asset.Size,
+		}})
+	}
+	s.writeData(c, map[string]any{
+		"provider": descriptor,
+		"result":   outcome,
+		"query": map[string]any{
+			"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds,
+		},
+		"candidates": result.Candidates,
+		"logs":       logs,
+	})
+}
+
+type providerTestLog struct {
+	Level   string         `json:"level"`
+	Stage   string         `json:"stage"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 type matchSearchRequest struct {

@@ -1,4 +1,4 @@
-import {useEffect, useState, type CSSProperties} from 'react';
+import {useEffect, useState, type CSSProperties, type FormEvent} from 'react';
 import {
   Check,
   ChevronRight,
@@ -16,10 +16,12 @@ import {
   TestTube2,
   ToggleLeft,
   ToggleRight,
+  X,
 } from 'lucide-react';
+import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, listProviders, testProvider as runProviderTest, updateProvider} from '@/api';
-import type {ProviderConfig} from '@/types';
+import {apiReadMode, candidateArtworkURL, listProviders, testProvider as runProviderTest, updateProvider} from '@/api';
+import type {CandidateSearchQuery, MatchCandidate, ProviderConfig, ProviderTestResponse} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
@@ -36,10 +38,34 @@ const healthText = {
   disabled: '未启用',
 };
 
+const defaultTestQuery: CandidateSearchQuery = {
+  title: 'Imagine', artists: ['John Lennon'], album: '', durationSeconds: 0,
+};
+
+function formatLogDetails(details: Record<string, string | number | boolean | string[] | undefined> | undefined): string {
+  if (!details) return '';
+  return Object.entries(details)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(' / ') : String(value)}`)
+    .join(' · ');
+}
+
+function candidateAssetLabel(candidate: MatchCandidate): string {
+  const assets = [];
+  if (candidate.hasArtwork) assets.push('封面');
+  if (candidate.hasLyrics) assets.push('歌词');
+  return assets.length > 0 ? assets.join(' + ') : '仅元数据';
+}
+
 export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCoversChange}: SettingsPageProps) {
   const [tab, setTab] = useState<SettingsTab>('providers');
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testingId, setTestingId] = useState<string>();
+  const [testProviderId, setTestProviderId] = useState<string>();
+  const [testQuery, setTestQuery] = useState<CandidateSearchQuery>(defaultTestQuery);
+  const [testArtistInput, setTestArtistInput] = useState(defaultTestQuery.artists.join(' / '));
+  const [testResponse, setTestResponse] = useState<ProviderTestResponse>();
+  const [testError, setTestError] = useState('');
 
   useEffect(() => {
     listProviders().then(setProviders);
@@ -55,12 +81,37 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
 	}
   };
 
-	const testProvider = async (provider: ProviderConfig) => {
-	setTestingId(provider.id);
-	try { onNotice(await runProviderTest(provider)); }
-	catch (error) { onNotice(error instanceof Error ? error.message : '连接测试失败'); }
-	finally { setTestingId(undefined); }
-  };
+	const openProviderTest = (provider: ProviderConfig) => {
+	  setTestProviderId(provider.id);
+	  setTestResponse(undefined);
+	  setTestError('');
+	};
+
+	const executeProviderTest = async (event: FormEvent) => {
+	  event.preventDefault();
+	  const provider = providers.find((item) => item.id === testProviderId);
+	  const title = testQuery.title.trim();
+	  if (!provider || !title) {
+		setTestError('请输入歌曲名后再测试');
+		return;
+	  }
+	  const query: CandidateSearchQuery = {
+		...testQuery,
+		title,
+		artists: testArtistInput.split(/[,，/]/).map((item) => item.trim()).filter(Boolean),
+		album: testQuery.album.trim(),
+	  };
+	  setTestingId(provider.id);
+	  setTestError('');
+	  setTestResponse(undefined);
+	  try {
+		setTestResponse(await runProviderTest(provider, query));
+	  } catch (error) {
+		setTestError(error instanceof Error ? error.message : '数据源查询失败');
+	  } finally {
+		setTestingId(undefined);
+	  }
+	};
 
   return (
     <div className="section-page settings-page">
@@ -122,15 +173,68 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                     {provider.experimental && <div className="experimental-note"><CircleAlert size={13} /> 实验性非官方接口</div>}
                     <div className="provider-foot">
                       <small>{provider.quotaLabel}</small>
-					  <button disabled={testingId === provider.id || !provider.enabled} onClick={() => void testProvider(provider)}>
-                        {testingId === provider.id ? <LoaderCircle size={13} className="spin" /> : <TestTube2 size={13} />}
-                        测试
+                      <button disabled={!provider.enabled} onClick={() => openProviderTest(provider)}>
+                        <TestTube2 size={13} />
+                        测试查询
                       </button>
                       <button>配置</button>
                     </div>
                   </article>
                 ))}
               </div>
+			  {testProviderId && (() => {
+				const provider = providers.find((item) => item.id === testProviderId);
+				if (!provider) return null;
+				const candidates = testResponse?.candidates ?? [];
+				return (
+				  <section className="provider-test-panel" aria-label="数据源搜索测试">
+					<div className="provider-test-head">
+					  <div><span className="eyebrow">PROVIDER DIAGNOSTICS</span><h3>测试 {provider.name}</h3><p>输入一组真实查询，查看候选、歌词、封面和探测日志。</p></div>
+					  <button className="icon-button" title="关闭数据源测试" onClick={() => setTestProviderId(undefined)}><X size={17} /></button>
+					</div>
+					<form className="provider-test-form" onSubmit={(event) => void executeProviderTest(event)}>
+					  <label><span>歌曲名</span><input aria-label="测试歌曲名" value={testQuery.title} onChange={(event) => setTestQuery((current) => ({...current, title: event.target.value}))} placeholder="例如：再回首" required /></label>
+					  <label><span>歌手</span><input aria-label="测试歌手" value={testArtistInput} onChange={(event) => setTestArtistInput(event.target.value)} placeholder="多个歌手用 / 分隔" /></label>
+					  <label><span>专辑（可选）</span><input aria-label="测试专辑" value={testQuery.album} onChange={(event) => setTestQuery((current) => ({...current, album: event.target.value}))} placeholder="专辑名" /></label>
+					  <label><span>时长秒数（可选）</span><input aria-label="测试时长" type="number" min="0" value={testQuery.durationSeconds || ''} onChange={(event) => setTestQuery((current) => ({...current, durationSeconds: Math.max(0, Number(event.target.value) || 0)}))} placeholder="例如：248" /></label>
+					  <button className="primary-button" type="submit" disabled={testingId === provider.id}>
+						{testingId === provider.id ? <LoaderCircle size={14} className="spin" /> : <TestTube2 size={14} />}
+						执行查询并探测封面
+					  </button>
+					</form>
+					{testError && <div className="provider-test-error"><CircleAlert size={14} /> {testError}</div>}
+					{testResponse && (
+					  <div className="provider-test-output">
+						<div className="provider-test-summary">
+						  <strong className={cn(testResponse.result.status === 'ok' ? 'is-success' : 'is-error')}>{testResponse.result.status === 'ok' ? '查询完成' : '查询异常'}</strong>
+						  <span>{testResponse.result.count} 个候选</span>
+						  <span>{testResponse.result.latencyMs} ms</span>
+						  {testResponse.result.cached && <span>缓存命中</span>}
+						</div>
+						{candidates.length > 0 ? (
+						  <div className="provider-test-candidates">
+							{candidates.map((candidate) => {
+							  const imageUrl = candidateArtworkURL(candidate);
+							  return (
+								<article className="provider-test-candidate" key={candidate.id}>
+								  <CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} size="sm" missing={!showGeneratedCovers && !imageUrl} imageUrl={imageUrl} blankOnImageError={!showGeneratedCovers} />
+								  <div><strong>{candidate.title.value}</strong><span>{candidate.artists.value.join(' / ') || '未提供歌手'}</span><small>{candidate.album.value || '未提供专辑'} · {candidateAssetLabel(candidate)} · {Math.round(candidate.score * 100)}%</small></div>
+								</article>
+							  );
+							})}
+						  </div>
+						) : <div className="provider-test-empty">没有候选。请先查看下方日志，确认查询参数和数据源是否返回了结果。</div>}
+						{(testResponse.logs?.length ?? 0) > 0 && (
+						  <details className="provider-test-logs" open>
+							<summary>抓取与封面探测日志（{testResponse.logs!.length} 条）</summary>
+							<div>{testResponse.logs!.map((log, index) => <div className={cn('provider-test-log', `is-${log.level}`)} key={`${log.stage}-${index}`}><span>{log.stage}</span><p><strong>{log.message}</strong>{formatLogDetails(log.details) && <small>{formatLogDetails(log.details)}</small>}</p></div>)}</div>
+						  </details>
+						)}
+					  </div>
+					)}
+				  </section>
+				);
+			  })()}
 			  <div className="settings-policy-note">
 				<ShieldCheck size={18} />
 				<div><strong>来源用途策略</strong><span>远程封面只通过后端候选 ID、安全下载和图片验证后写入；实验性来源需要已实现适配器才能启用。</span></div>

@@ -80,8 +80,19 @@ func validateArtworkURL(providerID, value string) (*url.URL, error) {
 func safeArtworkClient(providerID string) *http.Client {
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 15 * time.Second}
 	transport := &http.Transport{
-		Proxy: nil,
-		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+		TLSHandshakeTimeout: 5 * time.Second,
+		IdleConnTimeout:     15 * time.Second,
+		DisableCompression:  true,
+	}
+	// The desktop development environment (and many user machines) reaches
+	// public music CDNs through HTTPS_PROXY. A proxy connection must dial the
+	// proxy host, not the provider host, so the strict direct dialer below cannot
+	// be used in that case. The URL allowlist and redirect validation still
+	// constrain every requested provider URL.
+	if artworkProxyConfigured() {
+		transport.Proxy = http.ProxyFromEnvironment
+	} else {
+		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(address)
 			if err != nil {
 				return nil, err
@@ -110,10 +121,7 @@ func safeArtworkClient(providerID string) *http.Client {
 				dialErrors = append(dialErrors, err)
 			}
 			return nil, errors.Join(dialErrors...)
-		},
-		TLSHandshakeTimeout: 5 * time.Second,
-		IdleConnTimeout:     15 * time.Second,
-		DisableCompression:  true,
+		}
 	}
 	return &http.Client{
 		Transport: transport,
@@ -126,6 +134,12 @@ func safeArtworkClient(providerID string) *http.Client {
 			return err
 		},
 	}
+}
+
+func artworkProxyConfigured() bool {
+	request := &http.Request{URL: &url.URL{Scheme: "https", Host: "coverartarchive.org"}}
+	proxy, _ := http.ProxyFromEnvironment(request)
+	return proxy != nil
 }
 
 func publicIP(ip net.IP) bool {

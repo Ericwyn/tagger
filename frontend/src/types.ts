@@ -242,6 +242,30 @@ export interface ProviderConfig {
   quotaLabel: string;
 }
 
+export interface ProviderTestResult {
+  status: string;
+  count: number;
+  latencyMs: number;
+  retryable?: boolean;
+  error?: string;
+  cached?: boolean;
+}
+
+export interface ProviderTestLog {
+  level: 'info' | 'success' | 'warning' | 'error' | string;
+  stage: string;
+  message: string;
+  details?: Record<string, string | number | boolean | string[] | undefined>;
+}
+
+export interface ProviderTestResponse {
+  provider: ProviderConfig;
+  result: ProviderTestResult;
+  query?: CandidateSearchQuery;
+  candidates?: MatchCandidate[];
+  logs?: ProviderTestLog[];
+}
+
 export interface TrackPatch {
   title: string;
   artists: string[];

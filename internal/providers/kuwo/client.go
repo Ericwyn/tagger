@@ -49,14 +49,18 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	values := url.Values{"client": {"kt"}, "ft": {"music"}, "cluster": {"0"}, "strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"}, "pn": {"0"}, "rn": {strconv.Itoa(limit)}, "all": {keyword}}
 	var response struct {
 		Items []struct {
-			MusicRID     string `json:"MUSICRID"`
-			SongName     string `json:"SONGNAME"`
-			Artist       string `json:"ARTIST"`
-			Album        string `json:"ALBUM"`
-			AlbumArtist  string `json:"ALBUMARTIST"`
-			Duration     string `json:"SONG_DURATION"`
-			TrackNumber  int    `json:"TRACKNUM"`
-			AlbumPicture string `json:"ALBUMPIC"`
+			MusicRID             string `json:"MUSICRID"`
+			SongName             string `json:"SONGNAME"`
+			Artist               string `json:"ARTIST"`
+			Album                string `json:"ALBUM"`
+			AlbumArtist          string `json:"ALBUMARTIST"`
+			Duration             string `json:"SONG_DURATION"`
+			TrackNumber          int    `json:"TRACKNUM"`
+			AlbumPicture         string `json:"ALBUMPIC"`
+			AlbumPictureShort    string `json:"ALBUMPIC_SHORT"`
+			WebAlbumPicture      string `json:"web_albumpic"`
+			WebAlbumPictureShort string `json:"web_albumpic_short"`
+			Picture              string `json:"PIC"`
 		} `json:"abslist"`
 	}
 	if err := providers.GetJSON(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, &response); err != nil {
@@ -68,9 +72,36 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		if id == "" {
 			continue
 		}
-		result = append(result, providers.Candidate{ProviderID: "kuwo", ExternalID: id, Title: item.SongName, Artists: splitArtists(item.Artist), Album: item.Album, AlbumArtists: splitArtists(item.AlbumArtist), TrackNumber: item.TrackNumber, DurationSeconds: parseDuration(item.Duration), ArtworkURL: item.AlbumPicture})
+		result = append(result, providers.Candidate{ProviderID: "kuwo", ExternalID: id, Title: item.SongName, Artists: splitArtists(item.Artist), Album: item.Album, AlbumArtists: splitArtists(item.AlbumArtist), TrackNumber: item.TrackNumber, DurationSeconds: parseDuration(item.Duration), ArtworkURL: normalizeArtworkURL(item.AlbumPicture, item.WebAlbumPicture, item.WebAlbumPictureShort, item.AlbumPictureShort, item.Picture)})
 	}
 	return result, nil
+}
+
+func normalizeArtworkURL(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.HasPrefix(value, "//") {
+			return "https:" + value
+		}
+		if strings.HasPrefix(strings.ToLower(value), "http://") {
+			return "https://" + value[len("http://"):]
+		}
+		if strings.HasPrefix(strings.ToLower(value), "https://") {
+			return value
+		}
+		value = strings.TrimPrefix(value, "/")
+		value = strings.TrimPrefix(value, "star/albumcover/")
+		// Kuwo's search API normally returns the 120px short path. The same
+		// path can be requested at 500px without another metadata lookup.
+		if strings.HasPrefix(value, "120/") {
+			value = "500/" + strings.TrimPrefix(value, "120/")
+		}
+		return "https://img1.kwcdn.kuwo.cn/star/albumcover/" + value
+	}
+	return ""
 }
 
 func splitArtists(value string) []string {

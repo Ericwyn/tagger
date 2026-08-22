@@ -45,7 +45,7 @@ func (c *Client) Descriptor() providers.Descriptor {
 	return providers.Descriptor{
 		ID: "musicbrainz", Name: "MusicBrainz", ShortName: "MB",
 		Description:  "开放、结构化的发行与艺人资料",
-		Capabilities: []string{"歌曲", "专辑", "音轨", "外部 ID"},
+		Capabilities: []string{"歌曲", "专辑", "音轨", "封面", "外部 ID"},
 		Health:       providers.HealthReady, Enabled: true, Accent: "#e84b2c", QuotaLabel: "1 req/s · 官方 API",
 	}
 }

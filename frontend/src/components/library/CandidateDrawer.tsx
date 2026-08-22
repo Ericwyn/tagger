@@ -417,7 +417,7 @@ export function CandidateDrawer({
                   {selected.acoustidFingerprint?.value && <DiffRow label="AcoustID 指纹" current={track.acoustidFingerprint || '空'} candidate={selected.acoustidFingerprint.value} active={fields.has('acoustidFingerprint')} />}
                 </div>
 
-                <div className="asset-options">
+                <div className="asset-options" aria-label="附加资源写入选项">
                   <label className={cn(selected.hasArtwork && 'is-available')}>
 					<input
 					  type="checkbox"
@@ -426,17 +426,17 @@ export function CandidateDrawer({
 					  onChange={(event) => setIncludeArtwork(event.target.checked)}
 					/>
                     <Image size={16} />
-                    <span><strong>封面</strong><small>{selected.hasArtwork ? '有可用图片' : '当前来源不提供'}</small></span>
+                    <span><strong>同时写入封面</strong><small>{selected.hasArtwork ? '勾选后把候选图片嵌入当前音频；不勾选则保留现有封面' : '当前来源不提供图片'}</small></span>
                   </label>
                   <label className={cn(selected.hasLyrics && 'is-available')}>
                     <input
                       type="checkbox"
                       disabled={!selected.hasLyrics || !selected.lyrics?.value}
                       checked={includeLyrics}
-                      onChange={(event) => setIncludeLyrics(event.target.checked)}
-                    />
+					  onChange={(event) => setIncludeLyrics(event.target.checked)}
+					/>
                     <Music2 size={16} />
-                    <span><strong>歌词</strong><small>{selected.hasLyrics ? '含同步歌词' : '可改用 LRCLIB'}</small></span>
+                    <span><strong>同时写入歌词</strong><small>{selected.hasLyrics ? '勾选后把候选歌词写入音频标签；不勾选则保留现有歌词' : '当前来源不提供歌词'}</small></span>
                   </label>
                 </div>
               </section>
@@ -447,7 +447,7 @@ export function CandidateDrawer({
         <div className="candidate-footer">
           <button className="secondary-button" onClick={onClose}><ChevronLeft size={15} /> 返回编辑</button>
           <div>
-            <span>采用 {fields.size} 组字段 · 不会清空候选中缺失的值</span>
+            <span>采用 {fields.size} 组字段 · 附加资源勾选后会写入音频内嵌数据</span>
             <button
               className="primary-button"
               disabled={!selected || applying || loading}

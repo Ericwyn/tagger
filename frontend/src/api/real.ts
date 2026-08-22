@@ -4,7 +4,8 @@ import type {
   MatchCandidate,
 	MatchItem,
   ArtworkWriteResult,
-  ProviderConfig,
+	ProviderConfig,
+	ProviderTestResponse,
   RestorePreview,
   RestoreResult,
 	Revision,
@@ -350,8 +351,13 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
-	testProvider(providerId: string): Promise<{provider: ProviderConfig; result: {status: string; count: number; latencyMs: number; cached?: boolean}}> {
-	  return request(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, {method: 'POST'});
+	testProvider(providerId: string, query?: CandidateSearchQuery): Promise<ProviderTestResponse> {
+	  const init: RequestInit = {method: 'POST'};
+	  if (query) {
+		init.headers = {'Content-Type': 'application/json'};
+		init.body = JSON.stringify({query, limit: 5, probeArtwork: true});
+	  }
+	  return request<ProviderTestResponse>(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, init);
 	},
 
 	deleteArtwork(track: Track): Promise<ArtworkWriteResult> {

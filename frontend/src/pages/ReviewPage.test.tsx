@@ -15,9 +15,9 @@ describe('ReviewPage field selection', () => {
     await user.click(titleToggle);
 
     expect(screen.getByRole('button', {name: '采用标题'})).not.toHaveClass('is-checked');
-	const artworkToggle = screen.getByRole('button', {name: '采用封面'});
+	const artworkToggle = screen.getByRole('button', {name: '采用替换封面'});
 	await user.click(artworkToggle);
-	expect(screen.getByRole('button', {name: '取消采用封面'})).toHaveClass('is-checked');
+	expect(screen.getByRole('button', {name: '取消采用替换封面'})).toHaveClass('is-checked');
 	});
 
   it('moves to the next track after accepting and cycles alternative candidates', async () => {

@@ -348,7 +348,7 @@ export const revisions: Revision[] = [
     action: '写入同步歌词',
     source: 'LRCLIB',
     time: '昨天 21:40',
-    fields: ['歌词', '.lrc sidecar'],
+    fields: ['歌词'],
     coverTone: 'cobalt',
   },
   {

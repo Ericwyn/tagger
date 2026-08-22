@@ -544,6 +544,12 @@ func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 	if tested.Code != 200 || !containsJSON(tested.Body.Bytes(), `"status":"ok"`) {
 		t.Fatalf("test provider = %d %s", tested.Code, tested.Body.String())
 	}
+	customBody := []byte(`{"query":{"title":"自定义测试","artists":["测试歌手"],"album":"测试专辑","durationSeconds":201},"limit":3,"probeArtwork":false}`)
+	custom := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", &ut.Body{Body: bytes.NewReader(customBody), Len: len(customBody)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if custom.Code != 200 || !containsJSON(custom.Body.Bytes(), `"title":"自定义测试"`) || !containsJSON(custom.Body.Bytes(), `"message":"数据源搜索完成"`) || !containsJSON(custom.Body.Bytes(), `"candidates"`) {
+		t.Fatalf("custom provider test = %d %s", custom.Code, custom.Body.String())
+	}
 }
 
 func TestMatchItemsAPIReadsPersistedCandidates(t *testing.T) {

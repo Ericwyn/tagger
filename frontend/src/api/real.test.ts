@@ -330,6 +330,18 @@ describe('real API client', () => {
 	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers/apple/test');
   });
 
+  it('sends a custom provider diagnostic query with artwork probing enabled', async () => {
+    const provider = {id: 'netease', name: '网易云音乐', health: 'ready', enabled: true};
+    const query = {title: '再回首', artists: ['姜育恒'], album: '多年以后', durationSeconds: 248};
+    const response = {provider, result: {status: 'ok', count: 1, latencyMs: 88}, query, candidates: [], logs: []};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: response}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.testProvider('netease', query)).resolves.toEqual(response);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/providers/netease/test');
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({query, limit: 5, probeArtwork: true});
+  });
+
   it('lists persistent revision history', async () => {
     const revision = {
       id: 'revlog-1', trackId: 'trk-1', trackTitle: 'Song', fileName: 'Song.flac',

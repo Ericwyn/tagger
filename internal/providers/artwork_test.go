@@ -26,6 +26,7 @@ func TestValidateArtworkURLUsesProviderAllowlist(t *testing.T) {
 		{"apple", "https://is1-ssl.mzstatic.com/image/thumb.jpg"},
 		{"netease", "https://p1.music.126.net/cover.jpg"},
 		{"kuwo", "https://img1.kuwo.cn/cover.jpg"},
+		{"kuwo", "https://img1.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg"},
 		{"kugou", "https://imge.kugou.com/cover.jpg"},
 	}
 	for _, item := range allowed {

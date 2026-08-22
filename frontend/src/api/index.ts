@@ -5,7 +5,8 @@ import type {
   LibrarySummary,
   MatchCandidate,
 	MatchItem,
-  ProviderConfig,
+	ProviderConfig,
+	ProviderTestResponse,
   RestorePreview,
   RestoreResult,
 	Revision,
@@ -162,10 +163,9 @@ export function updateProvider(provider: ProviderConfig, enabled: boolean): Prom
 	: real.updateProvider(provider.id, enabled);
 }
 
-export async function testProvider(provider: ProviderConfig): Promise<string> {
-  if (apiReadMode === 'mock') return `${provider.name} Mock 连接测试完成`;
-  const response = await real.testProvider(provider.id);
-  return `${provider.name} 连接正常 · ${response.result.cached ? '缓存命中' : `${response.result.latencyMs}ms`}`;
+export async function testProvider(provider: ProviderConfig, query?: CandidateSearchQuery): Promise<ProviderTestResponse> {
+	if (apiReadMode === 'mock') return mock.testProvider(provider, query);
+	return real.testProvider(provider.id, query);
 }
 
 export function listJobs(): Promise<Job[]> {

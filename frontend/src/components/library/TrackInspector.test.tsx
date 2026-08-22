@@ -29,10 +29,10 @@ describe('TrackInspector', () => {
     expect(screen.getByText('再回首（修订）')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: '确认写入'}));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({title: '再回首（修订）'}), {writeTag: true, writeSidecar: true});
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({title: '再回首（修订）'}), {writeTag: true});
   });
 
-  it('lets the user keep lyrics out of the audio tag while saving the sidecar', async () => {
+  it('saves edited lyrics to the embedded audio tag without exposing sidecar writing', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(
@@ -49,12 +49,12 @@ describe('TrackInspector', () => {
 
     await user.click(screen.getByRole('tab', {name: '歌词'}));
     const lyrics = screen.getByPlaceholderText(/在这里输入歌词/);
-    fireEvent.change(lyrics, {target: {value: '[00:01.00] sidecar only'}});
-    await user.click(screen.getByLabelText('写入音频标签'));
+    fireEvent.change(lyrics, {target: {value: '[00:01.00] embedded only'}});
+    expect(screen.queryByRole('checkbox', {name: /同时保存/})).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '保存修改'}));
     await user.click(screen.getByRole('button', {name: '确认写入'}));
 
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({lyrics: '[00:01.00] sidecar only'}), {writeTag: false, writeSidecar: true});
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({lyrics: '[00:01.00] embedded only'}), {writeTag: true});
   });
 
   it('edits extended embedded fields without changing unknown raw tags', async () => {
@@ -81,7 +81,7 @@ describe('TrackInspector', () => {
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       comment: 'liner note', bpm: 128, musicbrainzTrackId: 'track-mbid',
-    }), {writeTag: true, writeSidecar: true});
+    }), {writeTag: true});
   });
 
   it('uploads artwork and requires a second click before deletion', async () => {
