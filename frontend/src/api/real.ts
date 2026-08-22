@@ -10,6 +10,7 @@ import type {
   Revision,
   Track,
   TrackPatch,
+	WriteSelection,
   UpdateProvenance,
 } from '@/types';
 
@@ -119,6 +120,12 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
 	listMatchItems(jobId: string): Promise<MatchItem[]> {
 	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
+	},
+
+	createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job> {
+	  return request<Job>(`/api/v1/matches/jobs/${encodeURIComponent(matchJobId)}/write`, {
+		method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({items}),
+	  });
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {

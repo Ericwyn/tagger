@@ -84,6 +84,7 @@ func (s *Server) routes() {
 	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.POST("/matches/tracks/batch", s.handleMatchBatch)
+	api.POST("/matches/jobs/:id/write", s.handleMatchWrite)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/jobs", s.handleJobs)
 	api.GET("/jobs/:id", s.handleJob)
@@ -239,6 +240,52 @@ func (s *Server) handleJobMatches(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, items)
+}
+
+type writeSelection struct {
+	TrackID      string   `json:"trackId"`
+	CandidateID  string   `json:"candidateId"`
+	BaseRevision string   `json:"baseRevision"`
+	Fields       []string `json:"fields"`
+}
+
+type matchWriteRequest struct {
+	Items []writeSelection `json:"items"`
+}
+
+func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil || s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "写入任务队列尚未启用")
+		return
+	}
+	matchJob, err := s.jobs.Get(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "匹配任务不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	if matchJob.Kind != domain.JobMatch || (matchJob.State != domain.JobReview && matchJob.State != domain.JobPartial) {
+		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务尚未进入审核状态")
+		return
+	}
+	var request matchWriteRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || len(request.Items) == 0 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "items 不能为空且请求 JSON 必须有效")
+		return
+	}
+	payload, _ := json.Marshal(struct {
+		MatchJobID string           `json:"matchJobId"`
+		Items      []writeSelection `json:"items"`
+	}{matchJob.ID, request.Items})
+	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "批量安全写入标签", Detail: "等待写入 worker", Total: len(request.Items), Payload: string(payload)})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
 }
 
 func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {

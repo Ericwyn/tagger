@@ -12,6 +12,7 @@ import type {
   Track,
   TrackPatch,
   UpdateProvenance,
+	WriteSelection,
 } from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
@@ -60,6 +61,11 @@ export async function createMatchJob(trackIds: string[]): Promise<Job | null> {
 export async function listMatchItems(jobId: string): Promise<MatchItem[]> {
   if (apiReadMode === 'mock') return [];
   return real.listMatchItems(jobId);
+}
+
+export async function createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job | null> {
+  if (apiReadMode === 'mock') return null;
+  return real.createWriteJob(matchJobId, items);
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {

@@ -101,7 +101,7 @@ export function CandidateDrawer({
       trackNumber: fields.has('track') && selected.trackNumber.value > 0 ? selected.trackNumber.value : track.trackNumber,
       trackTotal: fields.has('track') && selected.trackTotal.value > 0 ? selected.trackTotal.value : track.trackTotal,
       discNumber: fields.has('track') && selected.discNumber.value > 0 ? selected.discNumber.value : track.discNumber,
-      discTotal: track.discTotal,
+	  discTotal: fields.has('track') && selected.discTotal.value > 0 ? selected.discTotal.value : track.discTotal,
       year: fields.has('year') && selected.year.value > 0 ? selected.year.value : track.year,
       genres: fields.has('genres') && selected.genres.value.length > 0 ? selected.genres.value : track.genres,
       lyrics: includeLyrics && selected.hasLyrics && selected.lyrics?.value ? selected.lyrics.value : track.lyrics,

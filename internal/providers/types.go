@@ -78,6 +78,7 @@ type MatchCandidate struct {
 	TrackNumber     Field[int]       `json:"trackNumber"`
 	TrackTotal      Field[int]       `json:"trackTotal"`
 	DiscNumber      Field[int]       `json:"discNumber"`
+	DiscTotal       Field[int]       `json:"discTotal"`
 	DurationSeconds Field[int64]     `json:"durationSeconds"`
 	Genres          Field[[]string]  `json:"genres"`
 	Lyrics          *Field[string]   `json:"lyrics,omitempty"`

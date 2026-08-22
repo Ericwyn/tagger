@@ -29,6 +29,7 @@ const candidate: MatchCandidate = {
   trackNumber: {value: 0, source: 'LRCLIB'},
   trackTotal: {value: 0, source: 'LRCLIB'},
   discNumber: {value: 0, source: 'LRCLIB'},
+	discTotal: {value: 0, source: 'LRCLIB'},
   durationSeconds: {value: track.durationSeconds, source: 'LRCLIB'},
   genres: {value: [], source: 'LRCLIB'},
   lyrics: {value: '[00:01.00]new lyrics', source: 'LRCLIB'},

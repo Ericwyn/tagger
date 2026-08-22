@@ -80,6 +80,7 @@ export interface MatchCandidate {
   trackNumber: CandidateField<number>;
   trackTotal: CandidateField<number>;
   discNumber: CandidateField<number>;
+  discTotal: CandidateField<number>;
   durationSeconds: CandidateField<number>;
   genres: CandidateField<string[]>;
   lyrics?: CandidateField<string>;
@@ -116,6 +117,13 @@ export interface MatchItem {
   selectedCandidateId?: string;
   error?: string;
   updatedAt?: string;
+}
+
+export interface WriteSelection {
+  trackId: string;
+  candidateId: string;
+  baseRevision: string;
+  fields: string[];
 }
 
 export interface Revision {

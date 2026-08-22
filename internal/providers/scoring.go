@@ -31,6 +31,7 @@ func toView(query Query, descriptor Descriptor, candidate Candidate) MatchCandid
 		TrackNumber:     Field[int]{Value: candidate.TrackNumber, Source: source},
 		TrackTotal:      Field[int]{Value: candidate.TrackTotal, Source: source},
 		DiscNumber:      Field[int]{Value: candidate.DiscNumber, Source: source},
+		DiscTotal:       Field[int]{Value: candidate.DiscTotal, Source: source},
 		DurationSeconds: Field[int64]{Value: candidate.DurationSeconds, Source: source},
 		Genres:          Field[[]string]{Value: nonNil(candidate.Genres), Source: source},
 		HasLyrics:       candidate.Lyrics != "" || candidate.SyncedLyrics != "",

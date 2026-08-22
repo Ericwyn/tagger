@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, createMatchJob, listMatchItems, listTracks, waitForJob} from '@/api';
+import {apiReadMode, createMatchJob, createWriteJob, listMatchItems, listTracks, waitForJob} from '@/api';
 import type {Job, MatchCandidate, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -214,10 +214,18 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
           <button
             className="primary-button"
             disabled={accepted === 0 || applying}
-            onClick={() => {
-              setApplying(true);
-              window.setTimeout(onComplete, 700);
-            }}
+			onClick={async () => {
+			  setApplying(true);
+			  if (apiReadMode === 'real' && job) {
+				await createWriteJob(job.id, items.filter((item) => item.state === 'accepted').map((item) => ({
+				  trackId: item.track.id, candidateId: item.candidate.id, baseRevision: item.track.revision,
+				  fields: ['title', 'artists', 'album', 'albumArtists', 'trackNumber', 'trackTotal', 'discNumber', 'discTotal', 'year', 'genres', 'lyrics'],
+				})));
+			  } else {
+				await new Promise((resolve) => window.setTimeout(resolve, 700));
+			  }
+			  onComplete();
+			}}
           >
             {applying ? <LoaderCircle className="spin" size={15} /> : <FileCheck2 size={15} />}
             确认并创建写入任务
