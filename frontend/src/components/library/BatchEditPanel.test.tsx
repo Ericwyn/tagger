@@ -1,12 +1,14 @@
 import {render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {describe, expect, it, vi} from 'vitest';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {BatchEditPanel, buildBatchPatch} from '@/components/library/BatchEditPanel';
 import {seedTracks} from '@/mock/data';
 
 const track = seedTracks[0];
 
 describe('BatchEditPanel', () => {
+  beforeEach(() => localStorage.clear());
+
   it('builds explicit common-field and sequence patches', () => {
     const patch = buildBatchPatch(track, [
       {field: 'album', mode: 'set', value: '精选集'},
@@ -52,5 +54,23 @@ describe('BatchEditPanel', () => {
     await user.type(screen.getByLabelText('注释值'), 'liner note');
     await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
     expect(onApply).toHaveBeenCalledWith([{field: 'comment', mode: 'set', value: 'liner note'}], false);
+  });
+
+  it('saves and reloads a reusable batch rule template', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    const view = render(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+
+    await user.selectOptions(screen.getByLabelText('专辑操作'), 'set');
+    await user.type(screen.getByLabelText('专辑值'), '现场精选');
+    await user.type(screen.getByLabelText('模板名称'), '现场专辑');
+    await user.click(screen.getByRole('button', {name: '保存当前规则'}));
+    expect(screen.getByText('模板「现场专辑」已保存')).toBeInTheDocument();
+
+    view.rerender(<BatchEditPanel open={false} tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+    view.rerender(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+    await user.selectOptions(screen.getByLabelText('批量编辑模板'), '现场专辑');
+    expect(screen.getByLabelText('专辑操作')).toHaveValue('set');
+    expect(screen.getByLabelText('专辑值')).toHaveValue('现场精选');
   });
 });

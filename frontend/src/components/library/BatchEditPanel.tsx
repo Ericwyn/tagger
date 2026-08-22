@@ -13,6 +13,34 @@ interface OperationState {
   value: string;
 }
 
+interface BatchTemplate {
+  id: string;
+  name: string;
+  operations: BatchOperation[];
+  sequenceTracks: boolean;
+  updatedAt: string;
+}
+
+const templateStorageKey = 'tagger-batch-templates-v1';
+
+function readTemplates(): BatchTemplate[] {
+  try {
+    const payload = JSON.parse(localStorage.getItem(templateStorageKey) || '[]') as unknown;
+    if (!Array.isArray(payload)) return [];
+    return payload.filter((item): item is BatchTemplate => Boolean(item && typeof item === 'object' && typeof (item as BatchTemplate).id === 'string' && typeof (item as BatchTemplate).name === 'string' && Array.isArray((item as BatchTemplate).operations))).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function writeTemplates(templates: BatchTemplate[]): void {
+  try {
+    localStorage.setItem(templateStorageKey, JSON.stringify(templates.slice(0, 20)));
+  } catch {
+    // Disabled browser storage should not block one-off batch edits.
+  }
+}
+
 interface BatchEditPanelProps {
   open: boolean;
   tracks: Track[];
@@ -52,11 +80,19 @@ const emptyOperations = (): Record<EditableField, OperationState> => ({
 export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEditPanelProps) {
   const [operationState, setOperationState] = useState<Record<EditableField, OperationState>>(emptyOperations);
   const [sequenceTracks, setSequenceTracks] = useState(false);
+  const [templates, setTemplates] = useState<BatchTemplate[]>([]);
+  const [selectedTemplateID, setSelectedTemplateID] = useState('');
+  const [templateName, setTemplateName] = useState('');
+  const [templateMessage, setTemplateMessage] = useState('');
 
   useEffect(() => {
     if (open) {
       setOperationState(emptyOperations());
       setSequenceTracks(false);
+      setTemplates(readTemplates());
+      setSelectedTemplateID('');
+      setTemplateName('');
+      setTemplateMessage('');
     }
   }, [open]);
 
@@ -67,6 +103,54 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
     }),
     [operationState],
   );
+
+  const applyTemplate = (templateID: string) => {
+    setSelectedTemplateID(templateID);
+    const template = templates.find((item) => item.id === templateID);
+    if (!template) return;
+    const next = emptyOperations();
+    template.operations.forEach((operation) => {
+      if (operation.field in next) next[operation.field as EditableField] = {mode: operation.mode, value: operation.value};
+    });
+    setOperationState(next);
+    setSequenceTracks(template.sequenceTracks);
+    setTemplateMessage(`已载入模板「${template.name}」`);
+  };
+
+  const saveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) {
+      setTemplateMessage('请输入模板名称');
+      return;
+    }
+    if (operations.length === 0 && !sequenceTracks) {
+      setTemplateMessage('至少选择一个字段操作或音轨规则');
+      return;
+    }
+    const existing = templates.find((item) => item.name === name);
+    const template: BatchTemplate = {
+      id: existing?.id ?? `template-${Date.now()}`,
+      name,
+      operations,
+      sequenceTracks,
+      updatedAt: new Date().toISOString(),
+    };
+    const next = [template, ...templates.filter((item) => item.id !== template.id)];
+    setTemplates(next);
+    writeTemplates(next);
+    setSelectedTemplateID(template.id);
+    setTemplateName('');
+    setTemplateMessage(`模板「${name}」已保存`);
+  };
+
+  const deleteTemplate = () => {
+    if (!selectedTemplateID) return;
+    const next = templates.filter((item) => item.id !== selectedTemplateID);
+    setTemplates(next);
+    writeTemplates(next);
+    setSelectedTemplateID('');
+    setTemplateMessage('模板已删除');
+  };
 
   const previews = useMemo(() => tracks.slice(0, 20).map((track, index) => {
     const patch = buildBatchPatch(track, operations, sequenceTracks ? {index, total: tracks.length} : undefined);
@@ -106,6 +190,20 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
             <span className={cn(readOnlyCount > 0 && 'is-warning')}><strong>{readOnlyCount}</strong> 首不可写</span>
             <span><strong>{previews.reduce((count, preview) => count + preview.changes.length, 0)}</strong> 条预览差异</span>
           </div>
+
+          <section className="batch-template-section">
+            <div className="batch-edit-section-head"><span>批量规则模板</span><small>模板只保存字段规则，不保存曲目列表</small></div>
+            <div className="batch-template-controls">
+              <select aria-label="批量编辑模板" value={selectedTemplateID} onChange={(event) => applyTemplate(event.target.value)}>
+                <option value="">选择已保存模板</option>
+                {templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
+              <input aria-label="模板名称" value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="模板名称" />
+              <button className="secondary-button" type="button" onClick={saveTemplate}>保存当前规则</button>
+              {selectedTemplateID && <button className="ghost-button" type="button" onClick={deleteTemplate}>删除</button>}
+            </div>
+            {templateMessage && <small className="batch-template-message">{templateMessage}</small>}
+          </section>
 
           <section className="batch-edit-section">
             <div className="batch-edit-section-head"><span>公共字段操作</span><small>未选择的字段保持原值</small></div>

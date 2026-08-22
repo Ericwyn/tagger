@@ -2264,6 +2264,46 @@ button:disabled {
   color: var(--warning);
 }
 
+.batch-template-section {
+  margin-top: 16px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.batch-template-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(130px, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.batch-template-controls select,
+.batch-template-controls input {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.batch-template-controls .secondary-button,
+.batch-template-controls .ghost-button {
+  height: 32px;
+  white-space: nowrap;
+}
+
+.batch-template-message {
+  display: block;
+  margin-top: 7px;
+  color: var(--accent);
+  font-size: 10px;
+}
+
 .batch-edit-section {
   margin-top: 16px;
   border-top: 1px solid var(--line-strong);
@@ -5014,6 +5054,15 @@ button:disabled {
   .batch-edit-summary span {
     padding: 7px;
     font-size: 7px;
+  }
+
+  .batch-template-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .batch-template-controls .secondary-button,
+  .batch-template-controls .ghost-button {
+    width: 100%;
   }
 
   .batch-edit-field {
