@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/jobs"
@@ -630,6 +631,25 @@ func TestMatchReviewStateAPIUpdatesPersistedDecision(t *testing.T) {
 		&ut.Body{Body: bytes.NewReader(invalidBody), Len: len(invalidBody)}, ut.Header{Key: "content-type", Value: "application/json"})
 	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `candidateId`) {
 		t.Fatalf("invalid candidate review state = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestCandidateArtworkPreviewUsesShortLivedProviderReference(t *testing.T) {
+	s := newTestServer(t)
+	result, err := s.providers.Search(context.Background(), providers.Query{Title: "Preview"}, nil, 1)
+	if err != nil || len(result.Candidates) != 1 {
+		t.Fatalf("provider search = %#v err=%v", result, err)
+	}
+	asset := artwork.Asset{MIME: "image/png", Data: []byte("preview-image"), Width: 1, Height: 1, Size: 13, Hash: "preview-hash", Format: "png"}
+	s.downloadArtwork = func(_ context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+		if reference.CandidateID != result.Candidates[0].ID {
+			t.Fatalf("artwork reference = %#v", reference)
+		}
+		return asset, nil
+	}
+	response := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/matches/candidates/"+result.Candidates[0].ID+"/artwork", nil)
+	if response.Code != 200 || response.Body.String() != "preview-image" || response.Result().Header.Get("Content-Type") != "image/png" || response.Result().Header.Get("Cache-Control") != "private, max-age=300" {
+		t.Fatalf("candidate preview = %d type=%q cache=%q body=%q", response.Code, response.Result().Header.Get("Content-Type"), response.Result().Header.Get("Cache-Control"), response.Body.String())
 	}
 }
 

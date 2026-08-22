@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, updateMatchItem, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, updateMatchItem, waitForJob} from '@/api';
 import type {Job, MatchCandidate, MatchItem, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -271,7 +271,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               <span className="review-arrow"><ChevronRight size={15} /></span>
               {item.candidate ? (
                 <>
-                  <CoverArt title={item.candidate.title.value} artist={item.candidate.artists.value[0]} tone={item.candidate.coverTone} missing={!showGeneratedCovers} size="xs" />
+                  <CoverArt title={item.candidate.title.value} artist={item.candidate.artists.value[0]} tone={item.candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(item.candidate)} imageUrl={candidateArtworkURL(item.candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
                   <span className="review-candidate-copy">
                     <strong>{item.candidate.title.value}</strong>
                     <small>{item.candidate.providerName} · {Math.round(item.candidate.score * 100)}%</small>
@@ -302,7 +302,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               <div className="record-comparison">
                 <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} size="md" />
                 <div className="comparison-line"><span /><Sparkles size={16} /><span /></div>
-                <CoverArt title={active.candidate.title.value} artist={active.candidate.artists.value[0]} tone={active.candidate.coverTone} missing={!showGeneratedCovers} size="md" />
+                <CoverArt title={active.candidate.title.value} artist={active.candidate.artists.value[0]} tone={active.candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(active.candidate)} imageUrl={candidateArtworkURL(active.candidate)} blankOnImageError={!showGeneratedCovers} size="md" />
               </div>
               <div>
                 <span className="confidence-badge"><Check size={13} /> {active.candidate.scoreLabel} · {Math.round(active.candidate.score * 100)}%</span>

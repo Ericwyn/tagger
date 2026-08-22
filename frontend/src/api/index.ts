@@ -187,6 +187,11 @@ export function artworkURL(track: Track): string | undefined {
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0?revision=${encodeURIComponent(track.revision)}`;
 }
 
+export function candidateArtworkURL(candidate: MatchCandidate): string | undefined {
+  if (apiReadMode === 'mock' || !candidate.hasArtwork) return undefined;
+  return `/api/v1/matches/candidates/${encodeURIComponent(candidate.id)}/artwork`;
+}
+
 export function audioURL(track: Track): string | undefined {
   if (apiReadMode === 'mock') return undefined;
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/audio?revision=${encodeURIComponent(track.revision)}`;

@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
+import {candidateArtworkURL} from '@/api';
 import {cn, formatDuration} from '@/lib/utils';
 import type {CandidateSearchQuery, MatchCandidate, Track, TrackPatch} from '@/types';
 
@@ -234,10 +235,9 @@ export function CandidateDrawer({
                       title={candidate.title.value}
                       artist={candidate.artists.value[0]}
                       tone={candidate.coverTone}
-                      // Candidate artwork is still remote until the user applies it.
-                      // Do not render a generated cover merely because a provider
-                      // advertised an artwork URL that has not been downloaded.
-                      missing={!showGeneratedCovers}
+                      missing={!showGeneratedCovers && !candidateArtworkURL(candidate)}
+                      imageUrl={candidateArtworkURL(candidate)}
+                      blankOnImageError={!showGeneratedCovers}
                       size="sm"
                     />
                     <span className="candidate-copy">
@@ -263,7 +263,9 @@ export function CandidateDrawer({
                     title={selected.title.value}
                     artist={selected.artists.value[0]}
                     tone={selected.coverTone}
-                    missing={!showGeneratedCovers}
+                    missing={!showGeneratedCovers && !candidateArtworkURL(selected)}
+                    imageUrl={candidateArtworkURL(selected)}
+                    blankOnImageError={!showGeneratedCovers}
                     size="md"
                   />
                   <div>

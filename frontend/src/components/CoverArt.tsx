@@ -10,15 +10,16 @@ interface CoverArtProps {
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'hero';
   missing?: boolean;
   imageUrl?: string;
+  blankOnImageError?: boolean;
   className?: string;
 }
 
-export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, className}: CoverArtProps) {
+export function CoverArt({title, artist, tone, size = 'md', missing, imageUrl, blankOnImageError = false, className}: CoverArtProps) {
 	const [imageFailed, setImageFailed] = useState(false);
 
 	useEffect(() => setImageFailed(false), [imageUrl]);
 
-  if (missing) {
+  if (missing || (blankOnImageError && Boolean(imageUrl) && imageFailed)) {
     return (
       <div className={cn('cover-art cover-missing', `cover-${size}`, className)} aria-label="没有封面">
         <Disc3 aria-hidden="true" />

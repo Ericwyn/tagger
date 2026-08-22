@@ -98,6 +98,7 @@ func (s *Server) routes() {
 	api.PATCH("/matches/jobs/:id/items/:trackId", s.handleMatchReviewUpdate)
 	api.POST("/matches/jobs/:id/write", s.handleMatchWrite)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
+	api.GET("/matches/candidates/:id/artwork", s.handleCandidateArtwork)
 	api.GET("/jobs", s.handleJobs)
 	api.GET("/jobs/:id", s.handleJob)
 	api.POST("/jobs/:id/cancel", s.handleCancelJob)
@@ -1703,6 +1704,34 @@ func (s *Server) handleMatchArtwork(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 	s.finishArtworkMutation(ctx, c, ref, result, "采用数据源封面", descriptor.Name)
+}
+
+func (s *Server) handleCandidateArtwork(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器尚未初始化")
+		return
+	}
+	reference, err := s.providers.ArtworkReference(c.Param("id"))
+	if errors.Is(err, providers.ErrArtworkReferenceNotFound) {
+		s.writeError(c, consts.StatusNotFound, "candidate_artwork_expired", "候选封面不存在或已过期，请重新搜索")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	asset, err := s.downloadArtwork(ctx, reference)
+	if errors.Is(err, providers.ErrUnsafeArtworkURL) || errors.Is(err, artwork.ErrInvalid) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_provider_artwork", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusBadGateway, "provider_artwork_failed", err.Error())
+		return
+	}
+	c.SetContentType(asset.MIME)
+	c.Header("Cache-Control", "private, max-age=300")
+	c.Response.SetBody(asset.Data)
 }
 
 func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {
