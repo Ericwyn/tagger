@@ -63,4 +63,15 @@ describe('Tagger app prototype', () => {
     await user.click(await screen.findByRole('button', {name: '许嵩 · 青年晚报 9'}));
     expect(await screen.findByRole('heading', {name: '奇谈'})).toBeInTheDocument();
   });
+
+  it('filters the library by format and changes the track ordering', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', {name: '全部音乐'});
+
+    await user.selectOptions(screen.getByRole('combobox', {name: '曲目格式筛选'}), 'flac');
+    expect(screen.getByText('显示 15 / 24 首')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', {name: '曲目排序'}), 'title');
+    expect(screen.getByRole('combobox', {name: '曲目排序'})).toHaveValue('title');
+  });
 });

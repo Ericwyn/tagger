@@ -2,7 +2,6 @@ import {useEffect, useMemo, useState} from 'react';
 import {
   ArrowDownUp,
   Archive,
-  ChevronDown,
   FolderTree,
   LoaderCircle,
   Menu,
@@ -32,7 +31,7 @@ import {
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
+import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
@@ -57,6 +56,25 @@ const filterLabels: Record<SidebarFilter, string> = {
   'parse-error': '解析失败',
 };
 
+type FormatFilter = 'all' | TrackFormat;
+type SortMode = 'album' | 'title' | 'modified' | 'format';
+
+const formatLabels: Record<FormatFilter, string> = {
+  all: '全部格式',
+  flac: 'FLAC 无损',
+  mp3: 'MP3',
+  wav: 'WAV',
+};
+
+const sortLabels: Record<SortMode, string> = {
+  album: '专辑顺序',
+  title: '标题顺序',
+  modified: '最近修改',
+  format: '格式顺序',
+};
+
+const trackCollator = new Intl.Collator('zh-Hans-CN', {numeric: true, sensitivity: 'base'});
+
 export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -68,6 +86,8 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SidebarFilter>('all');
   const [search, setSearch] = useState('');
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>('all');
+  const [sortMode, setSortMode] = useState<SortMode>('album');
   const [saving, setSaving] = useState(false);
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [candidateLoading, setCandidateLoading] = useState(false);
@@ -136,9 +156,10 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
 
   const visibleTracks = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    return tracks.filter((track) => {
+    const filtered = tracks.filter((track) => {
       if (activeFolder && track.folderId !== activeFolder) return false;
       if (!activeFolder && activeFilter !== 'all' && track.health !== activeFilter) return false;
+      if (formatFilter !== 'all' && track.format !== formatFilter) return false;
       if (!query) return true;
       return [
         track.title,
@@ -148,7 +169,8 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
         track.genres.join(' '),
       ].some((value) => value.toLocaleLowerCase().includes(query));
     });
-  }, [activeFilter, activeFolder, search, tracks]);
+    return [...filtered].sort((left, right) => compareTracks(left, right, sortMode));
+  }, [activeFilter, activeFolder, formatFilter, search, sortMode, tracks]);
 
   const snapshotTracks = selectedIds.size > 0
     ? tracks.filter((track) => selectedIds.has(track.id))
@@ -442,8 +464,20 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
           </label>
           <div className="toolbar-spacer" />
           <button className="toolbar-button" disabled={snapshotTracks.length === 0} onClick={() => setSnapshotOpen(true)}><Archive size={15} /> 标签快照</button>
-          <button className="toolbar-button"><SlidersHorizontal size={15} /> 筛选 <ChevronDown size={13} /></button>
-          <button className="toolbar-button"><ArrowDownUp size={15} /> 专辑顺序 <ChevronDown size={13} /></button>
+          <label className="toolbar-filter">
+            <SlidersHorizontal size={15} />
+            <span>筛选</span>
+            <select aria-label="曲目格式筛选" value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as FormatFilter)}>
+              {Object.entries(formatLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className="toolbar-filter">
+            <ArrowDownUp size={15} />
+            <span>排序</span>
+            <select aria-label="曲目排序" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}>
+              {Object.entries(sortLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
           <button className="mobile-panel-button" title="打开曲目详情" onClick={() => setMobileInspector(true)}>
             <Menu size={18} />
           </button>
@@ -528,4 +562,20 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
       />
     </div>
   );
+}
+
+function compareTracks(left: Track, right: Track, mode: SortMode): number {
+  if (mode === 'title') {
+    return trackCollator.compare(left.title || left.fileName, right.title || right.fileName);
+  }
+  if (mode === 'modified') {
+    return right.modifiedAt.localeCompare(left.modifiedAt) || trackCollator.compare(left.relativePath, right.relativePath);
+  }
+  if (mode === 'format') {
+    return trackCollator.compare(left.format, right.format) || trackCollator.compare(left.title, right.title);
+  }
+  return trackCollator.compare(left.album, right.album)
+    || (left.discNumber ?? 0) - (right.discNumber ?? 0)
+    || (left.trackNumber ?? 0) - (right.trackNumber ?? 0)
+    || trackCollator.compare(left.title || left.fileName, right.title || right.fileName);
 }
