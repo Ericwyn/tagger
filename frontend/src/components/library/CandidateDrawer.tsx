@@ -111,6 +111,7 @@ export function CandidateDrawer({
   const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
   const [applying, setApplying] = useState(false);
   const [includeLyrics, setIncludeLyrics] = useState(false);
+  const [lyricsDraft, setLyricsDraft] = useState('');
   const [includeArtwork, setIncludeArtwork] = useState(false);
   const [queryEditing, setQueryEditing] = useState(false);
   const [queryDraft, setQueryDraft] = useState<CandidateSearchQuery>({title: '', artists: [], album: '', durationSeconds: 0});
@@ -120,9 +121,10 @@ export function CandidateDrawer({
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
-	const first = candidates[0];
-	setIncludeLyrics(focus === 'lyrics' && Boolean(first?.hasLyrics && first.lyrics?.value));
-	setIncludeArtwork(false);
+    const first = candidates[0];
+    setIncludeLyrics(focus === 'lyrics' && Boolean(first?.hasLyrics && first.lyrics?.value));
+    setLyricsDraft(first?.lyrics?.value ?? '');
+    setIncludeArtwork(false);
   }, [candidates, focus]);
 
   useEffect(() => {
@@ -177,8 +179,9 @@ export function CandidateDrawer({
   useEffect(() => {
     if (!selected) return;
     setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
-	setIncludeLyrics(focus === 'lyrics' && Boolean(selected.hasLyrics && selected.lyrics?.value));
-	setIncludeArtwork(false);
+    setIncludeLyrics(focus === 'lyrics' && Boolean(selected.hasLyrics && selected.lyrics?.value));
+    setLyricsDraft(selected.lyrics?.value ?? '');
+    setIncludeArtwork(false);
   }, [focus, selected]);
 
   if (!open || !track) return null;
@@ -222,7 +225,7 @@ export function CandidateDrawer({
 	  discTotal: fields.has('track') && selected.discTotal.value > 0 ? selected.discTotal.value : track.discTotal,
       year: fields.has('year') && selected.year.value > 0 ? selected.year.value : track.year,
       genres: fields.has('genres') && selected.genres.value.length > 0 ? selected.genres.value : track.genres,
-      lyrics: includeLyrics && selected.hasLyrics && selected.lyrics?.value ? selected.lyrics.value : track.lyrics,
+      lyrics: includeLyrics ? lyricsDraft : track.lyrics,
       comment: fields.has('comment') && selected.comment?.value ? selected.comment.value : track.comment,
       composers: fields.has('composers') && selected.composers?.value.length ? selected.composers.value : track.composers,
       conductor: fields.has('conductor') && selected.conductor?.value ? selected.conductor.value : track.conductor,
@@ -417,6 +420,25 @@ export function CandidateDrawer({
                   {selected.acoustidFingerprint?.value && <DiffRow label="AcoustID 指纹" current={track.acoustidFingerprint || '空'} candidate={selected.acoustidFingerprint.value} active={fields.has('acoustidFingerprint')} />}
                 </div>
 
+                {selected.lyrics?.value && (
+                  <div className="lyrics-candidate-editor">
+                    <div className="lyrics-candidate-editor-head">
+                      <div>
+                        <strong>歌词内容</strong>
+                        <span>{selected.lyrics.source} · 写入前可编辑</span>
+                      </div>
+                      {includeLyrics && <em>将写入内嵌标签</em>}
+                    </div>
+                    <textarea
+                      aria-label="远程歌词内容"
+                      value={lyricsDraft}
+                      onChange={(event) => setLyricsDraft(event.target.value)}
+                      spellCheck={false}
+                    />
+                    <small>可以修正错字、时间轴或补充内容；勾选下方“同时写入歌词”后才会保存到音频文件。</small>
+                  </div>
+                )}
+
                 <div className="asset-options" aria-label="附加资源写入选项">
                   <label className={cn(selected.hasArtwork && 'is-available')}>
 					<input
@@ -436,7 +458,7 @@ export function CandidateDrawer({
 					  onChange={(event) => setIncludeLyrics(event.target.checked)}
 					/>
                     <Music2 size={16} />
-                    <span><strong>同时写入歌词</strong><small>{selected.hasLyrics ? '勾选后把候选歌词写入音频标签；不勾选则保留现有歌词' : '当前来源不提供歌词'}</small></span>
+                    <span><strong>同时写入歌词</strong><small>{selected.hasLyrics ? '勾选后把上方编辑后的歌词写入音频标签；不勾选则保留现有歌词' : '当前来源不提供歌词'}</small></span>
                   </label>
                 </div>
               </section>

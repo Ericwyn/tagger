@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from '@testing-library/react';
+import {fireEvent, render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, expect, it, vi} from 'vitest';
 import {CandidateDrawer} from '@/components/library/CandidateDrawer';
@@ -59,6 +59,8 @@ it('keeps missing candidate fields and applies explicitly selected lyrics', asyn
     />,
   );
 
+  expect(screen.getByRole('textbox', {name: '远程歌词内容'})).toHaveValue('[00:01.00]new lyrics');
+  fireEvent.change(screen.getByRole('textbox', {name: '远程歌词内容'}), {target: {value: '[00:01.00]edited lyrics'}});
   await user.click(screen.getByRole('checkbox', {name: /歌词/}));
   await user.click(screen.getByRole('button', {name: '采用所选资料'}));
   await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
@@ -71,7 +73,7 @@ it('keeps missing candidate fields and applies explicitly selected lyrics', asyn
     discNumber: 1,
     year: 1989,
     genres: ['Pop'],
-    lyrics: '[00:01.00]new lyrics',
+    lyrics: '[00:01.00]edited lyrics',
   }));
 });
 

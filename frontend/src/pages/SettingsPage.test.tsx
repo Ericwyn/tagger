@@ -27,6 +27,7 @@ const candidate = {
   discNumber: {value: 1, source: 'MusicBrainz'}, discTotal: {value: 1, source: 'MusicBrainz'}, durationSeconds: {value: 248, source: 'MusicBrainz'},
   genres: {value: ['Pop'], source: 'MusicBrainz'}, hasLyrics: true, hasArtwork: true, coverTone: 'moss', score: 0.96,
   scoreLabel: '高度匹配', matchReasons: ['标题一致'],
+  lyrics: {value: '[00:01.00] 第一行歌词\n[00:05.00] 第二行歌词', source: 'MusicBrainz'},
 } as MatchCandidate;
 
 describe('SettingsPage provider diagnostics', () => {
@@ -47,6 +48,7 @@ describe('SettingsPage provider diagnostics', () => {
 
     expect(await screen.findByRole('heading', {name: '音乐数据源'})).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '测试查询'}));
+    expect(screen.getByRole('dialog', {name: '数据源搜索测试'})).toBeInTheDocument();
     await user.clear(screen.getByRole('textbox', {name: '测试歌曲名'}));
     await user.type(screen.getByRole('textbox', {name: '测试歌曲名'}), '再回首');
     await user.clear(screen.getByRole('textbox', {name: '测试歌手'}));
@@ -57,6 +59,8 @@ describe('SettingsPage provider diagnostics', () => {
       title: '再回首', artists: ['姜育恒'], album: '', durationSeconds: 0,
     }));
     expect(await screen.findByText('候选歌曲')).toBeInTheDocument();
+    await user.click(screen.getByText('查看歌词'));
+    expect(screen.getByText(/\[00:01\.00\] 第一行歌词/)).toBeInTheDocument();
     expect(screen.getByText(/抓取与封面探测日志/)).toBeInTheDocument();
     expect(screen.getByText('封面探测成功')).toBeInTheDocument();
   });

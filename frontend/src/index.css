@@ -67,6 +67,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Keep dense archive screens readable: auxiliary text never drops below 11px. */
+
 button,
 input,
 textarea,
@@ -198,7 +200,7 @@ button:disabled {
   margin-top: 2px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .global-player-progress {
@@ -268,7 +270,7 @@ button:disabled {
   margin-top: 2px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.13em;
 }
 
@@ -319,7 +321,7 @@ button:disabled {
   border-radius: 50%;
   background: var(--accent);
   color: white;
-  font-size: 10px;
+  font-size: 11px;
   font-style: normal;
   line-height: 17px;
   text-align: center;
@@ -384,7 +386,7 @@ button:disabled {
   border-radius: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .app-main,
@@ -400,7 +402,7 @@ button:disabled {
 .eyebrow {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -702,7 +704,7 @@ button:disabled {
 .library-switcher small {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .scan-line {
@@ -711,7 +713,7 @@ button:disabled {
   justify-content: space-between;
   margin-top: 10px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .scan-line span {
@@ -742,7 +744,7 @@ button:disabled {
   margin: 0 8px 8px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
@@ -774,7 +776,7 @@ button:disabled {
 .smart-row em {
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -834,7 +836,7 @@ button:disabled {
 .storage-note span,
 .storage-note p {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .storage-note strong {
@@ -904,7 +906,7 @@ button:disabled {
   gap: 7px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.06em;
 }
 
@@ -981,7 +983,7 @@ button:disabled {
   border-radius: 2px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .toolbar-spacer {
@@ -1041,7 +1043,7 @@ button:disabled {
   background: color-mix(in srgb, var(--paper-3) 55%, transparent);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1125,7 +1127,7 @@ button:disabled {
   margin-top: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .track-cell {
@@ -1142,13 +1144,13 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 2px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .track-time,
 .track-year {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .track-status {
@@ -1178,7 +1180,7 @@ button:disabled {
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.04em;
 }
 
@@ -1255,7 +1257,7 @@ button:disabled {
 }
 
 .selection-count span {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .selection-divider {
@@ -1408,7 +1410,7 @@ button:disabled {
 .mini-player > span {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .mini-player + audio {
@@ -1455,7 +1457,7 @@ button:disabled {
   position: relative;
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .inspector-tabs button::after {
@@ -1513,7 +1515,7 @@ button:disabled {
 
 .form-section-head > span {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -1528,7 +1530,7 @@ button:disabled {
   border-radius: 2px;
   background: var(--accent-soft);
   color: var(--accent-2);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1542,7 +1544,7 @@ button:disabled {
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 650;
 }
 
@@ -1572,7 +1574,7 @@ button:disabled {
   display: block;
   margin-top: 4px;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .field-grid {
@@ -1613,7 +1615,7 @@ button:disabled {
   border-radius: 2px;
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   text-align: left;
 }
 
@@ -1638,12 +1640,12 @@ button:disabled {
 }
 
 .extended-tags-toggle strong {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .extended-tags-toggle small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .extended-tags-toggle > svg {
@@ -1666,7 +1668,7 @@ button:disabled {
 }
 
 .extended-tags-panel .field-row > span {
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .extended-tags-panel .format-note {
@@ -1690,7 +1692,7 @@ button:disabled {
   padding: 9px 10px;
   border-bottom: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1710,7 +1712,7 @@ button:disabled {
   gap: 10px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -1721,7 +1723,7 @@ button:disabled {
 .raw-tag-row code {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
@@ -1738,7 +1740,7 @@ button:disabled {
   margin: 0;
   padding: 11px 10px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .raw-tags-error {
@@ -1761,7 +1763,7 @@ button:disabled {
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .dirty-indicator {
@@ -1780,7 +1782,7 @@ button:disabled {
 .inspector-actions .ghost-button {
   height: 35px;
   padding: 0 10px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .artwork-stage {
@@ -1803,7 +1805,7 @@ button:disabled {
   background: var(--ink);
   color: var(--paper);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .meta-list {
@@ -1815,7 +1817,7 @@ button:disabled {
   justify-content: space-between;
   padding: 7px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .meta-list dt {
@@ -1844,7 +1846,7 @@ button:disabled {
   padding: 7px;
   background: transparent;
   color: var(--danger);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .lyrics-head {
@@ -1868,7 +1870,7 @@ button:disabled {
 .lyrics-head small {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .lyrics-pane textarea {
@@ -1881,7 +1883,7 @@ button:disabled {
   outline: 0;
   background: var(--paper-2);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 25px;
 }
 
@@ -1899,12 +1901,12 @@ button:disabled {
   align-items: center;
   gap: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .lyrics-options label small {
   color: var(--faint);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .format-note {
@@ -1912,7 +1914,7 @@ button:disabled {
   border-left: 2px solid var(--warning);
   background: color-mix(in srgb, var(--warning) 8%, transparent);
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -1940,7 +1942,7 @@ button:disabled {
 
 .technical-hero > span {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.08em;
 }
 
@@ -1960,7 +1962,7 @@ button:disabled {
 
 .technical-grid dt {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .technical-grid dd {
@@ -1983,7 +1985,7 @@ button:disabled {
   display: block;
   margin-bottom: 6px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -1993,7 +1995,7 @@ button:disabled {
   overflow-wrap: anywhere;
   padding-right: 25px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .path-block button {
@@ -2011,7 +2013,7 @@ button:disabled {
   display: block;
   margin-top: 6px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .history-line {
@@ -2068,7 +2070,7 @@ button:disabled {
 .history-line span {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .history-line button {
@@ -2076,7 +2078,7 @@ button:disabled {
   padding: 5px;
   background: transparent;
   color: var(--accent);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .diff-overlay {
@@ -2129,7 +2131,7 @@ button:disabled {
   gap: 6px;
   min-height: 45px;
   border-bottom: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .diff-list del,
@@ -2152,7 +2154,7 @@ button:disabled {
 
 .diff-card > p {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -2227,7 +2229,7 @@ button:disabled {
 .batch-edit-head p {
   margin: 5px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .batch-edit-body {
@@ -2248,7 +2250,7 @@ button:disabled {
   background: var(--paper-2);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .batch-edit-summary strong {
@@ -2300,7 +2302,7 @@ button:disabled {
   display: block;
   margin-top: 7px;
   color: var(--accent);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .batch-edit-section {
@@ -2325,7 +2327,7 @@ button:disabled {
 .batch-edit-section-head small {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .batch-edit-fields {
@@ -2343,7 +2345,7 @@ button:disabled {
 }
 
 .batch-edit-field > strong {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .batch-edit-field input,
@@ -2354,7 +2356,7 @@ button:disabled {
   border: 1px solid var(--line-strong);
   background: var(--paper);
   color: var(--ink);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .batch-edit-field input:disabled {
@@ -2400,12 +2402,12 @@ button:disabled {
 }
 
 .batch-edit-sequence strong {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .batch-edit-sequence small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .batch-edit-preview-list {
@@ -2440,7 +2442,7 @@ button:disabled {
 .batch-edit-preview-row small {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .batch-edit-preview-row p {
@@ -2449,12 +2451,12 @@ button:disabled {
   gap: 5px;
   align-items: center;
   margin: 0 0 4px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .batch-edit-preview-row em {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -2478,7 +2480,7 @@ button:disabled {
 .batch-edit-empty {
   padding: 24px 3px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -2525,7 +2527,7 @@ button:disabled {
 .snapshot-head p {
   margin: 5px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .snapshot-body {
@@ -2552,7 +2554,7 @@ button:disabled {
 .snapshot-summary span,
 .snapshot-more {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .snapshot-export-buttons {
@@ -2666,7 +2668,7 @@ button:disabled {
 .snapshot-preview-row small,
 .snapshot-preview-row span {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .snapshot-preview-row svg {
@@ -2710,7 +2712,7 @@ button:disabled {
 .candidate-head p {
   margin: 5px 0 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .query-strip {
@@ -2738,7 +2740,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 2px;
   background: var(--paper-2);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .query-editor button {
@@ -2748,7 +2750,7 @@ button:disabled {
   border-radius: 2px;
   background: var(--ink);
   color: var(--paper);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -2764,7 +2766,7 @@ button:disabled {
   padding: 7px;
   background: transparent;
   color: var(--accent);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .query-strip select {
@@ -2774,7 +2776,7 @@ button:disabled {
   border-radius: 2px;
   background: var(--paper-2);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .candidate-loading {
@@ -2822,7 +2824,7 @@ button:disabled {
 .candidate-loading p {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .candidate-layout {
@@ -2851,7 +2853,7 @@ button:disabled {
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 0.05em;
 }
 
@@ -2895,13 +2897,13 @@ button:disabled {
 
 .candidate-copy > span {
   margin-top: 3px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .candidate-copy small {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .candidate-copy em {
@@ -2912,7 +2914,7 @@ button:disabled {
   border-radius: 2px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2935,7 +2937,7 @@ button:disabled {
   margin-top: -14px;
   margin-left: 22px;
   font-family: var(--sans);
-  font-size: 6px;
+  font-size: 11px;
 }
 
 .score-ring.is-low {
@@ -2974,7 +2976,7 @@ button:disabled {
   display: block;
   margin-top: 6px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .confidence-badge {
@@ -2987,7 +2989,7 @@ button:disabled {
   border-radius: 2px;
   background: color-mix(in srgb, var(--success) 9%, transparent);
   color: var(--success);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -3012,7 +3014,7 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 2px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .reason-list svg {
@@ -3040,7 +3042,7 @@ button:disabled {
 .field-policy > div:first-child button {
   background: transparent;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .field-chips {
@@ -3058,7 +3060,7 @@ button:disabled {
   border-radius: 2px;
   background: var(--paper);
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .field-chips button > span {
@@ -3093,13 +3095,13 @@ button:disabled {
   align-items: center;
   min-height: 37px;
   border-bottom: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .diff-column-head {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -3121,6 +3123,77 @@ button:disabled {
 
 .candidate-diff-row.is-muted {
   opacity: 0.35;
+}
+
+.lyrics-candidate-editor {
+  margin-top: 15px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper-2);
+}
+
+.lyrics-candidate-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.lyrics-candidate-editor-head strong,
+.lyrics-candidate-editor-head span {
+  display: block;
+}
+
+.lyrics-candidate-editor-head strong {
+  font-family: var(--display);
+  font-size: 15px;
+}
+
+.lyrics-candidate-editor-head span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lyrics-candidate-editor-head em {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--success);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.lyrics-candidate-editor textarea {
+  display: block;
+  width: 100%;
+  min-height: 190px;
+  resize: vertical;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  outline: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.lyrics-candidate-editor textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.lyrics-candidate-editor > small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .asset-options {
@@ -3150,13 +3223,13 @@ button:disabled {
 }
 
 .asset-options strong {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .asset-options small {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .candidate-footer {
@@ -3177,7 +3250,7 @@ button:disabled {
 
 .candidate-footer > div > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 /* Shared section pages */
@@ -3221,7 +3294,7 @@ button:disabled {
   padding: 0 16px;
   background: transparent;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .section-tabs button::after {
@@ -3248,7 +3321,7 @@ button:disabled {
   margin-left: 4px;
   color: var(--faint);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -3299,7 +3372,7 @@ button:disabled {
 .review-stats span {
   margin-top: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-toolbar {
@@ -3357,7 +3430,7 @@ button:disabled {
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   line-height: 34px;
   text-transform: uppercase;
 }
@@ -3409,7 +3482,7 @@ button:disabled {
 .review-candidate-copy small {
   margin-top: 3px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-arrow {
@@ -3424,7 +3497,7 @@ button:disabled {
   padding: 3px 5px;
   border: 1px solid var(--line);
   border-radius: 2px;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-state.is-accepted { color: var(--success); }
@@ -3474,14 +3547,14 @@ button:disabled {
 }
 
 .review-detail-head p {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .review-detail-head small {
   display: block;
   margin-top: 7px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-policy-note,
@@ -3515,7 +3588,7 @@ button:disabled {
 .review-policy-note strong,
 .settings-policy-note strong,
 .integrity-note strong {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .review-policy-note span,
@@ -3523,14 +3596,14 @@ button:disabled {
 .integrity-note small {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-policy-note button {
   padding: 5px;
   background: transparent;
   color: var(--success);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .review-diff-table {
@@ -3551,12 +3624,12 @@ button:disabled {
 .review-diff-head {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
 .review-diff-row {
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .review-diff-row > span,
@@ -3578,7 +3651,7 @@ button:disabled {
 .review-diff-row > em {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -3612,7 +3685,7 @@ button:disabled {
   align-items: center;
   gap: 8px;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .review-footer strong {
@@ -3691,7 +3764,7 @@ button:disabled {
 .job-copy p,
 .job-numbers {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .job-copy p {
@@ -3723,7 +3796,7 @@ button:disabled {
   padding: 4px 6px;
   border: 1px solid var(--line);
   border-radius: 2px;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .job-state.state-review,
@@ -3749,7 +3822,7 @@ button:disabled {
 .job-detail > p {
   margin: 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .job-detail-progress {
@@ -3791,7 +3864,7 @@ button:disabled {
   justify-content: space-between;
   padding: 8px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .job-detail dt {
@@ -3817,14 +3890,14 @@ button:disabled {
   margin-bottom: 3px;
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
 .job-log code {
   color: color-mix(in srgb, var(--paper) 73%, transparent);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .job-items {
@@ -3838,7 +3911,7 @@ button:disabled {
   justify-content: space-between;
   padding: 11px 0 8px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -3846,7 +3919,7 @@ button:disabled {
 .job-items-empty,
 .job-item-noop {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: none;
 }
 
@@ -3880,7 +3953,7 @@ button:disabled {
 
 .job-item-head strong {
   overflow: hidden;
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3889,7 +3962,7 @@ button:disabled {
   flex: none;
   color: var(--success);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .job-item.is-failed .job-item-head span {
@@ -3899,7 +3972,7 @@ button:disabled {
 .job-item-error {
   margin: 7px 0 0;
   color: var(--danger);
-  font-size: 8px;
+  font-size: 11px;
   line-height: 1.45;
 }
 
@@ -3915,7 +3988,7 @@ button:disabled {
   align-items: center;
   gap: 5px;
   margin: 0;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .job-item-diff em {
@@ -3952,7 +4025,7 @@ button:disabled {
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--success) 42%, var(--line));
   color: var(--success);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .history-toolbar {
@@ -3987,7 +4060,7 @@ button:disabled {
   height: 28px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -4040,14 +4113,14 @@ button:disabled {
 
 .revision-row small {
   margin-top: 3px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .revision-row em {
   margin-top: 4px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -4056,7 +4129,7 @@ button:disabled {
   border: 1px solid var(--line);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   text-align: center;
 }
 
@@ -4093,7 +4166,7 @@ button:disabled {
   margin: 0;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .revision-meta {
@@ -4121,12 +4194,12 @@ button:disabled {
 
 .revision-meta span {
   color: var(--muted);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .revision-meta strong {
   margin-top: 3px;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .revision-diff {
@@ -4149,7 +4222,7 @@ button:disabled {
 .restore-preview-banner small {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .restore-warning,
@@ -4158,7 +4231,7 @@ button:disabled {
   padding: 7px 8px;
   border-left: 2px solid var(--warning);
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .restore-error {
@@ -4185,7 +4258,7 @@ button:disabled {
   gap: 7px;
   min-height: 42px;
   border-bottom: 1px solid var(--line);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .revision-diff-head {
@@ -4268,7 +4341,7 @@ button:disabled {
 
 .settings-nav small {
   margin-top: 2px;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .settings-content {
@@ -4293,7 +4366,7 @@ button:disabled {
 .settings-content-head p {
   margin: 5px 0 0;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .provider-grid {
@@ -4352,7 +4425,7 @@ button:disabled {
 .provider-card-head small {
   gap: 3px;
   margin-top: 3px;
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .provider-card-head .health-ready { color: var(--success); }
@@ -4376,7 +4449,7 @@ button:disabled {
   min-height: 34px;
   margin: 12px 0 9px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1.55;
 }
 
@@ -4390,7 +4463,7 @@ button:disabled {
   padding: 3px 5px;
   border: 1px solid var(--line);
   border-radius: 2px;
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .experimental-note {
@@ -4400,7 +4473,7 @@ button:disabled {
   width: fit-content;
   margin-top: 7px;
   color: var(--warning);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .provider-foot {
@@ -4419,7 +4492,7 @@ button:disabled {
   flex: 1;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .provider-foot button {
@@ -4429,18 +4502,41 @@ button:disabled {
   padding: 4px 5px;
   background: transparent;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .settings-policy-note {
   margin-top: 16px;
 }
 
+.provider-test-overlay {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.provider-test-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--ink) 45%, transparent);
+  cursor: default;
+}
+
 .provider-test-panel {
-  margin-top: 16px;
+  position: relative;
+  z-index: 1;
+  width: min(900px, 100%);
+  max-height: min(820px, calc(100vh - 48px));
+  overflow-y: auto;
   padding: 16px;
   border: 1px solid var(--line-strong);
   background: var(--paper-2);
+  box-shadow: var(--shadow);
 }
 
 .provider-test-head {
@@ -4461,7 +4557,7 @@ button:disabled {
 .provider-test-head p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-form {
@@ -4479,7 +4575,7 @@ button:disabled {
 
 .provider-test-form label > span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-form input {
@@ -4490,7 +4586,7 @@ button:disabled {
   background: var(--paper);
   color: var(--ink);
   font: inherit;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .provider-test-form input:focus {
@@ -4511,7 +4607,7 @@ button:disabled {
   border-left: 3px solid var(--danger);
   background: color-mix(in srgb, var(--danger) 8%, transparent);
   color: var(--danger);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-output {
@@ -4526,7 +4622,7 @@ button:disabled {
   gap: 7px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-summary strong {
@@ -4554,6 +4650,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 9px;
+  flex-wrap: wrap;
   min-width: 0;
   padding: 7px;
   border: 1px solid var(--line);
@@ -4562,6 +4659,7 @@ button:disabled {
 
 .provider-test-candidate > div {
   min-width: 0;
+  flex: 1;
 }
 
 .provider-test-candidate strong,
@@ -4573,6 +4671,33 @@ button:disabled {
   white-space: nowrap;
 }
 
+.provider-test-lyrics {
+  flex: 0 0 100%;
+  margin-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.provider-test-lyrics summary {
+  cursor: pointer;
+  padding-top: 7px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.provider-test-lyrics pre {
+  max-height: 180px;
+  margin: 7px 0 0;
+  padding: 9px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 .provider-test-candidate strong {
   font-family: var(--display);
   font-size: 11px;
@@ -4580,14 +4705,14 @@ button:disabled {
 
 .provider-test-candidate span {
   margin-top: 2px;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-candidate small {
   margin-top: 4px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
 }
 
 .provider-test-empty {
@@ -4595,7 +4720,7 @@ button:disabled {
   padding: 10px;
   border: 1px dashed var(--line-strong);
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-logs {
@@ -4608,7 +4733,7 @@ button:disabled {
   padding: 9px 0 7px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-log {
@@ -4622,13 +4747,13 @@ button:disabled {
 .provider-test-log > span {
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
 .provider-test-log p {
   margin: 0;
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .provider-test-log p small {
@@ -4636,7 +4761,7 @@ button:disabled {
   margin-top: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 
@@ -4686,7 +4811,7 @@ button:disabled {
   margin-top: 3px;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .library-setting-title em {
@@ -4696,7 +4821,7 @@ button:disabled {
   padding: 4px 6px;
   border: 1px solid color-mix(in srgb, var(--success) 40%, var(--line));
   color: var(--success);
-  font-size: 8px;
+  font-size: 11px;
   font-style: normal;
 }
 
@@ -4712,7 +4837,7 @@ button:disabled {
   display: block;
   margin-bottom: 5px;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .library-setting-grid select {
@@ -4720,7 +4845,7 @@ button:disabled {
   height: 34px;
   border: 1px solid var(--line);
   background: var(--paper);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .ignore-box {
@@ -4734,19 +4859,19 @@ button:disabled {
 
 .ignore-box span {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .ignore-box code {
   flex: 1;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .ignore-box button {
   background: transparent;
   color: var(--accent);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .system-settings {
@@ -4780,7 +4905,7 @@ button:disabled {
 .system-settings p {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 @media (max-width: 1450px) {
@@ -5097,7 +5222,7 @@ button:disabled {
     gap: 2px;
     min-width: 0;
     padding: 0;
-    font-size: 8px;
+    font-size: 11px;
   }
 
   .nav-item span {
@@ -5273,7 +5398,7 @@ button:disabled {
 
   .batch-edit-summary span {
     padding: 7px;
-    font-size: 7px;
+    font-size: 11px;
   }
 
   .batch-template-controls {

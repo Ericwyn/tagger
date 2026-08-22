@@ -1,4 +1,5 @@
 import {useEffect, useState, type CSSProperties, type FormEvent} from 'react';
+import {createPortal} from 'react-dom';
 import {
   Check,
   ChevronRight,
@@ -71,47 +72,120 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     listProviders().then(setProviders);
   }, []);
 
-	const toggleProvider = async (provider: ProviderConfig) => {
-	try {
-	  const updated = await updateProvider(provider, !provider.enabled);
-	  setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
-	  onNotice(`${updated.name} 已${updated.enabled ? '启用' : '停用'}并持久化`);
-	} catch (error) {
-	  onNotice(error instanceof Error ? error.message : '数据源设置保存失败');
-	}
+  const toggleProvider = async (provider: ProviderConfig) => {
+    try {
+      const updated = await updateProvider(provider, !provider.enabled);
+      setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
+      onNotice(`${updated.name} 已${updated.enabled ? '启用' : '停用'}并持久化`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '数据源设置保存失败');
+    }
   };
 
-	const openProviderTest = (provider: ProviderConfig) => {
-	  setTestProviderId(provider.id);
-	  setTestResponse(undefined);
-	  setTestError('');
+  const openProviderTest = (provider: ProviderConfig) => {
+    setTestProviderId(provider.id);
+    setTestResponse(undefined);
+    setTestError('');
+  };
+
+  const executeProviderTest = async (event: FormEvent) => {
+    event.preventDefault();
+    const provider = providers.find((item) => item.id === testProviderId);
+    const title = testQuery.title.trim();
+    if (!provider || !title) {
+      setTestError('请输入歌曲名后再测试');
+      return;
+    }
+    const query: CandidateSearchQuery = {
+      ...testQuery,
+      title,
+      artists: testArtistInput.split(/[,，/]/).map((item) => item.trim()).filter(Boolean),
+      album: testQuery.album.trim(),
+    };
+    setTestingId(provider.id);
+    setTestError('');
+    setTestResponse(undefined);
+    try {
+      setTestResponse(await runProviderTest(provider, query));
+    } catch (error) {
+      setTestError(error instanceof Error ? error.message : '数据源查询失败');
+    } finally {
+      setTestingId(undefined);
+    }
 	};
 
-	const executeProviderTest = async (event: FormEvent) => {
-	  event.preventDefault();
-	  const provider = providers.find((item) => item.id === testProviderId);
-	  const title = testQuery.title.trim();
-	  if (!provider || !title) {
-		setTestError('请输入歌曲名后再测试');
-		return;
-	  }
-	  const query: CandidateSearchQuery = {
-		...testQuery,
-		title,
-		artists: testArtistInput.split(/[,，/]/).map((item) => item.trim()).filter(Boolean),
-		album: testQuery.album.trim(),
-	  };
-	  setTestingId(provider.id);
-	  setTestError('');
-	  setTestResponse(undefined);
-	  try {
-		setTestResponse(await runProviderTest(provider, query));
-	  } catch (error) {
-		setTestError(error instanceof Error ? error.message : '数据源查询失败');
-	  } finally {
-		setTestingId(undefined);
-	  }
-	};
+  const providerTestPanel = testProviderId ? (() => {
+    const provider = providers.find((item) => item.id === testProviderId);
+    if (!provider) return null;
+    const candidates = testResponse?.candidates ?? [];
+
+    return createPortal(
+      <div className="provider-test-overlay">
+        <button className="provider-test-backdrop" aria-label="关闭数据源搜索测试" onClick={() => setTestProviderId(undefined)} />
+        <section className="provider-test-panel" role="dialog" aria-modal="true" aria-label="数据源搜索测试">
+          <div className="provider-test-head">
+            <div>
+              <span className="eyebrow">PROVIDER DIAGNOSTICS</span>
+              <h3>测试 {provider.name}</h3>
+              <p>输入一组真实查询，查看候选、歌词、封面和探测日志。</p>
+            </div>
+            <button className="icon-button" title="关闭数据源测试" onClick={() => setTestProviderId(undefined)}><X size={17} /></button>
+          </div>
+          <form className="provider-test-form" onSubmit={(event) => void executeProviderTest(event)}>
+            <label><span>歌曲名</span><input aria-label="测试歌曲名" value={testQuery.title} onChange={(event) => setTestQuery((current) => ({...current, title: event.target.value}))} placeholder="例如：再回首" required /></label>
+            <label><span>歌手</span><input aria-label="测试歌手" value={testArtistInput} onChange={(event) => setTestArtistInput(event.target.value)} placeholder="多个歌手用 / 分隔" /></label>
+            <label><span>专辑（可选）</span><input aria-label="测试专辑" value={testQuery.album} onChange={(event) => setTestQuery((current) => ({...current, album: event.target.value}))} placeholder="专辑名" /></label>
+            <label><span>时长秒数（可选）</span><input aria-label="测试时长" type="number" min="0" value={testQuery.durationSeconds || ''} onChange={(event) => setTestQuery((current) => ({...current, durationSeconds: Math.max(0, Number(event.target.value) || 0)}))} placeholder="例如：248" /></label>
+            <button className="primary-button" type="submit" disabled={testingId === provider.id}>
+              {testingId === provider.id ? <LoaderCircle size={14} className="spin" /> : <TestTube2 size={14} />}
+              执行查询并探测封面
+            </button>
+          </form>
+          {testError && <div className="provider-test-error"><CircleAlert size={14} /> {testError}</div>}
+          {testResponse && (
+            <div className="provider-test-output">
+              <div className="provider-test-summary">
+                <strong className={cn(testResponse.result.status === 'ok' ? 'is-success' : 'is-error')}>{testResponse.result.status === 'ok' ? '查询完成' : '查询异常'}</strong>
+                <span>{testResponse.result.count} 个候选</span>
+                <span>{testResponse.result.latencyMs} ms</span>
+                {testResponse.result.cached && <span>缓存命中</span>}
+              </div>
+              {candidates.length > 0 ? (
+                <div className="provider-test-candidates">
+                  {candidates.map((candidate) => {
+                    const imageUrl = candidateArtworkURL(candidate);
+                    return (
+                      <article className="provider-test-candidate" key={candidate.id}>
+                        <CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} size="sm" missing={!showGeneratedCovers && !imageUrl} imageUrl={imageUrl} blankOnImageError={!showGeneratedCovers} />
+                        <div>
+                          <strong>{candidate.title.value}</strong>
+                          <span>{candidate.artists.value.join(' / ') || '未提供歌手'}</span>
+                          <small>{candidate.album.value || '未提供专辑'} · {candidateAssetLabel(candidate)} · {Math.round(candidate.score * 100)}%</small>
+                        </div>
+                        {candidate.lyrics?.value && (
+                          <details className="provider-test-lyrics">
+                            <summary>查看歌词</summary>
+                            <pre>{candidate.lyrics.value}</pre>
+                          </details>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : <div className="provider-test-empty">没有候选。请先查看下方日志，确认查询参数和数据源是否返回了结果。</div>}
+              {(testResponse.logs?.length ?? 0) > 0 && (
+                <details className="provider-test-logs" open>
+                  <summary>抓取与封面探测日志（{testResponse.logs!.length} 条）</summary>
+                  <div>{testResponse.logs!.map((log, index) => <div className={cn('provider-test-log', `is-${log.level}`)} key={`${log.stage}-${index}`}><span>{log.stage}</span><p><strong>{log.message}</strong>{formatLogDetails(log.details) && <small>{formatLogDetails(log.details)}</small>}</p></div>)}</div>
+                </details>
+              )}
+            </div>
+          )}
+        </section>
+      </div>,
+      document.body,
+    );
+  })() : null;
 
   return (
     <div className="section-page settings-page">
@@ -121,7 +195,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
           <h1>设置</h1>
           <p>管理受控音乐目录、元数据来源和单二进制运行参数。</p>
         </div>
-		<button className="primary-button" onClick={() => onNotice(apiReadMode === 'real' ? '数据源开关已实时保存到 SQLite' : '设置已保存到 Mock 配置层')}><Save size={15} /> 保存设置</button>
+        <button className="primary-button" onClick={() => onNotice(apiReadMode === 'real' ? '数据源开关已实时保存到 SQLite' : '设置已保存到 Mock 配置层')}><Save size={15} /> 保存设置</button>
       </header>
 
       <div className="settings-layout">
@@ -161,7 +235,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                       <button
                         className="provider-toggle"
                         title={provider.enabled ? '停用数据源' : '启用数据源'}
-						onClick={() => void toggleProvider(provider)}
+                        onClick={() => void toggleProvider(provider)}
                       >
                         {provider.enabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
                       </button>
@@ -182,59 +256,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   </article>
                 ))}
               </div>
-			  {testProviderId && (() => {
-				const provider = providers.find((item) => item.id === testProviderId);
-				if (!provider) return null;
-				const candidates = testResponse?.candidates ?? [];
-				return (
-				  <section className="provider-test-panel" aria-label="数据源搜索测试">
-					<div className="provider-test-head">
-					  <div><span className="eyebrow">PROVIDER DIAGNOSTICS</span><h3>测试 {provider.name}</h3><p>输入一组真实查询，查看候选、歌词、封面和探测日志。</p></div>
-					  <button className="icon-button" title="关闭数据源测试" onClick={() => setTestProviderId(undefined)}><X size={17} /></button>
-					</div>
-					<form className="provider-test-form" onSubmit={(event) => void executeProviderTest(event)}>
-					  <label><span>歌曲名</span><input aria-label="测试歌曲名" value={testQuery.title} onChange={(event) => setTestQuery((current) => ({...current, title: event.target.value}))} placeholder="例如：再回首" required /></label>
-					  <label><span>歌手</span><input aria-label="测试歌手" value={testArtistInput} onChange={(event) => setTestArtistInput(event.target.value)} placeholder="多个歌手用 / 分隔" /></label>
-					  <label><span>专辑（可选）</span><input aria-label="测试专辑" value={testQuery.album} onChange={(event) => setTestQuery((current) => ({...current, album: event.target.value}))} placeholder="专辑名" /></label>
-					  <label><span>时长秒数（可选）</span><input aria-label="测试时长" type="number" min="0" value={testQuery.durationSeconds || ''} onChange={(event) => setTestQuery((current) => ({...current, durationSeconds: Math.max(0, Number(event.target.value) || 0)}))} placeholder="例如：248" /></label>
-					  <button className="primary-button" type="submit" disabled={testingId === provider.id}>
-						{testingId === provider.id ? <LoaderCircle size={14} className="spin" /> : <TestTube2 size={14} />}
-						执行查询并探测封面
-					  </button>
-					</form>
-					{testError && <div className="provider-test-error"><CircleAlert size={14} /> {testError}</div>}
-					{testResponse && (
-					  <div className="provider-test-output">
-						<div className="provider-test-summary">
-						  <strong className={cn(testResponse.result.status === 'ok' ? 'is-success' : 'is-error')}>{testResponse.result.status === 'ok' ? '查询完成' : '查询异常'}</strong>
-						  <span>{testResponse.result.count} 个候选</span>
-						  <span>{testResponse.result.latencyMs} ms</span>
-						  {testResponse.result.cached && <span>缓存命中</span>}
-						</div>
-						{candidates.length > 0 ? (
-						  <div className="provider-test-candidates">
-							{candidates.map((candidate) => {
-							  const imageUrl = candidateArtworkURL(candidate);
-							  return (
-								<article className="provider-test-candidate" key={candidate.id}>
-								  <CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} size="sm" missing={!showGeneratedCovers && !imageUrl} imageUrl={imageUrl} blankOnImageError={!showGeneratedCovers} />
-								  <div><strong>{candidate.title.value}</strong><span>{candidate.artists.value.join(' / ') || '未提供歌手'}</span><small>{candidate.album.value || '未提供专辑'} · {candidateAssetLabel(candidate)} · {Math.round(candidate.score * 100)}%</small></div>
-								</article>
-							  );
-							})}
-						  </div>
-						) : <div className="provider-test-empty">没有候选。请先查看下方日志，确认查询参数和数据源是否返回了结果。</div>}
-						{(testResponse.logs?.length ?? 0) > 0 && (
-						  <details className="provider-test-logs" open>
-							<summary>抓取与封面探测日志（{testResponse.logs!.length} 条）</summary>
-							<div>{testResponse.logs!.map((log, index) => <div className={cn('provider-test-log', `is-${log.level}`)} key={`${log.stage}-${index}`}><span>{log.stage}</span><p><strong>{log.message}</strong>{formatLogDetails(log.details) && <small>{formatLogDetails(log.details)}</small>}</p></div>)}</div>
-						  </details>
-						)}
-					  </div>
-					)}
-				  </section>
-				);
-			  })()}
+              {providerTestPanel}
 			  <div className="settings-policy-note">
 				<ShieldCheck size={18} />
 				<div><strong>来源用途策略</strong><span>远程封面只通过后端候选 ID、安全下载和图片验证后写入；实验性来源需要已实现适配器才能启用。</span></div>
