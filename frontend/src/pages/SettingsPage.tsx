@@ -524,7 +524,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <>
               <div className="settings-content-head">
                 <div><h2>音乐数据源</h2><p>数据源按能力组合；单个来源失败不会影响其他结果。</p></div>
-                <button className="secondary-button"><Plus size={15} /> 添加自定义来源</button>
+                <span className="settings-readonly-hint">内置策略可配置；自定义策略将在后续版本开放</span>
               </div>
               <div className="provider-grid">
                 {providers.map((provider) => (
@@ -596,11 +596,11 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   </button>
                 </div>
                 <div className="library-setting-grid">
-                  <label><span>扫描模式</span><select defaultValue="hybrid"><option value="hybrid">监听 + 定时对账</option><option>仅手动</option></select></label>
-                  <label><span>定时对账</span><select defaultValue="6h"><option value="6h">每 6 小时</option><option>每天</option></select></label>
-                  <label><span>符号链接</span><select defaultValue="off"><option value="off">不跟随</option><option>仅根目录内</option></select></label>
+                  <label><span>扫描模式</span><select aria-label="扫描模式" value="manual" disabled onChange={() => undefined}><option value="manual">仅手动 / 任务队列</option></select></label>
+                  <label><span>定时对账</span><select aria-label="定时对账" value="off" disabled onChange={() => undefined}><option value="off">未启用</option></select></label>
+                  <label><span>符号链接</span><select aria-label="符号链接" value="off" disabled onChange={() => undefined}><option value="off">不跟随</option></select></label>
                 </div>
-                <div className="ignore-box"><span>忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><button>编辑</button></div>
+                <div className="ignore-box"><span>默认忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><small>由扫描器固定处理</small></div>
               </article>
               <div className="registered-libraries" aria-label="已注册曲库">
                 <div className="registered-libraries-head"><div><h3>已注册曲库</h3><p>切换只会改变当前浏览和写入目标，不会删除其他曲库的索引。</p></div><span>{libraries.length} 个</span></div>

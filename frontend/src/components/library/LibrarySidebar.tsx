@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect, useRef, useState, type CSSProperties} from 'react';
 import {
   AlertTriangle,
   ChevronDown,
@@ -84,6 +84,39 @@ function folderTree(folders: FolderNode[]): FolderBranch[] {
   return roots;
 }
 
+function TreeLabel({children}: {children: string}) {
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  const contentRef = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const [shift, setShift] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const wrapper = wrapperRef.current;
+      const content = contentRef.current;
+      if (!wrapper || !content) return;
+      const nextShift = Math.max(0, content.scrollWidth - wrapper.clientWidth);
+      setShift(nextShift);
+      setOverflow(nextShift > 1);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined' || !wrapperRef.current) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrapperRef.current);
+    return () => observer.disconnect();
+  }, [children]);
+
+  const style = {
+    '--tree-label-shift': `${shift}px`,
+    '--tree-label-duration': `${Math.max(4, Math.min(12, shift / 12))}s`,
+  } as CSSProperties;
+  return (
+    <span ref={wrapperRef} className={cn('tree-label', overflow && 'is-overflow')} title={children} style={style}>
+      <span ref={contentRef}>{children}</span>
+    </span>
+  );
+}
+
 function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: FolderBranch; activeFolder: string | null; onSelectFolder: (id: string | null) => void}) {
   const [expanded, setExpanded] = useState(false);
   const hasChildren = branch.children.length > 0;
@@ -96,7 +129,7 @@ function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: Folder
           onClick={(event) => { if (hasChildren) { event.stopPropagation(); setExpanded((value) => !value); } }}
         >{hasChildren ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}</span>
         {expanded ? <FolderOpen size={15} /> : <Folder size={15} />}
-        <span>{branch.name}</span>
+        <TreeLabel>{branch.name}</TreeLabel>
         <em>{branch.count}</em>
       </button>
       {expanded && hasChildren && <div className="tree-nested-children">{branch.children.map((child) => <FolderBranchRow key={child.key} branch={child} activeFolder={activeFolder} onSelectFolder={onSelectFolder} />)}</div>}
@@ -170,7 +203,7 @@ export function LibrarySidebar({
         >
           <span className="tree-disclosure is-empty" aria-hidden="true" />
           <FolderOpen size={16} />
-          <span>{library.rootLabel}</span>
+          <TreeLabel>{library.rootLabel}</TreeLabel>
           <em>{library.trackCount}</em>
         </button>
         <div className="tree-children">

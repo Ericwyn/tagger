@@ -61,4 +61,18 @@ describe('LibrarySidebar library controls', () => {
     await user.click(screen.getByRole('button', {name: /管理曲库/}));
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
+
+  it('keeps the full folder name available to hover and assistive users', () => {
+    const longName = '非常长的唱片目录名称-2026-现场录音-高解析度收藏版';
+    // The production tree derives labels from folder paths; this assertion
+    // verifies the label contract without depending on viewport width.
+    render(<LibrarySidebar {...{
+      library: {...library, folders: [{id: 'folder-long', name: longName, count: 1}]},
+      libraries: [library, otherLibrary], activeFolder: null, activeFilter: 'all',
+      counts: {all: 12, complete: 12, 'missing-artwork': 0, 'missing-lyrics': 0, 'needs-review': 0, 'parse-error': 0},
+      sourceLabel: 'Mock', indexedSizeBytes: 1024, mobileOpen: false, onCloseMobile: vi.fn(),
+      onSelectFolder: vi.fn(), onSelectFilter: vi.fn(), onSwitchLibrary: vi.fn(), onRescan: vi.fn(), onOpenSettings: vi.fn(),
+    }} />);
+    expect(screen.getByTitle(longName)).toHaveTextContent(longName);
+  });
 });

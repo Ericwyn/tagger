@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {
   Check,
   ChevronRight,
@@ -19,6 +19,7 @@ import type {BatchEditItem, Job} from '@/types';
 
 interface JobsPageProps {
   onOpenReview: (jobId: string) => void;
+  focusJobId?: string;
 }
 
 const stateMeta: Record<Job['state'], {label: string; icon: typeof Check}> = {
@@ -66,9 +67,10 @@ function formatBatchValue(value: unknown): string {
   return String(value);
 }
 
-export function JobsPage({onOpenReview}: JobsPageProps) {
+export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
+	const focusConsumed = useRef(false);
 	const [jobFilter, setJobFilter] = useState<'all' | 'running' | 'review' | 'failed'>('all');
 	const [actionError, setActionError] = useState('');
 	const [batchItems, setBatchItems] = useState<BatchEditItem[]>([]);
@@ -79,8 +81,18 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 
 	const refresh = () => listJobs().then((next) => {
 	  setJobs(next);
-	  setSelectedId((current) => next.some((job) => job.id === current) ? current : next[0]?.id);
+	  setSelectedId((current) => {
+	    if (!focusConsumed.current && focusJobId && next.some((job) => job.id === focusJobId)) {
+	      focusConsumed.current = true;
+	      return focusJobId;
+	    }
+	    return next.some((job) => job.id === current) ? current : next[0]?.id;
 	  });
+	});
+
+	useEffect(() => {
+	  focusConsumed.current = false;
+	}, [focusJobId]);
 
 	const updateJob = (next: Job) => {
 	  setJobs((current) => current.map((job) => job.id === next.id ? next : job));

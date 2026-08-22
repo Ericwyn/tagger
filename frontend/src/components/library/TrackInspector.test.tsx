@@ -131,6 +131,30 @@ describe('TrackInspector', () => {
     expect(screen.getByTitle('试听')).toBeInTheDocument();
   });
 
+  it('copies the relative path and reports the result', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {configurable: true, value: {writeText}});
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+        onNotice={onNotice}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', {name: '技术'}));
+    await user.click(screen.getByRole('button', {name: '复制相对路径'}));
+    expect(writeText).toHaveBeenCalledWith(seedTracks[0].relativePath);
+    expect(onNotice).toHaveBeenCalledWith('相对路径已复制');
+  });
+
   it('opens the raw tag panel in mock mode', async () => {
     const user = userEvent.setup();
     render(

@@ -23,6 +23,7 @@ interface ReviewPageProps {
   showGeneratedCovers?: boolean;
   onBack: () => void;
   onComplete: () => void;
+  onJobQueued?: (jobId: string) => void;
 }
 
 type ReviewState = 'accepted' | 'review' | 'skipped';
@@ -95,7 +96,7 @@ function availableFields(candidate: MatchCandidate): string[] {
   });
 }
 
-export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, onBack, onComplete}: ReviewPageProps) {
+export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, onBack, onComplete, onJobQueued}: ReviewPageProps) {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -124,6 +125,13 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
         if (created) {
           if (active) setJob(created);
+          // A newly queued batch belongs in the durable task center. Leave the
+          // review route immediately so progress and cancellation are visible
+          // instead of keeping the user on a waiting screen.
+          if (!matchJobId && onJobQueued) {
+            onJobQueued(created.id);
+            return;
+          }
           if (apiReadMode === 'real' && !matchJobId) {
             stopJobEvents = subscribeJobEvents(created.id, (next) => {
               if (active) setJob(next);
@@ -420,7 +428,6 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
                 <strong>当前策略：采用所选字段</strong>
                 <span>不会删除候选中缺失的标签；评论和未知标签保持不变。</span>
               </div>
-              <button>修改策略</button>
               <button onClick={() => void rematchCurrent()} disabled={rematching}>
                 {rematching ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
                 重新匹配此曲

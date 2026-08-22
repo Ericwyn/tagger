@@ -38,6 +38,7 @@ interface TrackInspectorProps {
   playerPlaying?: boolean;
   onPlayTrack?: (track: Track) => void;
   onTogglePlayer?: () => void;
+  onNotice?: (message: string) => void;
   showGeneratedCovers?: boolean;
 }
 
@@ -129,6 +130,7 @@ export function TrackInspector({
   playerPlaying,
   onPlayTrack,
   onTogglePlayer,
+  onNotice,
   showGeneratedCovers = false,
 }: TrackInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>('tags');
@@ -238,6 +240,16 @@ export function TrackInspector({
       setRawTags({});
     } finally {
       setRawTagsLoading(false);
+    }
+  };
+
+  const copyRelativePath = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard_unavailable');
+      await navigator.clipboard.writeText(track.relativePath);
+      onNotice?.('相对路径已复制');
+    } catch {
+      onNotice?.('当前浏览器不允许访问剪贴板，请手动复制路径');
     }
   };
 
@@ -592,7 +604,7 @@ export function TrackInspector({
             <div className="path-block">
               <span>相对路径</span>
               <code>{track.relativePath}</code>
-              <button title="复制路径"><Copy size={14} /></button>
+              <button title="复制相对路径" aria-label="复制相对路径" onClick={() => void copyRelativePath()}><Copy size={14} /></button>
             </div>
             <div className="revision-block">
               <span>当前修订</span>

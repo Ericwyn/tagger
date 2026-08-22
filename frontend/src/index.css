@@ -1044,6 +1044,33 @@ button:disabled {
   white-space: nowrap;
 }
 
+.tree-row .tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.tree-label > span {
+  display: inline-block;
+  min-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.tree-label.is-overflow:hover > span {
+  animation: tree-label-marquee var(--tree-label-duration) ease-in-out infinite alternate;
+}
+
+@keyframes tree-label-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-1 * var(--tree-label-shift))); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-label.is-overflow:hover > span { animation: none; }
+}
+
 .tree-row em,
 .smart-row em {
   color: var(--faint);
@@ -4864,6 +4891,13 @@ button:disabled {
   font-size: 11px;
 }
 
+.settings-readonly-hint {
+  align-self: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
 .provider-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(280px, 1fr));
@@ -5632,6 +5666,11 @@ button:disabled {
 .ignore-box code {
   flex: 1;
   font-family: var(--mono);
+  font-size: 11px;
+}
+
+.ignore-box small {
+  color: var(--muted);
   font-size: 11px;
 }
 

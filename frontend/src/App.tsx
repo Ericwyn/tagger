@@ -19,6 +19,7 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [playerTrack, setPlayerTrack] = useState<Track | null>(null);
   const [playerPlaying, setPlayerPlaying] = useState(false);
+  const [jobFocusId, setJobFocusId] = useState<string>();
   const [showGeneratedCovers, setShowGeneratedCovers] = useState(() => localStorage.getItem('tagger-generated-covers') === 'true');
   const [authState, setAuthState] = useState<'checking' | 'ready' | 'required'>(apiReadMode === 'mock' ? 'ready' : 'checking');
   const [authError, setAuthError] = useState('');
@@ -62,6 +63,10 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (route.page !== 'jobs') setJobFocusId(undefined);
+  }, [route.page]);
+
   const navigate = (nextRoute: AppRoute) => {
     const nextPath = routePath(nextRoute);
     const currentPath = `${window.location.pathname}${window.location.search}`;
@@ -78,6 +83,11 @@ export function App() {
   const openReview = (ids: string[]) => navigate({page: 'review', batchIds: ids});
 
   const openReviewJob = (jobId: string) => navigate({page: 'review', batchIds: [], reviewJobId: jobId});
+
+  const openJobs = (focusJobId?: string) => {
+    setJobFocusId(focusJobId);
+    navigatePage('jobs');
+  };
 
   const playTrack = (track: Track) => {
     setPlayerTrack(track);
@@ -135,11 +145,12 @@ export function App() {
                 onBack={() => navigatePage('library')}
                 onComplete={() => {
                   setNotice('批量写入任务已创建，正在等待安全写入');
-                  navigatePage('jobs');
+                  openJobs();
                 }}
+                onJobQueued={(jobId) => openJobs(jobId)}
               />
             )}
-            {route.page === 'jobs' && <JobsPage onOpenReview={openReviewJob} />}
+            {route.page === 'jobs' && <JobsPage onOpenReview={openReviewJob} focusJobId={jobFocusId} />}
             {route.page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
             {route.page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} theme={theme} onThemeChange={setTheme} font={font} onFontChange={setFont} />}
           </motion.div>

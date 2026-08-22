@@ -51,6 +51,25 @@ describe('JobsPage', () => {
     expect(screen.getByRole('heading', {name: '批量编辑标签'})).toBeInTheDocument();
   });
 
+  it('focuses the newly queued job when opened from batch capture', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const queuedJob = {
+      id: 'job-queued', kind: 'match', state: 'running', title: '批量抓取元数据', detail: '已分析 1/4 首',
+      processed: 1, total: 4, succeeded: 1, failed: 0, startedAt: '刚刚',
+    } as const;
+    api.listJobs.mockResolvedValue([queuedJob, {
+      id: 'job-old', kind: 'scan', state: 'succeeded', title: '旧扫描', detail: '完成',
+      processed: 1, total: 1, succeeded: 1, failed: 0, startedAt: '更早',
+    }]);
+    render(<JobsPage onOpenReview={() => {}} focusJobId="job-queued" />);
+
+    expect(await screen.findByRole('heading', {name: '批量抓取元数据'})).toBeInTheDocument();
+    expect(screen.getAllByText('已分析 1/4 首').length).toBeGreaterThanOrEqual(1);
+    await user.click(screen.getByRole('button', {name: /旧扫描/}));
+    await user.click(screen.getByRole('button', {name: /刷新状态/}));
+    expect(screen.getByRole('heading', {name: '旧扫描'})).toBeInTheDocument();
+  });
+
   it('allows a review task to be discarded before switching libraries', async () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     const reviewJob = {

@@ -587,6 +587,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		playerPlaying={playerPlaying}
 		onPlayTrack={onPlayTrack}
 		onTogglePlayer={onTogglePlayer}
+		onNotice={onNotice}
 		showGeneratedCovers={showGeneratedCovers}
       />
 
