@@ -39,6 +39,18 @@ export interface Track {
   year?: number;
   genres: string[];
   lyrics: string;
+  comment: string;
+  composers: string[];
+  conductor: string;
+  lyricists: string[];
+  copyright: string;
+  bpm?: number;
+  isrc: string;
+  musicbrainzTrackId: string;
+  musicbrainzReleaseId: string;
+  musicbrainzArtistIds: string[];
+  acoustidId: string;
+  acoustidFingerprint: string;
   lyricsSidecar?: SidecarInfo;
   artworkCount: number;
   coverTone: CoverTone;
@@ -91,6 +103,18 @@ export interface MatchCandidate {
   discTotal: CandidateField<number>;
   durationSeconds: CandidateField<number>;
   genres: CandidateField<string[]>;
+  comment?: CandidateField<string>;
+  composers?: CandidateField<string[]>;
+  conductor?: CandidateField<string>;
+  lyricists?: CandidateField<string[]>;
+  copyright?: CandidateField<string>;
+  bpm?: CandidateField<number>;
+  isrc?: CandidateField<string>;
+  musicbrainzTrackId?: CandidateField<string>;
+  musicbrainzReleaseId?: CandidateField<string>;
+  musicbrainzArtistIds?: CandidateField<string[]>;
+  acoustidId?: CandidateField<string>;
+  acoustidFingerprint?: CandidateField<string>;
   lyrics?: CandidateField<string>;
   hasLyrics: boolean;
   hasArtwork: boolean;
@@ -219,6 +243,18 @@ export interface TrackPatch {
   year?: number;
   genres: string[];
   lyrics: string;
+  comment: string;
+  composers: string[];
+  conductor: string;
+  lyricists: string[];
+  copyright: string;
+  bpm?: number;
+  isrc: string;
+  musicbrainzTrackId: string;
+  musicbrainzReleaseId: string;
+  musicbrainzArtistIds: string[];
+  acoustidId: string;
+  acoustidFingerprint: string;
 }
 
 export interface RawTagsResponse {

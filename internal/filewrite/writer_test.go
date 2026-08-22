@@ -190,6 +190,57 @@ func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	}
 }
 
+func TestWriterPatchesExtendedEmbeddedFields(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "extended.flac")
+	if err := os.WriteFile(path, []byte("fake audio"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	engine := newMemoryEngine(map[string][]string{
+		"TITLE":    {"Song"},
+		"COMMENT":  {"old note"},
+		"COMPOSER": {"Old Composer"},
+		"BPM":      {"90"},
+	})
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatFLAC, engine)
+	patch := domain.TagPatch{
+		Comment:              &domain.StringFieldPatch{Op: domain.OperationSet, Value: "liner note"},
+		Composers:            &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"Composer A", "Composer B"}},
+		Conductor:            &domain.StringFieldPatch{Op: domain.OperationSet, Value: "Conductor"},
+		Lyricists:            &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"Lyricist"}},
+		Copyright:            &domain.StringFieldPatch{Op: domain.OperationSet, Value: "© 2024 Label"},
+		BPM:                  &domain.IntFieldPatch{Op: domain.OperationSet, Value: 128},
+		ISRC:                 &domain.StringFieldPatch{Op: domain.OperationSet, Value: "US-ABC-24-00001"},
+		MusicBrainzTrackID:   &domain.StringFieldPatch{Op: domain.OperationSet, Value: "track-mbid"},
+		MusicBrainzReleaseID: &domain.StringFieldPatch{Op: domain.OperationSet, Value: "release-mbid"},
+		MusicBrainzArtistIDs: &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"artist-mbid-1", "artist-mbid-2"}},
+		AcoustID:             &domain.StringFieldPatch{Op: domain.OperationSet, Value: "acoustid-id"},
+		AcoustIDFingerprint:  &domain.StringFieldPatch{Op: domain.OperationSet, Value: "fingerprint"},
+	}
+	result, err := writer.Write(context.Background(), ref, ref.Revision, patch, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || len(result.Diff) != 12 {
+		t.Fatalf("extended write result = %#v", result)
+	}
+	checks := map[string][]string{
+		"COMMENT": {"liner note"}, "COMPOSER": {"Composer A", "Composer B"}, "CONDUCTOR": {"Conductor"},
+		"LYRICIST": {"Lyricist"}, "COPYRIGHT": {"© 2024 Label"}, "BPM": {"128"}, "ISRC": {"US-ABC-24-00001"},
+		"MUSICBRAINZ_TRACKID": {"track-mbid"}, "MUSICBRAINZ_ALBUMID": {"release-mbid"},
+		"MUSICBRAINZ_ARTISTID": {"artist-mbid-1", "artist-mbid-2"}, "ACOUSTID_ID": {"acoustid-id"}, "ACOUSTID_FINGERPRINT": {"fingerprint"},
+	}
+	for key, want := range checks {
+		if got := result.AfterTags[key]; !slices.Equal(got, want) {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestWriterWritesAndDeletesLyricsSidecarWithRevisionGuard(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "song.mp3")
@@ -556,6 +607,78 @@ func TestWriterWithGeneratedWAV(t *testing.T) {
 	}
 	if after.Properties.Container != "WAV" || after.Properties.Codec != "PCM" {
 		t.Fatalf("WAV properties = %#v", after.Properties)
+	}
+}
+
+func TestWriterExtendedFieldsAcrossCertifiedFormats(t *testing.T) {
+	corpus := os.Getenv("TAGGER_TEST_MUSIC_DIR")
+	if corpus == "" {
+		corpus = "/home/ericwyn/Downloads/TestMusic"
+	}
+	type fixture struct {
+		format domain.TrackFormat
+		ext    string
+		source string
+	}
+	fixtures := []fixture{{format: domain.FormatWAV, ext: ".wav"}}
+	if _, err := os.Stat(corpus); err == nil {
+		for _, ext := range []string{".mp3", ".flac"} {
+			fixtures = append(fixtures, fixture{format: domain.TrackFormat(strings.TrimPrefix(ext, ".")), ext: ext, source: findAudio(t, corpus, ext)})
+		}
+	}
+
+	for _, item := range fixtures {
+		t.Run(strings.TrimPrefix(item.ext, "."), func(t *testing.T) {
+			root := t.TempDir()
+			destination := filepath.Join(root, "extended"+item.ext)
+			if item.source != "" {
+				copyFixture(t, item.source, destination)
+			} else {
+				writeSilentWAV(t, destination)
+			}
+			engine := taglibwasm.New()
+			if _, err := engine.Read(context.Background(), destination); err != nil {
+				t.Fatal(err)
+			}
+			writer, err := New(root, engine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := testFileRef(t, root, destination, item.format, engine)
+			_, err = writer.Write(context.Background(), ref, ref.Revision, domain.TagPatch{
+				Comment:              &domain.StringFieldPatch{Op: domain.OperationSet, Value: "Tagger extended comment"},
+				Composers:            &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"Composer A", "Composer B"}},
+				Conductor:            &domain.StringFieldPatch{Op: domain.OperationSet, Value: "Conductor"},
+				Lyricists:            &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"Lyricist"}},
+				Copyright:            &domain.StringFieldPatch{Op: domain.OperationSet, Value: "© Tagger"},
+				BPM:                  &domain.IntFieldPatch{Op: domain.OperationSet, Value: 128},
+				ISRC:                 &domain.StringFieldPatch{Op: domain.OperationSet, Value: "US-TAG-26-00001"},
+				MusicBrainzTrackID:   &domain.StringFieldPatch{Op: domain.OperationSet, Value: "track-mbid"},
+				MusicBrainzReleaseID: &domain.StringFieldPatch{Op: domain.OperationSet, Value: "release-mbid"},
+				MusicBrainzArtistIDs: &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"artist-mbid"}},
+				AcoustID:             &domain.StringFieldPatch{Op: domain.OperationSet, Value: "acoustid-id"},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := engine.Read(context.Background(), destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checks := map[string]string{
+				"COMMENT": "Tagger extended comment", "CONDUCTOR": "Conductor", "COPYRIGHT": "© Tagger",
+				"BPM": "128", "ISRC": "US-TAG-26-00001", "MUSICBRAINZ_TRACKID": "track-mbid",
+				"MUSICBRAINZ_ALBUMID": "release-mbid", "ACOUSTID_ID": "acoustid-id",
+			}
+			for key, want := range checks {
+				if got := firstRaw(after.Raw, key); got != want {
+					t.Errorf("%s = %q, want %q (raw=%#v)", key, got, want, after.Raw)
+				}
+			}
+			if !slices.Equal(after.Raw["COMPOSER"], []string{"Composer A", "Composer B"}) || !slices.Equal(after.Raw["LYRICIST"], []string{"Lyricist"}) || !slices.Equal(after.Raw["MUSICBRAINZ_ARTISTID"], []string{"artist-mbid"}) {
+				t.Fatalf("multi-value extended tags = %#v", after.Raw)
+			}
+		})
 	}
 }
 

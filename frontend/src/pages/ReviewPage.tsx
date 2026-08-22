@@ -47,6 +47,18 @@ const standardFields = [
   'discTotal',
   'year',
   'genres',
+  'comment',
+  'composers',
+  'conductor',
+  'lyricists',
+  'copyright',
+  'bpm',
+  'isrc',
+  'musicbrainzTrackId',
+  'musicbrainzReleaseId',
+  'musicbrainzArtistIds',
+  'acoustidId',
+  'acoustidFingerprint',
   'lyrics',
 ] as const;
 
@@ -63,6 +75,18 @@ function availableFields(candidate: MatchCandidate): string[] {
       case 'discTotal': return candidate.discTotal.value > 0;
       case 'year': return candidate.year.value > 0;
       case 'genres': return candidate.genres.value.length > 0;
+      case 'comment': return Boolean(candidate.comment?.value);
+      case 'composers': return Boolean(candidate.composers?.value.length);
+      case 'conductor': return Boolean(candidate.conductor?.value);
+      case 'lyricists': return Boolean(candidate.lyricists?.value.length);
+      case 'copyright': return Boolean(candidate.copyright?.value);
+      case 'bpm': return Boolean(candidate.bpm?.value);
+      case 'isrc': return Boolean(candidate.isrc?.value);
+      case 'musicbrainzTrackId': return Boolean(candidate.musicbrainzTrackId?.value);
+      case 'musicbrainzReleaseId': return Boolean(candidate.musicbrainzReleaseId?.value);
+      case 'musicbrainzArtistIds': return Boolean(candidate.musicbrainzArtistIds?.value.length);
+      case 'acoustidId': return Boolean(candidate.acoustidId?.value);
+      case 'acoustidFingerprint': return Boolean(candidate.acoustidFingerprint?.value);
       case 'lyrics': return Boolean(candidate.lyrics?.value);
     }
   });
@@ -295,6 +319,18 @@ export function ReviewPage({trackIds, showGeneratedCovers = false, onBack, onCom
               />
               <ReviewDiff field="year" label="年份" current={String(active.track.year || '空')} next={String(active.candidate.year.value)} source={active.candidate.providerName} checked={active.fields.includes('year')} onToggle={() => toggleField(active.track.id, 'year')} />
               <ReviewDiff field="genres" label="风格" current={active.track.genres.join(', ') || '空'} next={active.candidate.genres.value.join(', ')} source={active.candidate.providerName} checked={active.fields.includes('genres')} onToggle={() => toggleField(active.track.id, 'genres')} />
+              {active.candidate.comment?.value && <ReviewDiff field="comment" label="注释" current={active.track.comment || '空'} next={active.candidate.comment.value} source={active.candidate.providerName} checked={active.fields.includes('comment')} onToggle={() => toggleField(active.track.id, 'comment')} />}
+              {active.candidate.composers?.value.length ? <ReviewDiff field="composers" label="作曲家" current={active.track.composers.join(' / ') || '空'} next={active.candidate.composers.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('composers')} onToggle={() => toggleField(active.track.id, 'composers')} /> : null}
+              {active.candidate.conductor?.value && <ReviewDiff field="conductor" label="指挥" current={active.track.conductor || '空'} next={active.candidate.conductor.value} source={active.candidate.providerName} checked={active.fields.includes('conductor')} onToggle={() => toggleField(active.track.id, 'conductor')} />}
+              {active.candidate.lyricists?.value.length ? <ReviewDiff field="lyricists" label="作词家" current={active.track.lyricists.join(' / ') || '空'} next={active.candidate.lyricists.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('lyricists')} onToggle={() => toggleField(active.track.id, 'lyricists')} /> : null}
+              {active.candidate.copyright?.value && <ReviewDiff field="copyright" label="版权" current={active.track.copyright || '空'} next={active.candidate.copyright.value} source={active.candidate.providerName} checked={active.fields.includes('copyright')} onToggle={() => toggleField(active.track.id, 'copyright')} />}
+              {active.candidate.bpm?.value ? <ReviewDiff field="bpm" label="BPM" current={String(active.track.bpm || '空')} next={String(active.candidate.bpm.value)} source={active.candidate.providerName} checked={active.fields.includes('bpm')} onToggle={() => toggleField(active.track.id, 'bpm')} /> : null}
+              {active.candidate.isrc?.value && <ReviewDiff field="isrc" label="ISRC" current={active.track.isrc || '空'} next={active.candidate.isrc.value} source={active.candidate.providerName} checked={active.fields.includes('isrc')} onToggle={() => toggleField(active.track.id, 'isrc')} />}
+              {active.candidate.musicbrainzTrackId?.value && <ReviewDiff field="musicbrainzTrackId" label="MB Track ID" current={active.track.musicbrainzTrackId || '空'} next={active.candidate.musicbrainzTrackId.value} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzTrackId')} onToggle={() => toggleField(active.track.id, 'musicbrainzTrackId')} />}
+              {active.candidate.musicbrainzReleaseId?.value && <ReviewDiff field="musicbrainzReleaseId" label="MB Release ID" current={active.track.musicbrainzReleaseId || '空'} next={active.candidate.musicbrainzReleaseId.value} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzReleaseId')} onToggle={() => toggleField(active.track.id, 'musicbrainzReleaseId')} />}
+              {active.candidate.musicbrainzArtistIds?.value.length ? <ReviewDiff field="musicbrainzArtistIds" label="MB Artist ID" current={active.track.musicbrainzArtistIds.join(' / ') || '空'} next={active.candidate.musicbrainzArtistIds.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzArtistIds')} onToggle={() => toggleField(active.track.id, 'musicbrainzArtistIds')} /> : null}
+              {active.candidate.acoustidId?.value && <ReviewDiff field="acoustidId" label="AcoustID" current={active.track.acoustidId || '空'} next={active.candidate.acoustidId.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidId')} onToggle={() => toggleField(active.track.id, 'acoustidId')} />}
+              {active.candidate.acoustidFingerprint?.value && <ReviewDiff field="acoustidFingerprint" label="AcoustID 指纹" current={active.track.acoustidFingerprint || '空'} next={active.candidate.acoustidFingerprint.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidFingerprint')} onToggle={() => toggleField(active.track.id, 'acoustidFingerprint')} />}
               {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} />}
               {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} />}
             </div>

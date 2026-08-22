@@ -577,6 +577,18 @@ var restorableFields = []restorableField{
 	{field: "year", key: "DATE"},
 	{field: "genres", key: "GENRE", multi: true},
 	{field: "lyrics", key: "LYRICS"},
+	{field: "comment", key: "COMMENT"},
+	{field: "composers", key: "COMPOSER", multi: true},
+	{field: "conductor", key: "CONDUCTOR"},
+	{field: "lyricists", key: "LYRICIST", multi: true},
+	{field: "copyright", key: "COPYRIGHT"},
+	{field: "bpm", key: "BPM"},
+	{field: "isrc", key: "ISRC"},
+	{field: "musicbrainzTrackId", key: "MUSICBRAINZ_TRACKID"},
+	{field: "musicbrainzReleaseId", key: "MUSICBRAINZ_ALBUMID"},
+	{field: "musicbrainzArtistIds", key: "MUSICBRAINZ_ARTISTID", multi: true},
+	{field: "acoustidId", key: "ACOUSTID_ID"},
+	{field: "acoustidFingerprint", key: "ACOUSTID_FINGERPRINT"},
 }
 
 func compileRestore(current, target map[string][]string) (map[string][]string, []FieldDiff, error) {
@@ -792,6 +804,42 @@ func compilePatch(raw map[string][]string, patch domain.TagPatch) (map[string][]
 		return nil, nil, err
 	}
 	if err := applyString(updates, &diffs, raw, "lyrics", "LYRICS", patch.Lyrics); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "comment", "COMMENT", patch.Comment); err != nil {
+		return nil, nil, err
+	}
+	if err := applyStrings(updates, &diffs, raw, "composers", "COMPOSER", patch.Composers); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "conductor", "CONDUCTOR", patch.Conductor); err != nil {
+		return nil, nil, err
+	}
+	if err := applyStrings(updates, &diffs, raw, "lyricists", "LYRICIST", patch.Lyricists); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "copyright", "COPYRIGHT", patch.Copyright); err != nil {
+		return nil, nil, err
+	}
+	if err := applyInt(updates, &diffs, raw, "bpm", "BPM", patch.BPM, 1, 1000); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "isrc", "ISRC", patch.ISRC); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "musicbrainzTrackId", "MUSICBRAINZ_TRACKID", patch.MusicBrainzTrackID); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "musicbrainzReleaseId", "MUSICBRAINZ_ALBUMID", patch.MusicBrainzReleaseID); err != nil {
+		return nil, nil, err
+	}
+	if err := applyStrings(updates, &diffs, raw, "musicbrainzArtistIds", "MUSICBRAINZ_ARTISTID", patch.MusicBrainzArtistIDs); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "acoustidId", "ACOUSTID_ID", patch.AcoustID); err != nil {
+		return nil, nil, err
+	}
+	if err := applyString(updates, &diffs, raw, "acoustidFingerprint", "ACOUSTID_FINGERPRINT", patch.AcoustIDFingerprint); err != nil {
 		return nil, nil, err
 	}
 	return updates, diffs, nil

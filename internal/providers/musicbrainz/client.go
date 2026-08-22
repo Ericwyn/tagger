@@ -92,9 +92,20 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 				genres = append(genres, tag.Name)
 			}
 		}
+		artistIDs := make([]string, 0, len(recording.ArtistCredit))
+		for _, credit := range recording.ArtistCredit {
+			if credit.Artist.ID != "" {
+				artistIDs = append(artistIDs, credit.Artist.ID)
+			}
+		}
+		releaseID := ""
+		if len(recording.Releases) > 0 {
+			releaseID = recording.Releases[0].ID
+		}
 		result = append(result, providers.Candidate{
 			ProviderID: "musicbrainz", ExternalID: recording.ID, Title: recording.Title,
 			Artists: artists, Album: album, AlbumArtists: artists, Year: year(recording.FirstReleaseDate),
+			MusicBrainzTrackID: recording.ID, MusicBrainzReleaseID: releaseID, MusicBrainzArtistIDs: artistIDs,
 			DurationSeconds: int64(recording.Length / 1000), Genres: genres, ArtworkURL: artworkURL,
 		})
 	}
@@ -123,6 +134,7 @@ type searchResponse struct {
 		ArtistCredit     []struct {
 			Name   string `json:"name"`
 			Artist struct {
+				ID   string `json:"id"`
 				Name string `json:"name"`
 			} `json:"artist"`
 		} `json:"artist-credit"`

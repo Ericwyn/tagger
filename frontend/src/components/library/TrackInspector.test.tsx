@@ -57,6 +57,33 @@ describe('TrackInspector', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({lyrics: '[00:01.00] sidecar only'}), {writeTag: false, writeSidecar: true});
   });
 
+  it('edits extended embedded fields without changing unknown raw tags', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={onSave}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', {name: /扩展内嵌字段/}));
+    await user.type(screen.getByLabelText('注释'), 'liner note');
+    await user.type(screen.getByLabelText('BPM'), '128');
+    await user.type(screen.getByLabelText('MusicBrainz Track ID'), 'track-mbid');
+    await user.click(screen.getByRole('button', {name: '保存修改'}));
+    await user.click(screen.getByRole('button', {name: '确认写入'}));
+
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      comment: 'liner note', bpm: 128, musicbrainzTrackId: 'track-mbid',
+    }), {writeTag: true, writeSidecar: true});
+  });
+
   it('uploads artwork and requires a second click before deletion', async () => {
 	const user = userEvent.setup();
 	const onArtworkChange = vi.fn().mockResolvedValue(undefined);

@@ -1594,6 +1594,62 @@ button:disabled {
   text-align: left;
 }
 
+.extended-tags-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 43px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-2);
+  color: var(--ink);
+  text-align: left;
+}
+
+.extended-tags-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.extended-tags-toggle strong {
+  font-size: 10px;
+}
+
+.extended-tags-toggle small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.extended-tags-toggle > svg {
+  transition: transform 150ms ease;
+}
+
+.extended-tags-toggle > svg.is-rotated {
+  transform: rotate(180deg);
+}
+
+.extended-tags-panel {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.extended-tags-panel .field-row {
+  margin-bottom: 7px;
+}
+
+.extended-tags-panel .field-row > span {
+  font-size: 8px;
+}
+
+.extended-tags-panel .format-note {
+  margin: 3px 0 0;
+}
+
 .raw-tag-link svg:last-child {
   margin-left: auto;
 }

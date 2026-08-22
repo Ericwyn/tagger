@@ -468,7 +468,7 @@ func patchFromCandidate(candidate providers.MatchCandidate, fields []string) dom
 	// explicitly empty JSON array means the reviewer deselected every field and
 	// must produce a no-op patch instead of silently re-enabling all fields.
 	if fields == nil {
-		for _, field := range []string{"title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics"} {
+		for _, field := range []string{"title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics", "comment", "composers", "conductor", "lyricists", "copyright", "bpm", "isrc", "musicbrainzTrackId", "musicbrainzReleaseId", "musicbrainzArtistIds", "acoustidId", "acoustidFingerprint"} {
 			selected[field] = true
 		}
 	} else {
@@ -509,6 +509,42 @@ func patchFromCandidate(candidate providers.MatchCandidate, fields []string) dom
 	}
 	if selected["lyrics"] && candidate.Lyrics != nil && candidate.Lyrics.Value != "" {
 		patch.Lyrics = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.Lyrics.Value}
+	}
+	if selected["comment"] && candidate.Comment.Value != "" {
+		patch.Comment = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.Comment.Value}
+	}
+	if selected["composers"] && len(candidate.Composers.Value) > 0 {
+		patch.Composers = &domain.StringsFieldPatch{Op: domain.OperationSet, Value: candidate.Composers.Value}
+	}
+	if selected["conductor"] && candidate.Conductor.Value != "" {
+		patch.Conductor = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.Conductor.Value}
+	}
+	if selected["lyricists"] && len(candidate.Lyricists.Value) > 0 {
+		patch.Lyricists = &domain.StringsFieldPatch{Op: domain.OperationSet, Value: candidate.Lyricists.Value}
+	}
+	if selected["copyright"] && candidate.Copyright.Value != "" {
+		patch.Copyright = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.Copyright.Value}
+	}
+	if selected["bpm"] && candidate.BPM.Value > 0 {
+		patch.BPM = &domain.IntFieldPatch{Op: domain.OperationSet, Value: candidate.BPM.Value}
+	}
+	if selected["isrc"] && candidate.ISRC.Value != "" {
+		patch.ISRC = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.ISRC.Value}
+	}
+	if selected["musicbrainzTrackId"] && candidate.MusicBrainzTrackID.Value != "" {
+		patch.MusicBrainzTrackID = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.MusicBrainzTrackID.Value}
+	}
+	if selected["musicbrainzReleaseId"] && candidate.MusicBrainzReleaseID.Value != "" {
+		patch.MusicBrainzReleaseID = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.MusicBrainzReleaseID.Value}
+	}
+	if selected["musicbrainzArtistIds"] && len(candidate.MusicBrainzArtistIDs.Value) > 0 {
+		patch.MusicBrainzArtistIDs = &domain.StringsFieldPatch{Op: domain.OperationSet, Value: candidate.MusicBrainzArtistIDs.Value}
+	}
+	if selected["acoustidId"] && candidate.AcoustID.Value != "" {
+		patch.AcoustID = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.AcoustID.Value}
+	}
+	if selected["acoustidFingerprint"] && candidate.AcoustIDFingerprint.Value != "" {
+		patch.AcoustIDFingerprint = &domain.StringFieldPatch{Op: domain.OperationSet, Value: candidate.AcoustIDFingerprint.Value}
 	}
 	return patch
 }

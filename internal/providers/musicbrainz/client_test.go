@@ -19,7 +19,7 @@ func TestSearchBuildsOfficialRecordingQueryAndMapsResponse(t *testing.T) {
 		if !strings.Contains(query, `recording:"再回首"`) || !strings.Contains(query, `artist:"姜育恒"`) {
 			t.Errorf("query = %q", query)
 		}
-		body := `{"recordings":[{"id":"mbid-1","title":"再回首","length":255000,"first-release-date":"1989-01-01","artist-credit":[{"name":"姜育恒"}],"releases":[{"id":"release-1","title":"多年以后・再回首"}],"tags":[{"name":"mandopop"}]}]}`
+		body := `{"recordings":[{"id":"mbid-1","title":"再回首","length":255000,"first-release-date":"1989-01-01","artist-credit":[{"name":"姜育恒","artist":{"id":"artist-1","name":"姜育恒"}}],"releases":[{"id":"release-1","title":"多年以后・再回首"}],"tags":[{"name":"mandopop"}]}]}`
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 
@@ -33,6 +33,9 @@ func TestSearchBuildsOfficialRecordingQueryAndMapsResponse(t *testing.T) {
 	}
 	if candidates[0].ArtworkURL != "https://coverartarchive.org/release/release-1/front-500" {
 		t.Fatalf("artwork = %q", candidates[0].ArtworkURL)
+	}
+	if candidates[0].MusicBrainzTrackID != "mbid-1" || candidates[0].MusicBrainzReleaseID != "release-1" || len(candidates[0].MusicBrainzArtistIDs) != 1 || candidates[0].MusicBrainzArtistIDs[0] != "artist-1" {
+		t.Fatalf("musicbrainz ids = %#v", candidates[0])
 	}
 }
 

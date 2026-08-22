@@ -252,6 +252,18 @@ func applySnapshot(track *domain.Track, snapshot tags.Snapshot) {
 	}
 	track.Genres = values(snapshot.Raw, "GENRE")
 	track.Lyrics = first(snapshot.Raw, "LYRICS", "UNSYNCEDLYRICS", "UNSYNCED LYRICS", "")
+	track.Comment = first(snapshot.Raw, "COMMENT", "DESCRIPTION", "")
+	track.Composers = values(snapshot.Raw, "COMPOSER", "COMPOSERS")
+	track.Conductor = first(snapshot.Raw, "CONDUCTOR", "")
+	track.Lyricists = values(snapshot.Raw, "LYRICIST", "LYRICISTS")
+	track.Copyright = first(snapshot.Raw, "COPYRIGHT", "")
+	track.BPM = positiveInt(first(snapshot.Raw, "BPM", "TBPM", ""))
+	track.ISRC = first(snapshot.Raw, "ISRC", "")
+	track.MusicBrainzTrackID = first(snapshot.Raw, "MUSICBRAINZ_TRACKID", "MUSICBRAINZ_TRACK_ID", "")
+	track.MusicBrainzReleaseID = first(snapshot.Raw, "MUSICBRAINZ_ALBUMID", "MUSICBRAINZ_RELEASEID", "MUSICBRAINZ_RELEASE_ID", "")
+	track.MusicBrainzArtistIDs = values(snapshot.Raw, "MUSICBRAINZ_ARTISTID", "MUSICBRAINZ_ARTIST_ID")
+	track.AcoustID = first(snapshot.Raw, "ACOUSTID_ID", "ACOUSTID", "")
+	track.AcoustIDFingerprint = first(snapshot.Raw, "ACOUSTID_FINGERPRINT", "")
 	track.TrackNumber, track.TrackTotal = indexValues(snapshot.Raw, "TRACKNUMBER", "TRACKTOTAL", "TOTALTRACKS")
 	track.DiscNumber, track.DiscTotal = indexValues(snapshot.Raw, "DISCNUMBER", "DISCTOTAL", "TOTALDISCS")
 	track.Year = yearValue(first(snapshot.Raw, "DATE", "YEAR", "RELEASEDATE", ""))
@@ -260,13 +272,16 @@ func applySnapshot(track *domain.Track, snapshot tags.Snapshot) {
 func fallbackTrack(relativePath string, format domain.TrackFormat) domain.Track {
 	title, artists, album := inferFromPath(relativePath)
 	return domain.Track{
-		Format:       format,
-		Title:        title,
-		Artists:      artists,
-		Album:        album,
-		AlbumArtists: append([]string(nil), artists...),
-		Genres:       []string{},
-		Health:       domain.HealthNeedsReview,
+		Format:               format,
+		Title:                title,
+		Artists:              artists,
+		Album:                album,
+		AlbumArtists:         append([]string(nil), artists...),
+		Genres:               []string{},
+		Composers:            []string{},
+		Lyricists:            []string{},
+		MusicBrainzArtistIDs: []string{},
+		Health:               domain.HealthNeedsReview,
 		Properties: domain.TrackProperties{
 			Container: strings.ToUpper(string(format)),
 			Codec:     strings.ToUpper(string(format)),

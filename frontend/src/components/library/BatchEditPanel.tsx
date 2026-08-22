@@ -174,6 +174,18 @@ export function buildBatchPatch(track: Track, operations: BatchOperation[], sequ
     year: track.year,
     genres: track.genres,
     lyrics: track.lyrics,
+    comment: track.comment,
+    composers: track.composers,
+    conductor: track.conductor,
+    lyricists: track.lyricists,
+    copyright: track.copyright,
+    bpm: track.bpm,
+    isrc: track.isrc,
+    musicbrainzTrackId: track.musicbrainzTrackId,
+    musicbrainzReleaseId: track.musicbrainzReleaseId,
+    musicbrainzArtistIds: track.musicbrainzArtistIds,
+    acoustidId: track.acoustidId,
+    acoustidFingerprint: track.acoustidFingerprint,
   };
   operations.forEach((operation) => {
     if (operation.field === 'album') patch.album = applyText(operation.mode, track.album, operation.value);

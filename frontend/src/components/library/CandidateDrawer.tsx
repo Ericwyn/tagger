@@ -35,6 +35,18 @@ const fieldOptions = [
   {id: 'track', label: '音轨 / 光盘'},
   {id: 'year', label: '年份'},
   {id: 'genres', label: '风格'},
+  {id: 'comment', label: '注释'},
+  {id: 'composers', label: '作曲家'},
+  {id: 'conductor', label: '指挥'},
+  {id: 'lyricists', label: '作词家'},
+  {id: 'copyright', label: '版权'},
+  {id: 'bpm', label: 'BPM'},
+  {id: 'isrc', label: 'ISRC'},
+  {id: 'musicbrainzTrackId', label: 'MB Track ID'},
+  {id: 'musicbrainzReleaseId', label: 'MB Release ID'},
+  {id: 'musicbrainzArtistIds', label: 'MB Artist ID'},
+  {id: 'acoustidId', label: 'AcoustID'},
+  {id: 'acoustidFingerprint', label: 'AcoustID 指纹'},
 ] as const;
 
 type FieldID = typeof fieldOptions[number]['id'];
@@ -114,6 +126,18 @@ export function CandidateDrawer({
         year: track.year,
         genres: track.genres,
         lyrics: track.lyrics,
+        comment: track.comment,
+        composers: track.composers,
+        conductor: track.conductor,
+        lyricists: track.lyricists,
+        copyright: track.copyright,
+        bpm: track.bpm,
+        isrc: track.isrc,
+        musicbrainzTrackId: track.musicbrainzTrackId,
+        musicbrainzReleaseId: track.musicbrainzReleaseId,
+        musicbrainzArtistIds: track.musicbrainzArtistIds,
+        acoustidId: track.acoustidId,
+        acoustidFingerprint: track.acoustidFingerprint,
       };
     }
     return {
@@ -128,6 +152,18 @@ export function CandidateDrawer({
       year: fields.has('year') && selected.year.value > 0 ? selected.year.value : track.year,
       genres: fields.has('genres') && selected.genres.value.length > 0 ? selected.genres.value : track.genres,
       lyrics: includeLyrics && selected.hasLyrics && selected.lyrics?.value ? selected.lyrics.value : track.lyrics,
+      comment: fields.has('comment') && selected.comment?.value ? selected.comment.value : track.comment,
+      composers: fields.has('composers') && selected.composers?.value.length ? selected.composers.value : track.composers,
+      conductor: fields.has('conductor') && selected.conductor?.value ? selected.conductor.value : track.conductor,
+      lyricists: fields.has('lyricists') && selected.lyricists?.value.length ? selected.lyricists.value : track.lyricists,
+      copyright: fields.has('copyright') && selected.copyright?.value ? selected.copyright.value : track.copyright,
+      bpm: fields.has('bpm') && selected.bpm?.value ? selected.bpm.value : track.bpm,
+      isrc: fields.has('isrc') && selected.isrc?.value ? selected.isrc.value : track.isrc,
+      musicbrainzTrackId: fields.has('musicbrainzTrackId') && selected.musicbrainzTrackId?.value ? selected.musicbrainzTrackId.value : track.musicbrainzTrackId,
+      musicbrainzReleaseId: fields.has('musicbrainzReleaseId') && selected.musicbrainzReleaseId?.value ? selected.musicbrainzReleaseId.value : track.musicbrainzReleaseId,
+      musicbrainzArtistIds: fields.has('musicbrainzArtistIds') && selected.musicbrainzArtistIds?.value.length ? selected.musicbrainzArtistIds.value : track.musicbrainzArtistIds,
+      acoustidId: fields.has('acoustidId') && selected.acoustidId?.value ? selected.acoustidId.value : track.acoustidId,
+      acoustidFingerprint: fields.has('acoustidFingerprint') && selected.acoustidFingerprint?.value ? selected.acoustidFingerprint.value : track.acoustidFingerprint,
     };
   };
 
@@ -285,6 +321,18 @@ export function CandidateDrawer({
                   />
                   <DiffRow label="年份" current={String(track.year || '空')} candidate={String(selected.year.value || '来源未提供')} active={fields.has('year')} />
                   <DiffRow label="风格" current={track.genres.join(', ') || '空'} candidate={selected.genres.value.join(', ')} active={fields.has('genres')} />
+                  {selected.comment?.value && <DiffRow label="注释" current={track.comment || '空'} candidate={selected.comment.value} active={fields.has('comment')} />}
+                  {selected.composers?.value.length ? <DiffRow label="作曲家" current={track.composers.join(' / ') || '空'} candidate={selected.composers.value.join(' / ')} active={fields.has('composers')} /> : null}
+                  {selected.conductor?.value && <DiffRow label="指挥" current={track.conductor || '空'} candidate={selected.conductor.value} active={fields.has('conductor')} />}
+                  {selected.lyricists?.value.length ? <DiffRow label="作词家" current={track.lyricists.join(' / ') || '空'} candidate={selected.lyricists.value.join(' / ')} active={fields.has('lyricists')} /> : null}
+                  {selected.copyright?.value && <DiffRow label="版权" current={track.copyright || '空'} candidate={selected.copyright.value} active={fields.has('copyright')} />}
+                  {selected.bpm?.value ? <DiffRow label="BPM" current={String(track.bpm || '空')} candidate={String(selected.bpm.value)} active={fields.has('bpm')} /> : null}
+                  {selected.isrc?.value && <DiffRow label="ISRC" current={track.isrc || '空'} candidate={selected.isrc.value} active={fields.has('isrc')} />}
+                  {selected.musicbrainzTrackId?.value && <DiffRow label="MB Track ID" current={track.musicbrainzTrackId || '空'} candidate={selected.musicbrainzTrackId.value} active={fields.has('musicbrainzTrackId')} />}
+                  {selected.musicbrainzReleaseId?.value && <DiffRow label="MB Release ID" current={track.musicbrainzReleaseId || '空'} candidate={selected.musicbrainzReleaseId.value} active={fields.has('musicbrainzReleaseId')} />}
+                  {selected.musicbrainzArtistIds?.value.length ? <DiffRow label="MB Artist ID" current={track.musicbrainzArtistIds.join(' / ') || '空'} candidate={selected.musicbrainzArtistIds.value.join(' / ')} active={fields.has('musicbrainzArtistIds')} /> : null}
+                  {selected.acoustidId?.value && <DiffRow label="AcoustID" current={track.acoustidId || '空'} candidate={selected.acoustidId.value} active={fields.has('acoustidId')} />}
+                  {selected.acoustidFingerprint?.value && <DiffRow label="AcoustID 指纹" current={track.acoustidFingerprint || '空'} candidate={selected.acoustidFingerprint.value} active={fields.has('acoustidFingerprint')} />}
                 </div>
 
                 <div className="asset-options">
@@ -362,5 +410,17 @@ function candidateHasField(candidate: MatchCandidate, field: FieldID): boolean {
     case 'track': return candidate.trackNumber.value > 0 || candidate.trackTotal.value > 0 || candidate.discNumber.value > 0;
     case 'year': return candidate.year.value > 0;
     case 'genres': return candidate.genres.value.length > 0;
+    case 'comment': return Boolean(candidate.comment?.value);
+    case 'composers': return Boolean(candidate.composers?.value.length);
+    case 'conductor': return Boolean(candidate.conductor?.value);
+    case 'lyricists': return Boolean(candidate.lyricists?.value.length);
+    case 'copyright': return Boolean(candidate.copyright?.value);
+    case 'bpm': return Boolean(candidate.bpm?.value);
+    case 'isrc': return Boolean(candidate.isrc?.value);
+    case 'musicbrainzTrackId': return Boolean(candidate.musicbrainzTrackId?.value);
+    case 'musicbrainzReleaseId': return Boolean(candidate.musicbrainzReleaseId?.value);
+    case 'musicbrainzArtistIds': return Boolean(candidate.musicbrainzArtistIds?.value.length);
+    case 'acoustidId': return Boolean(candidate.acoustidId?.value);
+    case 'acoustidFingerprint': return Boolean(candidate.acoustidFingerprint?.value);
   }
 }

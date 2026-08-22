@@ -49,16 +49,28 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 		snapshots: map[string]tags.Snapshot{
 			"Singer-Song.flac": {
 				Raw: map[string][]string{
-					"TITLE":       {"Song"},
-					"ARTIST":      {"Singer", "Guest"},
-					"ALBUM":       {"Album"},
-					"ALBUMARTIST": {"Singer"},
-					"TRACKNUMBER": {"2/10"},
-					"DISCNUMBER":  {"1"},
-					"DISCTOTAL":   {"2"},
-					"DATE":        {"2024-05-01"},
-					"GENRE":       {"Pop", "Rock"},
-					"LYRICS":      {"embedded lyrics"},
+					"TITLE":                {"Song"},
+					"ARTIST":               {"Singer", "Guest"},
+					"ALBUM":                {"Album"},
+					"ALBUMARTIST":          {"Singer"},
+					"TRACKNUMBER":          {"2/10"},
+					"DISCNUMBER":           {"1"},
+					"DISCTOTAL":            {"2"},
+					"DATE":                 {"2024-05-01"},
+					"GENRE":                {"Pop", "Rock"},
+					"LYRICS":               {"embedded lyrics"},
+					"COMMENT":              {"liner note"},
+					"COMPOSER":             {"Composer A", "Composer B"},
+					"CONDUCTOR":            {"Conductor"},
+					"LYRICIST":             {"Lyricist"},
+					"COPYRIGHT":            {"© 2024 Label"},
+					"BPM":                  {"128"},
+					"ISRC":                 {"US-ABC-24-00001"},
+					"MUSICBRAINZ_TRACKID":  {"track-mbid"},
+					"MUSICBRAINZ_ALBUMID":  {"release-mbid"},
+					"MUSICBRAINZ_ARTISTID": {"artist-mbid-1", "artist-mbid-2"},
+					"ACOUSTID_ID":          {"acoustid-id"},
+					"ACOUSTID_FINGERPRINT": {"fingerprint"},
 				},
 				DurationSeconds: 241,
 				ArtworkCount:    1,
@@ -106,6 +118,12 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	}
 	if flac.Year == nil || *flac.Year != 2024 || flac.DiscTotal == nil || *flac.DiscTotal != 2 {
 		t.Fatalf("flac date/disc = %#v", flac)
+	}
+	if flac.Comment != "liner note" || len(flac.Composers) != 2 || flac.Conductor != "Conductor" || len(flac.Lyricists) != 1 || flac.Copyright != "© 2024 Label" {
+		t.Fatalf("flac people/description = %#v", flac)
+	}
+	if flac.BPM == nil || *flac.BPM != 128 || flac.ISRC != "US-ABC-24-00001" || flac.MusicBrainzTrackID != "track-mbid" || flac.MusicBrainzReleaseID != "release-mbid" || len(flac.MusicBrainzArtistIDs) != 2 || flac.AcoustID != "acoustid-id" || flac.AcoustIDFingerprint != "fingerprint" {
+		t.Fatalf("flac identifiers = %#v", flac)
 	}
 	if mp3.Title != "Song Two" || len(mp3.Artists) != 1 || mp3.Artists[0] != "Singer" || mp3.Album != "Album" {
 		t.Fatalf("filename fallback = %#v", mp3)

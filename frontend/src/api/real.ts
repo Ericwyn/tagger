@@ -321,15 +321,27 @@ function serializePatch(track: Track, patch: TrackPatch) {
   if (patch.year !== track.year) result.year = numberOperation(patch.year);
   if (!arraysEqual(patch.genres, track.genres)) result.genres = stringsOperation(patch.genres);
   if (patch.lyrics !== track.lyrics) result.lyrics = stringOperation(patch.lyrics);
+  if (patch.comment !== track.comment) result.comment = stringOperation(patch.comment);
+  if (!arraysEqual(patch.composers, track.composers)) result.composers = stringsOperation(patch.composers);
+  if (patch.conductor !== track.conductor) result.conductor = stringOperation(patch.conductor);
+  if (!arraysEqual(patch.lyricists, track.lyricists)) result.lyricists = stringsOperation(patch.lyricists);
+  if (patch.copyright !== track.copyright) result.copyright = stringOperation(patch.copyright);
+  if (patch.bpm !== track.bpm) result.bpm = numberOperation(patch.bpm);
+  if (patch.isrc !== track.isrc) result.isrc = stringOperation(patch.isrc);
+  if (patch.musicbrainzTrackId !== track.musicbrainzTrackId) result.musicbrainzTrackId = stringOperation(patch.musicbrainzTrackId);
+  if (patch.musicbrainzReleaseId !== track.musicbrainzReleaseId) result.musicbrainzReleaseId = stringOperation(patch.musicbrainzReleaseId);
+  if (!arraysEqual(patch.musicbrainzArtistIds, track.musicbrainzArtistIds)) result.musicbrainzArtistIds = stringsOperation(patch.musicbrainzArtistIds);
+  if (patch.acoustidId !== track.acoustidId) result.acoustidId = stringOperation(patch.acoustidId);
+  if (patch.acoustidFingerprint !== track.acoustidFingerprint) result.acoustidFingerprint = stringOperation(patch.acoustidFingerprint);
   return result;
 }
 
-function stringOperation(value: string): FieldOperation<string> {
+function stringOperation(value = ''): FieldOperation<string> {
   const normalized = value.trim();
   return normalized ? {op: 'set', value: normalized} : {op: 'delete'};
 }
 
-function stringsOperation(value: string[]): FieldOperation<string[]> {
+function stringsOperation(value: string[] = []): FieldOperation<string[]> {
   const normalized = value.map((item) => item.trim()).filter(Boolean);
   return normalized.length > 0 ? {op: 'set', value: normalized} : {op: 'delete'};
 }
@@ -338,6 +350,6 @@ function numberOperation(value?: number): FieldOperation<number> {
   return value === undefined ? {op: 'delete'} : {op: 'set', value};
 }
 
-function arraysEqual(left: string[], right: string[]): boolean {
+function arraysEqual(left: string[] = [], right: string[] = []): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }

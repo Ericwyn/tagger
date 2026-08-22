@@ -43,6 +43,27 @@ func TestPatchFromCandidateDistinguishesOmittedAndEmptyFieldLists(t *testing.T) 
 	}
 }
 
+func TestPatchFromCandidateIncludesSelectedExtendedFields(t *testing.T) {
+	candidate := providers.MatchCandidate{
+		Comment:              providers.Field[string]{Value: "liner note"},
+		Composers:            providers.Field[[]string]{Value: []string{"Composer"}},
+		Conductor:            providers.Field[string]{Value: "Conductor"},
+		Lyricists:            providers.Field[[]string]{Value: []string{"Lyricist"}},
+		Copyright:            providers.Field[string]{Value: "© Tagger"},
+		BPM:                  providers.Field[int]{Value: 128},
+		ISRC:                 providers.Field[string]{Value: "US-TAG-26-00001"},
+		MusicBrainzTrackID:   providers.Field[string]{Value: "track-mbid"},
+		MusicBrainzReleaseID: providers.Field[string]{Value: "release-mbid"},
+		MusicBrainzArtistIDs: providers.Field[[]string]{Value: []string{"artist-mbid"}},
+		AcoustID:             providers.Field[string]{Value: "acoustid-id"},
+		AcoustIDFingerprint:  providers.Field[string]{Value: "fingerprint"},
+	}
+	patch := patchFromCandidate(candidate, []string{"comment", "composers", "conductor", "lyricists", "copyright", "bpm", "isrc", "musicbrainzTrackId", "musicbrainzReleaseId", "musicbrainzArtistIds", "acoustidId", "acoustidFingerprint"})
+	if patch.Comment == nil || patch.Composers == nil || patch.Conductor == nil || patch.Lyricists == nil || patch.Copyright == nil || patch.BPM == nil || patch.ISRC == nil || patch.MusicBrainzTrackID == nil || patch.MusicBrainzReleaseID == nil || patch.MusicBrainzArtistIDs == nil || patch.AcoustID == nil || patch.AcoustIDFingerprint == nil {
+		t.Fatalf("extended candidate patch = %#v", patch)
+	}
+}
+
 func TestPrepareCandidateArtworkUsesRegistryReference(t *testing.T) {
 	registry := providers.NewRegistry(artworkTestStrategy{})
 	result, err := registry.Search(context.Background(), providers.Query{Title: "Song"}, nil, 1)

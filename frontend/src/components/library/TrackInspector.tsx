@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Check,
+  ChevronDown,
   ChevronRight,
   CircleEllipsis,
   Copy,
@@ -65,6 +66,18 @@ function toPatch(track: Track): TrackPatch {
     year: track.year,
     genres: [...track.genres],
     lyrics: track.lyrics,
+    comment: track.comment,
+    composers: [...track.composers],
+    conductor: track.conductor,
+    lyricists: [...track.lyricists],
+    copyright: track.copyright,
+    bpm: track.bpm,
+    isrc: track.isrc,
+    musicbrainzTrackId: track.musicbrainzTrackId,
+    musicbrainzReleaseId: track.musicbrainzReleaseId,
+    musicbrainzArtistIds: [...track.musicbrainzArtistIds],
+    acoustidId: track.acoustidId,
+    acoustidFingerprint: track.acoustidFingerprint,
   };
 }
 
@@ -87,6 +100,18 @@ function mockRawTags(track: Track): Record<string, string[]> {
     DATE: track.year ? [String(track.year)] : [],
     GENRE: [...track.genres],
     LYRICS: track.lyrics ? [track.lyrics] : [],
+    COMMENT: track.comment ? [track.comment] : [],
+    COMPOSER: [...track.composers],
+    CONDUCTOR: track.conductor ? [track.conductor] : [],
+    LYRICIST: [...track.lyricists],
+    COPYRIGHT: track.copyright ? [track.copyright] : [],
+    BPM: track.bpm ? [String(track.bpm)] : [],
+    ISRC: track.isrc ? [track.isrc] : [],
+    MUSICBRAINZ_TRACKID: track.musicbrainzTrackId ? [track.musicbrainzTrackId] : [],
+    MUSICBRAINZ_ALBUMID: track.musicbrainzReleaseId ? [track.musicbrainzReleaseId] : [],
+    MUSICBRAINZ_ARTISTID: [...track.musicbrainzArtistIds],
+    ACOUSTID_ID: track.acoustidId ? [track.acoustidId] : [],
+    ACOUSTID_FINGERPRINT: track.acoustidFingerprint ? [track.acoustidFingerprint] : [],
   };
   return Object.fromEntries(Object.entries(tags).filter(([, values]) => values.length));
 }
@@ -112,6 +137,7 @@ export function TrackInspector({
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
   const [writeTag, setWriteTag] = useState(true);
   const [writeSidecar, setWriteSidecar] = useState(true);
+  const [extendedOpen, setExtendedOpen] = useState(false);
   const [rawTags, setRawTags] = useState<Record<string, string[]> | null>(null);
   const [rawTagsOpen, setRawTagsOpen] = useState(false);
   const [rawTagsLoading, setRawTagsLoading] = useState(false);
@@ -125,6 +151,7 @@ export function TrackInspector({
 	setDeleteArtworkArmed(false);
 	setWriteTag(true);
 	setWriteSidecar(true);
+	setExtendedOpen(false);
 	setRawTags(null);
 	setRawTagsOpen(false);
 	setRawTagsError('');
@@ -147,6 +174,18 @@ export function TrackInspector({
       ['year', '年份'],
       ['genres', '风格'],
       ['lyrics', '歌词'],
+      ['comment', '注释'],
+      ['composers', '作曲家'],
+      ['conductor', '指挥'],
+      ['lyricists', '作词家'],
+      ['copyright', '版权'],
+      ['bpm', 'BPM'],
+      ['isrc', 'ISRC'],
+      ['musicbrainzTrackId', 'MusicBrainz Track ID'],
+      ['musicbrainzReleaseId', 'MusicBrainz Release ID'],
+      ['musicbrainzArtistIds', 'MusicBrainz Artist ID'],
+      ['acoustidId', 'AcoustID'],
+      ['acoustidFingerprint', 'AcoustID Fingerprint'],
     ];
     return names.filter(([key]) => JSON.stringify(draft[key]) !== JSON.stringify(original[key]));
   }, [draft, original]);
@@ -338,6 +377,71 @@ export function TrackInspector({
                 />
               </label>
             </div>
+
+            <button
+              type="button"
+              className="extended-tags-toggle"
+              aria-expanded={extendedOpen}
+              onClick={() => setExtendedOpen((value) => !value)}
+            >
+              <span><strong>扩展内嵌字段</strong><small>常见 ID3 / Vorbis / RIFF 标识</small></span>
+              <ChevronDown size={15} className={cn(extendedOpen && 'is-rotated')} />
+            </button>
+            {extendedOpen && (
+              <section className="extended-tags-panel">
+                <div className="field-grid two">
+                  <label className="field-row">
+                    <span>注释</span>
+                    <input value={draft.comment} onChange={(event) => set('comment', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>BPM</span>
+                    <input type="number" min="1" max="1000" value={draft.bpm ?? ''} onChange={(event) => set('bpm', inputNumber(event.target.value))} />
+                  </label>
+                  <label className="field-row">
+                    <span>作曲家</span>
+                    <input value={draft.composers.join(' / ')} onChange={(event) => set('composers', parseList(event.target.value))} />
+                  </label>
+                  <label className="field-row">
+                    <span>指挥</span>
+                    <input value={draft.conductor} onChange={(event) => set('conductor', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>作词家</span>
+                    <input value={draft.lyricists.join(' / ')} onChange={(event) => set('lyricists', parseList(event.target.value))} />
+                  </label>
+                  <label className="field-row">
+                    <span>版权</span>
+                    <input value={draft.copyright} onChange={(event) => set('copyright', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>ISRC</span>
+                    <input value={draft.isrc} onChange={(event) => set('isrc', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>MusicBrainz Track ID</span>
+                    <input value={draft.musicbrainzTrackId} onChange={(event) => set('musicbrainzTrackId', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>MusicBrainz Release ID</span>
+                    <input value={draft.musicbrainzReleaseId} onChange={(event) => set('musicbrainzReleaseId', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>MusicBrainz Artist ID</span>
+                    <input value={draft.musicbrainzArtistIds.join(' / ')} onChange={(event) => set('musicbrainzArtistIds', parseList(event.target.value))} />
+                  </label>
+                  <label className="field-row">
+                    <span>AcoustID</span>
+                    <input value={draft.acoustidId} onChange={(event) => set('acoustidId', event.target.value)} />
+                  </label>
+                  <label className="field-row">
+                    <span>AcoustID Fingerprint</span>
+                    <input value={draft.acoustidFingerprint} onChange={(event) => set('acoustidFingerprint', event.target.value)} />
+                  </label>
+                </div>
+                <p className="format-note">空值会删除对应内嵌键；未列出的格式专有键保持不变。</p>
+              </section>
+            )}
 
             <button className="raw-tag-link" onClick={() => void showRawTags()}>
               <FileAudio2 size={15} />

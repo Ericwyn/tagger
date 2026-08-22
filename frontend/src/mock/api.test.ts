@@ -18,6 +18,18 @@ describe('mock api', () => {
       year: before.year,
       genres: before.genres,
       lyrics: before.lyrics,
+      comment: before.comment,
+      composers: before.composers,
+      conductor: before.conductor,
+      lyricists: before.lyricists,
+      copyright: before.copyright,
+      bpm: before.bpm,
+      isrc: before.isrc,
+      musicbrainzTrackId: before.musicbrainzTrackId,
+      musicbrainzReleaseId: before.musicbrainzReleaseId,
+      musicbrainzArtistIds: before.musicbrainzArtistIds,
+      acoustidId: before.acoustidId,
+      acoustidFingerprint: before.acoustidFingerprint,
     });
 
     expect(updated.title).toBe('新的标题');
