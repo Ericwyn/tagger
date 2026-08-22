@@ -447,6 +447,18 @@ func TestBatchEditAPIQueuesRevisionGuardedJob(t *testing.T) {
 	if invalidYear.Code != 400 || !containsJSON(invalidYear.Body.Bytes(), `"年份必须是正整数"`) {
 		t.Fatalf("invalid year batch edit = %d %s", invalidYear.Code, invalidYear.Body.String())
 	}
+	extendedBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"comment","mode":"set","value":"liner note"},{"field":"composers","mode":"append","value":"Composer"},{"field":"bpm","mode":"set","value":"128"}],"sequenceTracks":false}`)
+	extended := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(extendedBody), Len: len(extendedBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if extended.Code != 202 || !containsJSON(extended.Body.Bytes(), `"kind":"batch_edit"`) {
+		t.Fatalf("extended batch edit = %d %s", extended.Code, extended.Body.String())
+	}
+	invalidAppendBody := []byte(`{"items":[{"trackId":"` + track.ID + `"}],"operations":[{"field":"comment","mode":"append","value":"extra"}],"sequenceTracks":false}`)
+	invalidAppend := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(invalidAppendBody), Len: len(invalidAppendBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if invalidAppend.Code != 400 || !containsJSON(invalidAppend.Body.Bytes(), `不支持追加操作`) {
+		t.Fatalf("invalid extended append = %d %s", invalidAppend.Code, invalidAppend.Body.String())
+	}
 }
 
 func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {

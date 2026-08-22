@@ -169,7 +169,7 @@ export interface WriteSelection {
 export type BatchEditMode = 'set' | 'append' | 'delete';
 
 export interface BatchEditOperation {
-  field: 'album' | 'albumArtists' | 'year' | 'genres';
+  field: 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
   mode: BatchEditMode;
   value: string;
 }

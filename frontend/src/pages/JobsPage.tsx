@@ -50,6 +50,13 @@ const batchFieldText: Record<string, string> = {
   year: '年份',
   trackNumber: '音轨号',
   trackTotal: '总音轨',
+  comment: '注释',
+  composers: '作曲家',
+  conductor: '指挥',
+  lyricists: '作词家',
+  copyright: '版权',
+  bpm: 'BPM',
+  isrc: 'ISRC',
 };
 
 function formatBatchValue(value: unknown): string {

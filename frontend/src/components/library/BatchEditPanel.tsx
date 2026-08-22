@@ -3,7 +3,7 @@ import {Check, ChevronDown, LoaderCircle, Wand2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import type {BatchEditOperation, Track, TrackPatch} from '@/types';
 
-type EditableField = 'album' | 'albumArtists' | 'year' | 'genres';
+type EditableField = 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
 type OperationMode = '' | 'set' | 'append' | 'delete';
 
 export type BatchOperation = BatchEditOperation;
@@ -21,11 +21,18 @@ interface BatchEditPanelProps {
   onApply: (operations: BatchOperation[], sequenceTracks: boolean) => Promise<void>;
 }
 
-const fields: Array<{id: EditableField; label: string; kind: 'text' | 'list' | 'number'}> = [
-  {id: 'album', label: '专辑', kind: 'text'},
+const fields: Array<{id: EditableField; label: string; kind: 'text' | 'list' | 'number'; allowAppend?: boolean}> = [
+  {id: 'album', label: '专辑', kind: 'text', allowAppend: false},
   {id: 'albumArtists', label: '专辑艺术家', kind: 'list'},
   {id: 'year', label: '年份', kind: 'number'},
   {id: 'genres', label: '风格', kind: 'list'},
+  {id: 'comment', label: '注释', kind: 'text', allowAppend: false},
+  {id: 'composers', label: '作曲家', kind: 'list'},
+  {id: 'conductor', label: '指挥', kind: 'text', allowAppend: false},
+  {id: 'lyricists', label: '作词家', kind: 'list'},
+  {id: 'copyright', label: '版权', kind: 'text', allowAppend: false},
+  {id: 'bpm', label: 'BPM', kind: 'number'},
+  {id: 'isrc', label: 'ISRC', kind: 'text', allowAppend: false},
 ];
 
 const emptyOperations = (): Record<EditableField, OperationState> => ({
@@ -33,6 +40,13 @@ const emptyOperations = (): Record<EditableField, OperationState> => ({
   albumArtists: {mode: '', value: ''},
   year: {mode: '', value: ''},
   genres: {mode: '', value: ''},
+  comment: {mode: '', value: ''},
+  composers: {mode: '', value: ''},
+  conductor: {mode: '', value: ''},
+  lyricists: {mode: '', value: ''},
+  copyright: {mode: '', value: ''},
+  bpm: {mode: '', value: ''},
+  isrc: {mode: '', value: ''},
 });
 
 export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEditPanelProps) {
@@ -106,7 +120,7 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
                       <select aria-label={`${field.label}操作`} value={state.mode} onChange={(event) => setOperationState((current) => ({...current, [field.id]: {...current[field.id], mode: event.target.value as OperationMode}}))}>
                         <option value="">保持不变</option>
                         <option value="set">设置为</option>
-                        {field.kind !== 'number' && <option value="append">追加</option>}
+                        {field.kind !== 'number' && field.allowAppend !== false && <option value="append">追加</option>}
                         <option value="delete">删除</option>
                       </select>
                       <ChevronDown size={13} />
@@ -192,6 +206,13 @@ export function buildBatchPatch(track: Track, operations: BatchOperation[], sequ
     if (operation.field === 'albumArtists') patch.albumArtists = applyList(operation.mode, track.albumArtists, operation.value);
     if (operation.field === 'genres') patch.genres = applyList(operation.mode, track.genres, operation.value);
     if (operation.field === 'year') patch.year = applyYear(operation.mode, track.year, operation.value);
+    if (operation.field === 'comment') patch.comment = applyText(operation.mode, track.comment, operation.value);
+    if (operation.field === 'composers') patch.composers = applyList(operation.mode, track.composers, operation.value);
+    if (operation.field === 'conductor') patch.conductor = applyText(operation.mode, track.conductor, operation.value);
+    if (operation.field === 'lyricists') patch.lyricists = applyList(operation.mode, track.lyricists, operation.value);
+    if (operation.field === 'copyright') patch.copyright = applyText(operation.mode, track.copyright, operation.value);
+    if (operation.field === 'bpm') patch.bpm = applyYear(operation.mode, track.bpm, operation.value);
+    if (operation.field === 'isrc') patch.isrc = applyText(operation.mode, track.isrc, operation.value);
   });
   if (sequence) {
     patch.trackNumber = sequence.index + 1;
@@ -234,5 +255,12 @@ function displayValue(track: Track | TrackPatch, field: EditableField): string {
   if (field === 'album') return track.album || '';
   if (field === 'albumArtists') return track.albumArtists.join(' / ');
   if (field === 'genres') return track.genres.join(' / ');
+  if (field === 'comment') return track.comment || '';
+  if (field === 'composers') return track.composers.join(' / ');
+  if (field === 'conductor') return track.conductor || '';
+  if (field === 'lyricists') return track.lyricists.join(' / ');
+  if (field === 'copyright') return track.copyright || '';
+  if (field === 'bpm') return track.bpm ? String(track.bpm) : '';
+  if (field === 'isrc') return track.isrc || '';
   return track.year ? String(track.year) : '';
 }

@@ -106,6 +106,14 @@ func TestPatchFromBatchEditBuildsExplicitOperations(t *testing.T) {
 	if deleted.Genres == nil || deleted.Genres.Op != domain.OperationDelete || deleted.Year == nil || deleted.Year.Op != domain.OperationDelete {
 		t.Fatalf("delete batch patch = %#v", deleted)
 	}
+	extended := patchFromBatchEdit(track, []domain.BatchEditOperation{
+		{Field: "comment", Mode: domain.BatchEditSet, Value: "liner note"},
+		{Field: "composers", Mode: domain.BatchEditSet, Value: "Composer A, Composer B"},
+		{Field: "bpm", Mode: domain.BatchEditSet, Value: "128"},
+	}, false, 0, 1)
+	if extended.Comment == nil || extended.Comment.Value != "liner note" || extended.Composers == nil || len(extended.Composers.Value) != 2 || extended.BPM == nil || extended.BPM.Value != 128 {
+		t.Fatalf("extended batch patch = %#v", extended)
+	}
 }
 
 func ptr(value int) *int { return &value }

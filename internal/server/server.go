@@ -592,7 +592,12 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 	if len(payload.Operations) == 0 && !payload.SequenceTracks {
 		return fmt.Errorf("至少选择一个字段操作或音轨序号操作")
 	}
-	allowed := map[string]bool{"album": true, "albumArtists": true, "year": true, "genres": true}
+	allowed := map[string]bool{
+		"album": true, "albumArtists": true, "year": true, "genres": true,
+		"comment": true, "composers": true, "conductor": true, "lyricists": true,
+		"copyright": true, "bpm": true, "isrc": true,
+	}
+	noAppend := map[string]bool{"album": true, "year": true, "comment": true, "conductor": true, "copyright": true, "bpm": true, "isrc": true}
 	seenOperations := make(map[string]struct{}, len(payload.Operations))
 	for _, operation := range payload.Operations {
 		if !allowed[operation.Field] {
@@ -601,11 +606,8 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 		if operation.Mode != domain.BatchEditSet && operation.Mode != domain.BatchEditAppend && operation.Mode != domain.BatchEditDelete {
 			return fmt.Errorf("不支持的批量操作：%s", operation.Mode)
 		}
-		if operation.Field == "album" && operation.Mode == domain.BatchEditAppend {
-			return fmt.Errorf("专辑不支持追加操作")
-		}
-		if operation.Field == "year" && operation.Mode == domain.BatchEditAppend {
-			return fmt.Errorf("年份不支持追加操作")
+		if noAppend[operation.Field] && operation.Mode == domain.BatchEditAppend {
+			return fmt.Errorf("字段 %s 不支持追加操作", operation.Field)
 		}
 		if operation.Mode != domain.BatchEditDelete && strings.TrimSpace(operation.Value) == "" {
 			return fmt.Errorf("字段 %s 的设置值不能为空", operation.Field)
@@ -614,6 +616,12 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 			year, err := strconv.Atoi(strings.TrimSpace(operation.Value))
 			if err != nil || year <= 0 {
 				return fmt.Errorf("年份必须是正整数")
+			}
+		}
+		if operation.Field == "bpm" && operation.Mode != domain.BatchEditDelete {
+			bpm, err := strconv.Atoi(strings.TrimSpace(operation.Value))
+			if err != nil || bpm < 1 || bpm > 1000 {
+				return fmt.Errorf("BPM 必须是 1 到 1000 的整数")
 			}
 		}
 		if _, exists := seenOperations[operation.Field]; exists {

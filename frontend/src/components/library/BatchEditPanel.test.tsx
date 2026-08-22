@@ -19,6 +19,15 @@ describe('BatchEditPanel', () => {
     expect(patch.albumArtists).toEqual([]);
     expect(patch.trackNumber).toBe(2);
     expect(patch.trackTotal).toBe(3);
+
+    const extended = buildBatchPatch(track, [
+      {field: 'comment', mode: 'set', value: 'liner note'},
+      {field: 'composers', mode: 'append', value: 'Composer'},
+      {field: 'bpm', mode: 'set', value: '128'},
+    ]);
+    expect(extended.comment).toBe('liner note');
+    expect(extended.composers).toEqual([...track.composers, 'Composer']);
+    expect(extended.bpm).toBe(128);
   });
 
   it('shows a preview and submits selected operations', async () => {
@@ -32,5 +41,16 @@ describe('BatchEditPanel', () => {
 
     await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
     expect(onApply).toHaveBeenCalledWith([{field: 'album', mode: 'set', value: '现场精选'}], false);
+  });
+
+  it('exposes extended fields as safe batch operations', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    render(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+
+    await user.selectOptions(screen.getByLabelText('注释操作'), 'set');
+    await user.type(screen.getByLabelText('注释值'), 'liner note');
+    await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
+    expect(onApply).toHaveBeenCalledWith([{field: 'comment', mode: 'set', value: 'liner note'}], false);
   });
 });

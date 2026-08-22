@@ -375,6 +375,24 @@ func patchFromBatchEdit(track domain.Track, operations []domain.BatchEditOperati
 			patch.AlbumArtists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.AlbumArtists, operation.Value)}
 		case "genres":
 			patch.Genres = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Genres, operation.Value)}
+		case "comment":
+			patch.Comment = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+		case "composers":
+			patch.Composers = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Composers, operation.Value)}
+		case "conductor":
+			patch.Conductor = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+		case "lyricists":
+			patch.Lyricists = &domain.StringsFieldPatch{Op: batchStringsOperation(operation.Mode), Value: batchListValue(operation.Mode, track.Lyricists, operation.Value)}
+		case "copyright":
+			patch.Copyright = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
+		case "bpm":
+			if operation.Mode == domain.BatchEditDelete {
+				patch.BPM = &domain.IntFieldPatch{Op: domain.OperationDelete}
+			} else if bpm, err := strconv.Atoi(strings.TrimSpace(operation.Value)); err == nil && bpm > 0 {
+				patch.BPM = &domain.IntFieldPatch{Op: domain.OperationSet, Value: bpm}
+			}
+		case "isrc":
+			patch.ISRC = &domain.StringFieldPatch{Op: batchStringOperation(operation.Mode), Value: strings.TrimSpace(operation.Value)}
 		case "year":
 			if operation.Mode == domain.BatchEditDelete {
 				patch.Year = &domain.IntFieldPatch{Op: domain.OperationDelete}
