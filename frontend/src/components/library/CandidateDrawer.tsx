@@ -1,0 +1,283 @@
+import {useEffect, useMemo, useState} from 'react';
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  Image,
+  LoaderCircle,
+  Music2,
+  Search,
+  Sparkles,
+  X,
+} from 'lucide-react';
+import {CoverArt} from '@/components/CoverArt';
+import {cn, formatDuration} from '@/lib/utils';
+import type {MatchCandidate, Track, TrackPatch} from '@/types';
+
+interface CandidateDrawerProps {
+  open: boolean;
+  track: Track | null;
+  candidates: MatchCandidate[];
+  loading: boolean;
+  onClose: () => void;
+  onApply: (patch: TrackPatch, candidate: MatchCandidate) => Promise<void>;
+}
+
+const fieldOptions = [
+  {id: 'title', label: '标题'},
+  {id: 'artists', label: '艺术家'},
+  {id: 'album', label: '专辑'},
+  {id: 'albumArtists', label: '专辑艺术家'},
+  {id: 'track', label: '音轨 / 光盘'},
+  {id: 'year', label: '年份'},
+  {id: 'genres', label: '风格'},
+] as const;
+
+type FieldID = typeof fieldOptions[number]['id'];
+
+export function CandidateDrawer({
+  open,
+  track,
+  candidates,
+  loading,
+  onClose,
+  onApply,
+}: CandidateDrawerProps) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
+  const [applying, setApplying] = useState(false);
+
+  useEffect(() => {
+    setSelectedId(candidates[0]?.id ?? null);
+  }, [candidates]);
+
+  useEffect(() => {
+    if (!open) setSelectedId(null);
+  }, [open]);
+
+  const selected = useMemo(
+    () => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0],
+    [candidates, selectedId],
+  );
+
+  if (!open || !track) return null;
+
+  const buildPatch = (): TrackPatch => {
+    if (!selected) {
+      return {
+        title: track.title,
+        artists: track.artists,
+        album: track.album,
+        albumArtists: track.albumArtists,
+        trackNumber: track.trackNumber,
+        trackTotal: track.trackTotal,
+        discNumber: track.discNumber,
+        discTotal: track.discTotal,
+        year: track.year,
+        genres: track.genres,
+        lyrics: track.lyrics,
+      };
+    }
+    return {
+      title: fields.has('title') ? selected.title.value : track.title,
+      artists: fields.has('artists') ? selected.artists.value : track.artists,
+      album: fields.has('album') ? selected.album.value : track.album,
+      albumArtists: fields.has('albumArtists') ? selected.albumArtists.value : track.albumArtists,
+      trackNumber: fields.has('track') ? selected.trackNumber.value : track.trackNumber,
+      trackTotal: fields.has('track') ? selected.trackTotal.value : track.trackTotal,
+      discNumber: fields.has('track') ? selected.discNumber.value : track.discNumber,
+      discTotal: track.discTotal,
+      year: fields.has('year') ? selected.year.value : track.year,
+      genres: fields.has('genres') ? selected.genres.value : track.genres,
+      lyrics: track.lyrics,
+    };
+  };
+
+  const toggleField = (id: FieldID) => {
+    setFields((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  return (
+    <div className="candidate-layer">
+      <button className="candidate-backdrop" aria-label="关闭搜索结果" onClick={onClose} />
+      <aside className="candidate-drawer">
+        <div className="candidate-head">
+          <div>
+            <div className="eyebrow">METADATA MATCHER</div>
+            <h2>为「{track.title}」查找资料</h2>
+            <p>{track.artists.join(' / ')} · {formatDuration(track.durationSeconds)} · {track.format.toUpperCase()}</p>
+          </div>
+          <button className="icon-button" title="关闭候选结果" onClick={onClose}><X size={19} /></button>
+        </div>
+
+        <div className="query-strip">
+          <Search size={15} />
+          <span>{track.title}　{track.artists.join(' ')}</span>
+          <button>修改查询</button>
+        </div>
+
+        {loading ? (
+          <div className="candidate-loading">
+            <div className="radar-loader">
+              <i />
+              <i />
+              <Sparkles size={24} />
+            </div>
+            <strong>正在查询 3 个数据源</strong>
+            <p>MusicBrainz · 网易云音乐 · Apple Music</p>
+          </div>
+        ) : (
+          <div className="candidate-layout">
+            <section className="candidate-list-pane">
+              <div className="pane-head">
+                <span>找到 {candidates.length} 个候选</span>
+                <small>按匹配度排序</small>
+              </div>
+              <div className="candidate-list">
+                {candidates.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    className={cn('candidate-item', selected?.id === candidate.id && 'is-active')}
+                    onClick={() => setSelectedId(candidate.id)}
+                  >
+                    <CoverArt
+                      title={candidate.title.value}
+                      artist={candidate.artists.value[0]}
+                      tone={candidate.coverTone}
+                      size="sm"
+                    />
+                    <span className="candidate-copy">
+                      <strong>{candidate.title.value}</strong>
+                      <span>{candidate.artists.value.join(' / ')}</span>
+                      <small>{candidate.album.value} · {candidate.year.value}</small>
+                      <em>{candidate.providerName}</em>
+                    </span>
+                    <span className={cn('score-ring', candidate.score < 0.8 && 'is-low')}>
+                      {Math.round(candidate.score * 100)}
+                      <small>%</small>
+                    </span>
+                    <ChevronRight size={15} />
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {selected && (
+              <section className="candidate-detail-pane">
+                <div className="candidate-summary">
+                  <CoverArt
+                    title={selected.title.value}
+                    artist={selected.artists.value[0]}
+                    tone={selected.coverTone}
+                    size="md"
+                  />
+                  <div>
+                    <span className={cn('confidence-badge', selected.score < 0.8 && 'is-warning')}>
+                      {selected.score < 0.8 ? <CircleAlert size={13} /> : <Check size={13} />}
+                      {selected.scoreLabel} · {Math.round(selected.score * 100)}%
+                    </span>
+                    <h3>{selected.title.value}</h3>
+                    <p>{selected.artists.value.join(' / ')}</p>
+                    <small>{selected.providerName} / {selected.externalId}</small>
+                  </div>
+                </div>
+
+                <div className="reason-list">
+                  {selected.matchReasons.map((reason) => <span key={reason}><Check size={12} /> {reason}</span>)}
+                </div>
+
+                <div className="field-policy">
+                  <div>
+                    <strong>选择要采用的字段</strong>
+                    <button onClick={() => setFields(new Set(fieldOptions.map((item) => item.id)))}>全选</button>
+                  </div>
+                  <div className="field-chips">
+                    {fieldOptions.map((field) => (
+                      <button
+                        key={field.id}
+                        className={cn(fields.has(field.id) && 'is-active')}
+                        onClick={() => toggleField(field.id)}
+                      >
+                        <span>{fields.has(field.id) && <Check size={11} />}</span>
+                        {field.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="candidate-diff">
+                  <div className="diff-column-head"><span>字段</span><span>当前文件</span><span>候选值</span></div>
+                  <DiffRow label="标题" current={track.title} candidate={selected.title.value} active={fields.has('title')} />
+                  <DiffRow label="艺术家" current={track.artists.join(' / ')} candidate={selected.artists.value.join(' / ')} active={fields.has('artists')} />
+                  <DiffRow label="专辑" current={track.album || '空'} candidate={selected.album.value} active={fields.has('album')} />
+                  <DiffRow
+                    label="音轨"
+                    current={track.trackNumber ? `${track.trackNumber} / ${track.trackTotal || '—'}` : '空'}
+                    candidate={`${selected.trackNumber.value} / ${selected.trackTotal.value}`}
+                    active={fields.has('track')}
+                  />
+                  <DiffRow label="年份" current={String(track.year || '空')} candidate={String(selected.year.value)} active={fields.has('year')} />
+                  <DiffRow label="风格" current={track.genres.join(', ') || '空'} candidate={selected.genres.value.join(', ')} active={fields.has('genres')} />
+                </div>
+
+                <div className="asset-options">
+                  <label className={cn(selected.hasArtwork && 'is-available')}>
+                    <input type="checkbox" disabled={!selected.hasArtwork} />
+                    <Image size={16} />
+                    <span><strong>封面</strong><small>{selected.hasArtwork ? '有可用图片' : '当前来源不提供'}</small></span>
+                  </label>
+                  <label className={cn(selected.hasLyrics && 'is-available')}>
+                    <input type="checkbox" disabled={!selected.hasLyrics} />
+                    <Music2 size={16} />
+                    <span><strong>歌词</strong><small>{selected.hasLyrics ? '含同步歌词' : '可改用 LRCLIB'}</small></span>
+                  </label>
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+
+        <div className="candidate-footer">
+          <button className="secondary-button" onClick={onClose}><ChevronLeft size={15} /> 返回编辑</button>
+          <div>
+            <span>采用 {fields.size} 组字段 · 不会清空候选中缺失的值</span>
+            <button
+              className="primary-button"
+              disabled={!selected || applying || loading}
+              onClick={async () => {
+                if (!selected) return;
+                setApplying(true);
+                try {
+                  await onApply(buildPatch(), selected);
+                  onClose();
+                } finally {
+                  setApplying(false);
+                }
+              }}
+            >
+              {applying ? <LoaderCircle className="spin" size={15} /> : <Sparkles size={15} />}
+              采用所选资料
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function DiffRow({label, current, candidate, active}: {label: string; current: string; candidate: string; active: boolean}) {
+  const same = current === candidate;
+  return (
+    <div className={cn('candidate-diff-row', !active && 'is-muted')}>
+      <span>{label}</span>
+      <span>{current}</span>
+      <span className={cn(!same && active && 'is-changed')}>{candidate}</span>
+    </div>
+  );
+}

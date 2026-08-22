@@ -1,0 +1,13 @@
+# Frontend dependencies and generated output
+frontend/node_modules/
+frontend/dist/
+
+# Local tooling and editor state
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Local runtime data
+data/
+tmp/
