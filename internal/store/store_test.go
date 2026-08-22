@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -160,6 +161,34 @@ func TestListRevisionsIsNewestFirstAndConcurrentSafe(t *testing.T) {
 	}
 	if len(revisions) != 5 || !revisions[0].CreatedAt.Equal(base.Add(11*time.Minute)) || !revisions[4].CreatedAt.Equal(base.Add(7*time.Minute)) {
 		t.Fatalf("newest revisions = %#v", revisions)
+	}
+}
+
+func TestHistoryRetentionPrunesPerTrackAndPersists(t *testing.T) {
+	dataStore := openTestStore(t)
+	base := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	for index := 0; index < 5; index++ {
+		_, err := dataStore.CreateRevision(context.Background(), domain.Revision{
+			ID: "retention-" + strconv.Itoa(index), LibraryID: "lib-1", TrackID: "track-1",
+			TrackTitle: "Song", FileName: "song.mp3", Action: "修改标签", Source: "测试",
+			CreatedAt: base.Add(time.Duration(index) * time.Minute), Diff: []domain.RevisionDiff{{Field: "title"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := dataStore.SetHistoryRetention(context.Background(), 3); err != nil {
+		t.Fatal(err)
+	}
+	revisions, err := dataStore.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 3 || revisions[0].ID != "retention-4" || revisions[2].ID != "retention-2" {
+		t.Fatalf("retained revisions = %#v err=%v", revisions, err)
+	}
+	if got := dataStore.HistoryRetention(context.Background()); got != 3 {
+		t.Fatalf("retention = %d, want 3", got)
+	}
+	if err := dataStore.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

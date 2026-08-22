@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
   getSystem: vi.fn(),
+  updateSystemSettings: vi.fn(),
   candidateArtworkURL: vi.fn(() => undefined),
 }));
 
@@ -42,11 +43,13 @@ const candidate = {
 describe('SettingsPage provider diagnostics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem('tagger-history-retention');
     api.listProviders.mockResolvedValue([provider]);
     api.getLibrary.mockResolvedValue(library);
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
     api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090'});
+    api.updateSystemSettings.mockResolvedValue({historyRetention: 20});
     api.testProvider.mockResolvedValue({
       provider,
       result: {status: 'ok', count: 1, latencyMs: 42},
@@ -105,5 +108,6 @@ describe('SettingsPage provider diagnostics', () => {
     expect([...retention.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['最近 3 次', '最近 5 次', '最近 10 次', '最近 20 次']);
     await user.selectOptions(retention, '5');
     expect(localStorage.getItem('tagger-history-retention')).toBe('5');
+    await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith(5));
   });
 });

@@ -89,6 +89,7 @@ func (s *Server) routes() {
 	api := s.h.Group("/api/v1")
 	api.Use(s.requireAuth)
 	api.GET("/system", s.handleSystem)
+	api.PATCH("/system/settings", s.handleSystemSettings)
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
@@ -172,12 +173,38 @@ func (s *Server) handleHealth(_ context.Context, c *app.RequestContext) {
 	c.JSON(consts.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleSystem(_ context.Context, c *app.RequestContext) {
-	s.writeData(c, map[string]string{
-		"version":    s.version,
-		"tag_engine": s.tagEngineInfo,
-		"listen":     s.listen,
+func (s *Server) handleSystem(ctx context.Context, c *app.RequestContext) {
+	historyRetention := 20
+	if s.store != nil {
+		historyRetention = s.store.HistoryRetention(ctx)
+	}
+	s.writeData(c, map[string]any{
+		"version":          s.version,
+		"tag_engine":       s.tagEngineInfo,
+		"listen":           s.listen,
+		"historyRetention": historyRetention,
 	})
+}
+
+type systemSettingsRequest struct {
+	HistoryRetention *int `json:"historyRetention"`
+}
+
+func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "settings_unavailable", "系统设置存储尚未初始化")
+		return
+	}
+	var request systemSettingsRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || request.HistoryRetention == nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "需要提供 historyRetention")
+		return
+	}
+	if err := s.store.SetHistoryRetention(ctx, *request.HistoryRetention); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_history_retention", err.Error())
+		return
+	}
+	s.writeData(c, map[string]any{"historyRetention": s.store.HistoryRetention(ctx)})
 }
 
 func (s *Server) handleLibraries(_ context.Context, c *app.RequestContext) {

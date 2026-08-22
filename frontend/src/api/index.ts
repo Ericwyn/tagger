@@ -41,7 +41,12 @@ export async function getLibrary(): Promise<LibrarySummary> {
 }
 
 export function getSystem(): Promise<SystemInfo> {
-  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock'}) : real.getSystem();
+  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20}) : real.getSystem();
+}
+
+export function updateSystemSettings(historyRetention: number): Promise<{historyRetention: number}> {
+  if (apiReadMode === 'mock') return Promise.resolve({historyRetention});
+  return real.updateSystemSettings(historyRetention);
 }
 
 export function setAuthToken(token: string): void {

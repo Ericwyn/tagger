@@ -791,6 +791,13 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	if limited.Code != 200 || !containsJSON(limited.Body.Bytes(), `"id":"revlog-test-2"`) || containsJSON(limited.Body.Bytes(), `"id":"revlog-test"`) {
 		t.Fatalf("limited revision list = %d %s", limited.Code, limited.Body.String())
 	}
+	settingsBody := []byte(`{"historyRetention":3}`)
+	settings := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/system/settings",
+		&ut.Body{Body: bytes.NewReader(settingsBody), Len: len(settingsBody)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if settings.Code != 200 || !containsJSON(settings.Body.Bytes(), `"historyRetention":3`) {
+		t.Fatalf("system settings = %d %s", settings.Code, settings.Body.String())
+	}
 	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/"+created.ID, nil)
 	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"resultRevision":"after"`) {
 		t.Fatalf("revision detail = %d %s", detail.Code, detail.Body.String())

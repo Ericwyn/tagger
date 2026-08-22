@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/domain"
@@ -28,9 +29,10 @@ var migrationFiles embed.FS
 var migrationMu sync.Mutex
 
 type Store struct {
-	db   *sql.DB
-	path string
-	now  func() time.Time
+	db               *sql.DB
+	path             string
+	now              func() time.Time
+	historyRetention atomic.Int64
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -61,7 +63,14 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{db: db, path: path, now: time.Now}, nil
+	store := &Store{db: db, path: path, now: time.Now}
+	retention, err := store.loadHistoryRetention(ctx)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	store.historyRetention.Store(int64(retention))
+	return store, nil
 }
 
 func migrate(ctx context.Context, db *sql.DB) error {
@@ -261,6 +270,9 @@ func (s *Store) CreateRevision(ctx context.Context, revision domain.Revision) (d
 		beforeArtworkHash, afterArtworkHash, beforeSidecarJSON, afterSidecarJSON)
 	if err != nil {
 		return domain.Revision{}, fmt.Errorf("insert revision: %w", err)
+	}
+	if err := s.pruneTrackRevisions(ctx, tx, revision.TrackID); err != nil {
+		return domain.Revision{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.Revision{}, fmt.Errorf("commit revision: %w", err)

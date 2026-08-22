@@ -60,6 +60,7 @@ export interface SystemInfo {
   version: string;
   tag_engine: string;
   listen?: string;
+  historyRetention?: number;
 }
 
 interface FieldOperation<T> {
@@ -162,6 +163,14 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
   return {
     getSystem(): Promise<SystemInfo> {
       return request<SystemInfo>('/api/v1/system');
+    },
+
+    updateSystemSettings(historyRetention: number): Promise<{historyRetention: number}> {
+      return request<{historyRetention: number}>('/api/v1/system/settings', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({historyRetention}),
+      });
     },
 
     async getLibrary(): Promise<LibrarySummary> {

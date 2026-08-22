@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {historyRetentionOptions, type CandidateSearchQuery, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 
@@ -105,13 +105,24 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
 
   useEffect(() => {
     if (tab !== 'system') return;
-    void getSystem().then(setSystemInfo).catch(() => setSystemInfo(undefined));
+    void getSystem().then((info) => {
+      setSystemInfo(info);
+      if (info.historyRetention && historyRetentionOptions.includes(info.historyRetention as HistoryRetention)) {
+        setHistoryRetention(info.historyRetention as HistoryRetention);
+        localStorage.setItem(historyRetentionKey, String(info.historyRetention));
+      }
+    }).catch(() => setSystemInfo(undefined));
   }, [tab]);
 
-  const updateHistoryRetention = (value: HistoryRetention) => {
+  const updateHistoryRetention = async (value: HistoryRetention) => {
     setHistoryRetention(value);
     localStorage.setItem(historyRetentionKey, String(value));
-    onNotice(`历史列表将显示最近 ${value} 次修订`);
+    try {
+      await updateSystemSettings(value);
+      onNotice(`历史保留策略已更新：每首曲目最近 ${value} 次修订`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '历史保留策略保存失败');
+    }
   };
 
   const runLibraryScan = async () => {
@@ -398,7 +409,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <section>
                   <div className="system-icon"><Database size={19} /></div>
                   <div><strong>历史保留</strong><p>标签和封面修订按内容 hash 去重保存。</p></div>
-                  <label className="system-select"><span>每文件</span><select aria-label="历史保留次数" value={historyRetention} onChange={(event) => updateHistoryRetention(Number(event.target.value) as HistoryRetention)}>
+                  <label className="system-select"><span>每文件</span><select aria-label="历史保留次数" value={historyRetention} onChange={(event) => void updateHistoryRetention(Number(event.target.value) as HistoryRetention)}>
                     {historyRetentionOptions.map((value) => <option key={value} value={value}>最近 {value} 次</option>)}
                   </select></label>
                 </section>

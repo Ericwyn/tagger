@@ -29,6 +29,17 @@ describe('real API client', () => {
     }
   });
 
+  it('updates the server-side history retention setting without touching the listener', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {historyRetention: 3}}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.updateSystemSettings(3)).resolves.toEqual({historyRetention: 3});
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/system/settings', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({historyRetention: 3}),
+    }));
+  });
+
   it('unwraps library and track responses', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({data: [library]}), {status: 200}))
