@@ -479,8 +479,10 @@ func (s *Server) handleJobMatches(ctx context.Context, c *app.RequestContext) {
 }
 
 type matchReviewUpdateRequest struct {
-	State               string `json:"state"`
-	SelectedCandidateID string `json:"selectedCandidateId,omitempty"`
+	State               string   `json:"state"`
+	SelectedCandidateID string   `json:"selectedCandidateId,omitempty"`
+	Fields              []string `json:"fields,omitempty"`
+	Artwork             *bool    `json:"artwork,omitempty"`
 }
 
 func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestContext) {
@@ -544,6 +546,12 @@ func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestCont
 	item.State = request.State
 	if request.SelectedCandidateID != "" {
 		item.SelectedCandidateID = request.SelectedCandidateID
+	}
+	if request.Fields != nil {
+		item.ReviewFields = append([]string(nil), request.Fields...)
+	}
+	if request.Artwork != nil {
+		item.ReviewArtwork = *request.Artwork
 	}
 	if err := s.store.UpsertMatchItem(ctx, item); err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
@@ -617,6 +625,8 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 		}
 		item.State = "write_pending"
 		item.SelectedCandidateID = selection.CandidateID
+		item.ReviewFields = append([]string(nil), selection.Fields...)
+		item.ReviewArtwork = selection.Artwork
 		if itemErr := s.store.UpsertMatchItem(ctx, item); itemErr != nil {
 			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
 			return

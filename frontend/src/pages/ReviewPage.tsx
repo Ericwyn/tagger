@@ -110,6 +110,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       let errorByTrack = new Map<string, string>();
       let matchStateByTrack = new Map<string, MatchItem['state']>();
       let selectedCandidateByTrack = new Map<string, string>();
+      let reviewFieldsByTrack = new Map<string, string[] | null | undefined>();
+      let reviewArtworkByTrack = new Map<string, boolean>();
       if (apiReadMode === 'real') {
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
         if (created) {
@@ -128,6 +130,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           selectedCandidateByTrack = new Map(matchItems
             .filter((item) => item.selectedCandidateId)
             .map((item) => [item.trackId, item.selectedCandidateId!] as const));
+          reviewFieldsByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewFields] as const));
+          reviewArtworkByTrack = new Map(matchItems.map((item) => [item.trackId, Boolean(item.reviewArtwork)] as const));
         }
       }
       const reviewed = next.map((track) => {
@@ -135,12 +139,13 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
         const itemState = matchStateByTrack.get(track.id);
         const candidate = candidates.find((item) => item.id === selectedCandidateByTrack.get(track.id)) ?? candidates[0];
         const noMatch = !candidate || itemState === 'no_match' || itemState === 'failed';
+        const persistedFields = reviewFieldsByTrack.get(track.id);
         return {
           track,
           candidate,
           candidates,
-          fields: candidate ? availableFields(candidate) : [],
-          includeArtwork: false,
+          fields: candidate ? (persistedFields == null ? availableFields(candidate) : persistedFields) : [],
+          includeArtwork: reviewArtworkByTrack.get(track.id) ?? false,
           error: errorByTrack.get(track.id),
           state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 ? 'accepted' as const : 'review' as const,
         };
@@ -170,19 +175,21 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, state} : item));
   };
 
-  const persistReviewState = (trackId: string, state: 'review' | 'accepted' | 'skipped', candidateId?: string) => {
+  const persistReviewState = (trackId: string, state: 'review' | 'accepted' | 'skipped', candidateId?: string, fields?: string[], artwork?: boolean) => {
     if (apiReadMode !== 'real' || !job) return;
-    void updateMatchItem(job.id, trackId, state, candidateId).catch(() => undefined);
+    void updateMatchItem(job.id, trackId, state, candidateId, fields, artwork).catch(() => undefined);
   };
 
   const toggleFields = (trackId: string, fields: string[]) => {
-    setItems((current) => current.map((item) => {
-      if (item.track.id !== trackId) return item;
-      const next = new Set(item.fields);
-      const shouldEnable = fields.some((field) => !next.has(field));
-      fields.forEach((field) => shouldEnable ? next.add(field) : next.delete(field));
-      return {...item, fields: [...next], state: next.size === 0 && item.state === 'accepted' ? 'review' : item.state};
-    }));
+    const item = items.find((entry) => entry.track.id === trackId);
+    if (!item) return;
+    const next = new Set(item.fields);
+    const shouldEnable = fields.some((field) => !next.has(field));
+    fields.forEach((field) => shouldEnable ? next.add(field) : next.delete(field));
+    const nextFields = [...next];
+    const nextState = next.size === 0 && item.state === 'accepted' ? 'review' : item.state;
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, fields: nextFields, state: nextState} : entry));
+    persistReviewState(trackId, nextState, item.candidate?.id, nextFields, item.includeArtwork);
   };
 
   const toggleField = (trackId: string, field: string) => toggleFields(trackId, [field]);
@@ -202,11 +209,15 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     setItems((current) => current.map((entry) => entry.track.id === trackId
       ? {...entry, candidate: nextCandidate, fields: availableFields(nextCandidate), state: 'review'}
       : entry));
-    persistReviewState(trackId, 'review', nextCandidate.id);
+    persistReviewState(trackId, 'review', nextCandidate.id, availableFields(nextCandidate), false);
   };
 
   const toggleArtwork = (trackId: string) => {
-    setItems((current) => current.map((item) => item.track.id === trackId ? {...item, includeArtwork: !item.includeArtwork} : item));
+    const item = items.find((entry) => entry.track.id === trackId);
+    if (!item) return;
+    const includeArtwork = !item.includeArtwork;
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, includeArtwork} : entry));
+    persistReviewState(trackId, item.state, item.candidate?.id, item.fields, includeArtwork);
   };
 
   if (loading) {
@@ -243,7 +254,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           onClick={() => {
             const highConfidence = items.filter((item) => item.candidate && item.candidate.score >= 0.92);
             setItems((current) => current.map((item) => item.candidate && item.candidate.score >= 0.92 ? {...item, state: 'accepted'} : item));
-            highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id));
+            highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork));
           }}
         >
           <Check size={15} /> 接受所有高置信
@@ -356,9 +367,9 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
             </div>
 
             <div className="review-detail-actions">
-              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
+              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
               <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => changeCandidate(active.track.id)}><ChevronRight size={15} /> 更换候选</button>
-              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
+              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id, active.fields, active.includeArtwork); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
             </div>
           </section>
         )}

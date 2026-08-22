@@ -610,20 +610,20 @@ func TestMatchReviewStateAPIUpdatesPersistedDecision(t *testing.T) {
 	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: track.ID, State: "review", Candidates: candidates}); err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"state":"accepted","selectedCandidateId":"candidate-review"}`)
+	body := []byte(`{"state":"accepted","selectedCandidateId":"candidate-review","fields":["title","comment"],"artwork":true}`)
 	accepted := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
 		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
-	if accepted.Code != 200 || !containsJSON(accepted.Body.Bytes(), `"state":"accepted"`) || !containsJSON(accepted.Body.Bytes(), `"selectedCandidateId":"candidate-review"`) {
+	if accepted.Code != 200 || !containsJSON(accepted.Body.Bytes(), `"state":"accepted"`) || !containsJSON(accepted.Body.Bytes(), `"selectedCandidateId":"candidate-review"`) || !containsJSON(accepted.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(accepted.Body.Bytes(), `"reviewArtwork":true`) {
 		t.Fatalf("accepted review state = %d %s", accepted.Code, accepted.Body.String())
 	}
 	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
-	if err != nil || item.State != "accepted" || item.SelectedCandidateID != "candidate-review" {
+	if err != nil || item.State != "accepted" || item.SelectedCandidateID != "candidate-review" || len(item.ReviewFields) != 2 || !item.ReviewArtwork {
 		t.Fatalf("accepted item = %#v err=%v", item, err)
 	}
 	skippedBody := []byte(`{"state":"skipped"}`)
 	skipped := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
 		&ut.Body{Body: bytes.NewReader(skippedBody), Len: len(skippedBody)}, ut.Header{Key: "content-type", Value: "application/json"})
-	if skipped.Code != 200 || !containsJSON(skipped.Body.Bytes(), `"state":"skipped"`) {
+	if skipped.Code != 200 || !containsJSON(skipped.Body.Bytes(), `"state":"skipped"`) || !containsJSON(skipped.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(skipped.Body.Bytes(), `"reviewArtwork":true`) {
 		t.Fatalf("skipped review state = %d %s", skipped.Code, skipped.Body.String())
 	}
 	invalidBody := []byte(`{"state":"accepted","selectedCandidateId":"missing"}`)

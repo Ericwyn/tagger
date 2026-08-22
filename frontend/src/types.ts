@@ -154,6 +154,8 @@ export interface MatchItem {
   state: 'review' | 'accepted' | 'skipped' | 'no_match' | 'failed' | 'written' | 'write_pending' | 'write_failed' | 'artwork_failed';
   candidates: MatchCandidate[];
   selectedCandidateId?: string;
+  reviewFields?: string[] | null;
+  reviewArtwork?: boolean;
   error?: string;
   updatedAt?: string;
 }

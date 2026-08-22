@@ -74,6 +74,47 @@ export class APIError extends Error {
   }
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+// Keep older SQLite payloads/API responses readable after new normalized fields
+// are added. A rescan will populate the fields, but opening the library must
+// never crash just because an existing track predates the schema.
+export function normalizeTrack(track: Track): Track {
+  const raw = track as Track & Record<string, unknown>;
+  const bpm = typeof raw.bpm === 'number' && Number.isFinite(raw.bpm) ? raw.bpm : undefined;
+  return {
+    ...track,
+    title: stringValue(raw.title),
+    artists: stringArray(raw.artists),
+    album: stringValue(raw.album),
+    albumArtists: stringArray(raw.albumArtists),
+    genres: stringArray(raw.genres),
+    lyrics: stringValue(raw.lyrics),
+    comment: stringValue(raw.comment),
+    composers: stringArray(raw.composers),
+    conductor: stringValue(raw.conductor),
+    lyricists: stringArray(raw.lyricists),
+    copyright: stringValue(raw.copyright),
+    bpm,
+    isrc: stringValue(raw.isrc),
+    musicbrainzTrackId: stringValue(raw.musicbrainzTrackId),
+    musicbrainzReleaseId: stringValue(raw.musicbrainzReleaseId),
+    musicbrainzArtistIds: stringArray(raw.musicbrainzArtistIds),
+    acoustidId: stringValue(raw.acoustidId),
+    acoustidFingerprint: stringValue(raw.acoustidFingerprint),
+  };
+}
+
+function normalizeTrackResult<T extends {track: Track}>(result: T): T {
+  return {...result, track: normalizeTrack(result.track)};
+}
+
 export function createRealAPI(fetcher: typeof fetch = fetch) {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await fetcher(path, {
@@ -103,7 +144,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
     async listTracks(): Promise<Track[]> {
       const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks');
-      return result.tracks;
+      return (result.tracks ?? []).map(normalizeTrack);
     },
 
 	async rescanLibrary(libraryId: string): Promise<Job> {
@@ -155,11 +196,11 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
 	},
 
-	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string): Promise<MatchItem> {
+	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean): Promise<MatchItem> {
 	  return request<MatchItem>(`/api/v1/matches/jobs/${encodeURIComponent(jobId)}/items/${encodeURIComponent(trackId)}`, {
 		method: 'PATCH',
 		headers: {'Content-Type': 'application/json'},
-		body: JSON.stringify({state, selectedCandidateId}),
+		body: JSON.stringify({state, selectedCandidateId, fields, artwork}),
 	  });
 	},
 
@@ -201,7 +242,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 				content,
 				dryRun: false,
 			}),
-		});
+		}).then(normalizeTrackResult);
 	},
 
 	deleteLyricsSidecar(track: Track): Promise<LyricsSidecarWriteResult> {
@@ -216,11 +257,11 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 				baseSidecarRevision: track.lyricsSidecar?.revision ?? '',
 				dryRun: false,
 			}),
-		});
+		}).then(normalizeTrackResult);
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {
-      return request<WriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/tags`, {
+      const result = await request<WriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/tags`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -233,6 +274,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
           provenance,
         }),
       });
+	      return normalizeTrackResult(result);
     },
 
 	async searchCandidates(track: Track, override?: CandidateSearchQuery): Promise<MatchCandidate[]> {
@@ -278,7 +320,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
         body: JSON.stringify({baseRevision, target: 'before'}),
-      });
+      }).then(normalizeTrackResult);
     },
 
     writeArtwork(track: Track, file: File): Promise<ArtworkWriteResult> {
@@ -286,7 +328,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		method: 'PUT',
 		headers: {'Content-Type': file.type || 'application/octet-stream', 'If-Match': `"${track.revision}"`},
 		body: file,
-	  });
+	  }).then(normalizeTrackResult);
 	},
 
 	updateProvider(providerId: string, enabled: boolean): Promise<ProviderConfig> {
@@ -303,7 +345,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0`, {
 		method: 'DELETE',
 		headers: {'If-Match': `"${track.revision}"`},
-	  });
+	  }).then(normalizeTrackResult);
 	},
 
 	applyCandidateArtwork(track: Track, candidateId: string): Promise<ArtworkWriteResult> {
@@ -311,7 +353,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		method: 'POST',
 		headers: {'Content-Type': 'application/json', 'If-Match': `"${track.revision}"`},
 		body: JSON.stringify({candidateId, baseRevision: track.revision, dryRun: false}),
-	  });
+	  }).then(normalizeTrackResult);
 	},
   };
 }

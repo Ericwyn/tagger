@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {APIError, createRealAPI} from '@/api/real';
+import {APIError, createRealAPI, normalizeTrack} from '@/api/real';
 import type {LibrarySummary, Track} from '@/types';
 
 const library: LibrarySummary = {
@@ -23,7 +23,10 @@ describe('real API client', () => {
     const api = createRealAPI(fetcher);
 
     await expect(api.getLibrary()).resolves.toEqual(library);
-    await expect(api.listTracks()).resolves.toEqual([track]);
+    const normalized = await api.listTracks();
+    expect(normalized).toEqual([expect.objectContaining(track)]);
+    expect(normalized[0].composers).toEqual([]);
+    expect(normalized[0].musicbrainzArtistIds).toEqual([]);
     expect(fetcher).toHaveBeenNthCalledWith(1, '/api/v1/libraries', expect.any(Object));
     expect(fetcher).toHaveBeenNthCalledWith(2, '/api/v1/tracks', expect.any(Object));
   });
@@ -146,7 +149,7 @@ describe('real API client', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({data: result}), {status: 200}));
     const api = createRealAPI(fetcher);
 
-    await expect(api.writeLyricsSidecar(current, '[00:01.00] hello')).resolves.toEqual(result);
+    await expect(api.writeLyricsSidecar(current, '[00:01.00] hello')).resolves.toEqual({...result, track: normalizeTrack(result.track)});
     const putInit = fetcher.mock.calls[0][1] as RequestInit;
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/lyrics-sidecar');
     expect(putInit.method).toBe('PUT');
@@ -155,7 +158,7 @@ describe('real API client', () => {
       baseRevision: 'rev-1', baseSidecarRevision: 'sidecar-old', content: '[00:01.00] hello', dryRun: false,
     });
 
-    await expect(api.deleteLyricsSidecar(updated)).resolves.toEqual(result);
+    await expect(api.deleteLyricsSidecar(updated)).resolves.toEqual({...result, track: normalizeTrack(result.track)});
     const deleteInit = fetcher.mock.calls[1][1] as RequestInit;
     expect(deleteInit.method).toBe('DELETE');
     expect(JSON.parse(String(deleteInit.body))).toEqual({baseRevision: 'rev-2', baseSidecarRevision: 'sidecar-new', dryRun: false});
@@ -328,7 +331,7 @@ describe('real API client', () => {
 	const api = createRealAPI(fetcher);
 
 	await expect(api.previewRevisionRestore('revlog/a', 'current-rev')).resolves.toEqual(preview);
-	await expect(api.restoreRevision('revlog/a', 'current-rev')).resolves.toEqual(restored);
+	await expect(api.restoreRevision('revlog/a', 'current-rev')).resolves.toEqual({...restored, track: normalizeTrack(restored.track)});
 	for (const [path, init] of fetcher.mock.calls) {
 	  expect(path).toMatch(/^\/api\/v1\/revisions\/revlog%2Fa\/restore/);
 	  expect(init).toEqual(expect.objectContaining({method: 'POST'}));
@@ -347,8 +350,8 @@ describe('real API client', () => {
 	const api = createRealAPI(fetcher);
 	const file = new File([new Uint8Array([137, 80, 78, 71])], 'cover.png', {type: 'image/png'});
 
-	await expect(api.writeArtwork(fullTrack, file)).resolves.toEqual(expect.objectContaining({track: uploadedTrack}));
-	await expect(api.deleteArtwork(uploadedTrack)).resolves.toEqual(expect.objectContaining({track: deletedTrack}));
+	await expect(api.writeArtwork(fullTrack, file)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(uploadedTrack)}));
+	await expect(api.deleteArtwork(uploadedTrack)).resolves.toEqual(expect.objectContaining({track: normalizeTrack(deletedTrack)}));
 	const uploadInit = fetcher.mock.calls[0][1] as RequestInit;
 	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/artwork/0');
 	expect(uploadInit).toEqual(expect.objectContaining({method: 'PUT', body: file}));
@@ -366,7 +369,7 @@ describe('real API client', () => {
 	}), {status: 200}));
 	const api = createRealAPI(fetcher);
 
-	await expect(api.applyCandidateArtwork(fullTrack, 'cand/apple')).resolves.toEqual(expect.objectContaining({track: updated}));
+	await expect(api.applyCandidateArtwork(fullTrack, 'cand/apple')).resolves.toEqual(expect.objectContaining({track: normalizeTrack(updated)}));
 	const [path, init] = fetcher.mock.calls[0] as [string, RequestInit];
 	expect(path).toBe('/api/v1/matches/tracks/trk-1/artwork');
 	expect(init.headers).toEqual(expect.objectContaining({'If-Match': '"provider-art-rev"'}));
