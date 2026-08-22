@@ -1,4 +1,4 @@
-import {render, screen, waitFor} from '@testing-library/react';
+import {render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, describe, expect, it} from 'vitest';
 import {App} from '@/App';
@@ -16,6 +16,15 @@ describe('Tagger app prototype', () => {
     expect(screen.queryByTitle('全局搜索快捷键')).not.toBeInTheDocument();
     expect(screen.queryByTitle('查看通知')).not.toBeInTheDocument();
     expect(screen.queryByTitle('账户与系统信息')).not.toBeInTheDocument();
+  });
+
+  it('keeps the theme control beside settings and leaves the far right for the player', async () => {
+    render(<App />);
+    const navigation = screen.getByRole('navigation', {name: '主导航'});
+    const buttons = within(navigation).getAllByRole('button');
+    expect(buttons[3]).toHaveTextContent('设置');
+    expect(buttons[4]).toHaveTextContent('主题');
+    expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
   });
 
   it('navigates between jobs, history and provider settings', async () => {

@@ -54,15 +54,18 @@ export function TopBar({page, onNavigate, dark, onToggleTheme, playerTrack, play
             <span>{label}</span>
           </button>
         ))}
+        <button
+          className="nav-theme-toggle"
+          title={dark ? '切换浅色主题' : '切换深色主题'}
+          aria-label={dark ? '切换浅色主题' : '切换深色主题'}
+          onClick={onToggleTheme}
+        >
+          {dark ? <SunMedium size={16} aria-hidden="true" /> : <MoonStar size={16} aria-hidden="true" />}
+          <span>主题</span>
+        </button>
       </nav>
 
       <GlobalPlayer track={playerTrack} playing={playerPlaying} onPlayingChange={onPlayerPlayingChange} onClose={onPlayerClose} />
-
-      <div className="top-actions">
-        <button className="icon-button" title={dark ? '切换浅色主题' : '切换深色主题'} onClick={onToggleTheme}>
-          {dark ? <SunMedium size={18} /> : <MoonStar size={18} />}
-        </button>
-      </div>
     </header>
   );
 }
