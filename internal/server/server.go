@@ -15,18 +15,20 @@ import (
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
+	"github.com/ericwyn/tagger/internal/providers"
 )
 
 type Server struct {
 	h             *hserver.Hertz
 	library       *library.Service
 	writer        *filewrite.Writer
+	providers     *providers.Registry
 	frontend      fs.FS
 	version       string
 	tagEngineInfo string
 }
 
-func New(listen string, libraryService *library.Service, writer *filewrite.Writer, frontend fs.FS, version, tagEngineInfo string) *Server {
+func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, frontend fs.FS, version, tagEngineInfo string) *Server {
 	h := hserver.Default(
 		hserver.WithHostPorts(listen),
 		hserver.WithMaxRequestBodySize(1<<20),
@@ -35,6 +37,7 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 		h:             h,
 		library:       libraryService,
 		writer:        writer,
+		providers:     providerRegistry,
 		frontend:      frontend,
 		version:       version,
 		tagEngineInfo: tagEngineInfo,
@@ -58,6 +61,8 @@ func (s *Server) routes() {
 	api.GET("/tracks", s.handleTracks)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
+	api.GET("/providers", s.handleProviders)
+	api.POST("/matches/tracks/search", s.handleMatchSearch)
 
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
@@ -200,6 +205,75 @@ func (s *Server) handleWriteError(c *app.RequestContext, err error) {
 	default:
 		s.writeError(c, consts.StatusInternalServerError, "write_failed", err.Error())
 	}
+}
+
+func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeData(c, []providers.Descriptor{})
+		return
+	}
+	s.writeData(c, s.providers.Descriptors())
+}
+
+type matchSearchRequest struct {
+	FileID string `json:"fileId"`
+	Query  struct {
+		Title           string   `json:"title"`
+		Artists         []string `json:"artists"`
+		Album           string   `json:"album"`
+		DurationSeconds int64    `json:"durationSeconds"`
+	} `json:"query"`
+	ProviderIDs      []string `json:"providerIds"`
+	LimitPerProvider int      `json:"limitPerProvider"`
+}
+
+func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器尚未初始化")
+		return
+	}
+	var request matchSearchRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	query := providers.Query{
+		Title: request.Query.Title, Artists: request.Query.Artists, Album: request.Query.Album,
+		DurationSeconds: request.Query.DurationSeconds,
+	}
+	if request.FileID != "" {
+		track, err := s.library.Track(request.FileID)
+		if errors.Is(err, library.ErrTrackNotFound) {
+			s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+			return
+		}
+		if err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if query.Title == "" {
+			query.Title = track.Title
+		}
+		if len(query.Artists) == 0 {
+			query.Artists = track.Artists
+		}
+		if query.Album == "" {
+			query.Album = track.Album
+		}
+		if query.DurationSeconds == 0 {
+			query.DurationSeconds = track.DurationSeconds
+		}
+	}
+	result, err := s.providers.Search(ctx, query, request.ProviderIDs, request.LimitPerProvider)
+	if errors.Is(err, providers.ErrProviderNotFound) {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.writeData(c, result)
 }
 
 func (s *Server) handleIndex(_ context.Context, c *app.RequestContext) {

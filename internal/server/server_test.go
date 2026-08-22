@@ -13,11 +13,25 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
+	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/tags"
 )
 
 type serverEngine struct{}
+
+type serverProvider struct{}
+
+func (serverProvider) Descriptor() providers.Descriptor {
+	return providers.Descriptor{ID: "test-provider", Name: "Test Provider", Enabled: true, Health: providers.HealthReady}
+}
+
+func (serverProvider) Search(_ context.Context, query providers.Query, _ int) ([]providers.Candidate, error) {
+	return []providers.Candidate{{
+		ProviderID: "test-provider", ExternalID: "external-1", Title: query.Title,
+		Artists: query.Artists, Album: query.Album, DurationSeconds: query.DurationSeconds,
+	}}, nil
+}
 
 func (serverEngine) Read(_ context.Context, path string) (tags.Snapshot, error) {
 	name := filepath.Base(path)
@@ -130,6 +144,32 @@ func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {
 	}
 }
 
+func TestProviderListAndTrackMatchSearch(t *testing.T) {
+	s := newTestServer(t)
+	providerList := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/providers", nil)
+	if providerList.Code != 200 || !containsJSON(providerList.Body.Bytes(), `"id":"test-provider"`) {
+		t.Fatalf("providers = %d %s", providerList.Code, providerList.Body.String())
+	}
+
+	allTracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)
+	var listEnvelope struct {
+		Data struct {
+			Tracks []struct {
+				ID string `json:"id"`
+			} `json:"tracks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(allTracks.Body.Bytes(), &listEnvelope); err != nil || len(listEnvelope.Data.Tracks) == 0 {
+		t.Fatalf("decode tracks: %v", err)
+	}
+	body := []byte(`{"fileId":"` + listEnvelope.Data.Tracks[0].ID + `","providerIds":["test-provider"],"limitPerProvider":3}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/tracks/search", &ut.Body{Body: bytes.NewReader(body), Len: len(body)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"providerId":"test-provider"`) || !containsJSON(response.Body.Bytes(), `"value":"Alpha"`) {
+		t.Fatalf("match = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	root := t.TempDir()
@@ -154,7 +194,8 @@ func newTestServer(t *testing.T) *Server {
 		"index.html":    &fstest.MapFile{Data: []byte("<main>Tagger</main>")},
 		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('tagger')")},
 	}
-	return New("127.0.0.1:0", service, writer, fs.FS(frontend), "test-version", serverEngine{}.Version())
+	registry := providers.NewRegistry(serverProvider{})
+	return New("127.0.0.1:0", service, writer, registry, fs.FS(frontend), "test-version", serverEngine{}.Version())
 }
 
 func containsJSON(body []byte, fragment string) bool {

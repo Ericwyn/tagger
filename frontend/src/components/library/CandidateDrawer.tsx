@@ -47,19 +47,30 @@ export function CandidateDrawer({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
   const [applying, setApplying] = useState(false);
+  const [includeLyrics, setIncludeLyrics] = useState(false);
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
+    setIncludeLyrics(false);
   }, [candidates]);
 
   useEffect(() => {
     if (!open) setSelectedId(null);
   }, [open]);
 
+  useEffect(() => {
+    setIncludeLyrics(false);
+  }, [selectedId]);
+
   const selected = useMemo(
     () => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0],
     [candidates, selectedId],
   );
+
+  useEffect(() => {
+    if (!selected) return;
+    setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
+  }, [selected]);
 
   if (!open || !track) return null;
 
@@ -80,17 +91,17 @@ export function CandidateDrawer({
       };
     }
     return {
-      title: fields.has('title') ? selected.title.value : track.title,
-      artists: fields.has('artists') ? selected.artists.value : track.artists,
-      album: fields.has('album') ? selected.album.value : track.album,
-      albumArtists: fields.has('albumArtists') ? selected.albumArtists.value : track.albumArtists,
-      trackNumber: fields.has('track') ? selected.trackNumber.value : track.trackNumber,
-      trackTotal: fields.has('track') ? selected.trackTotal.value : track.trackTotal,
-      discNumber: fields.has('track') ? selected.discNumber.value : track.discNumber,
+      title: fields.has('title') && selected.title.value ? selected.title.value : track.title,
+      artists: fields.has('artists') && selected.artists.value.length > 0 ? selected.artists.value : track.artists,
+      album: fields.has('album') && selected.album.value ? selected.album.value : track.album,
+      albumArtists: fields.has('albumArtists') && selected.albumArtists.value.length > 0 ? selected.albumArtists.value : track.albumArtists,
+      trackNumber: fields.has('track') && selected.trackNumber.value > 0 ? selected.trackNumber.value : track.trackNumber,
+      trackTotal: fields.has('track') && selected.trackTotal.value > 0 ? selected.trackTotal.value : track.trackTotal,
+      discNumber: fields.has('track') && selected.discNumber.value > 0 ? selected.discNumber.value : track.discNumber,
       discTotal: track.discTotal,
-      year: fields.has('year') ? selected.year.value : track.year,
-      genres: fields.has('genres') ? selected.genres.value : track.genres,
-      lyrics: track.lyrics,
+      year: fields.has('year') && selected.year.value > 0 ? selected.year.value : track.year,
+      genres: fields.has('genres') && selected.genres.value.length > 0 ? selected.genres.value : track.genres,
+      lyrics: includeLyrics && selected.hasLyrics && selected.lyrics?.value ? selected.lyrics.value : track.lyrics,
     };
   };
 
@@ -155,7 +166,7 @@ export function CandidateDrawer({
                     <span className="candidate-copy">
                       <strong>{candidate.title.value}</strong>
                       <span>{candidate.artists.value.join(' / ')}</span>
-                      <small>{candidate.album.value} · {candidate.year.value}</small>
+                      <small>{candidate.album.value || '专辑未知'} · {candidate.year.value || '年份未知'}</small>
                       <em>{candidate.providerName}</em>
                     </span>
                     <span className={cn('score-ring', candidate.score < 0.8 && 'is-low')}>
@@ -195,19 +206,25 @@ export function CandidateDrawer({
                 <div className="field-policy">
                   <div>
                     <strong>选择要采用的字段</strong>
-                    <button onClick={() => setFields(new Set(fieldOptions.map((item) => item.id)))}>全选</button>
+                    <button onClick={() => setFields(new Set(
+                      fieldOptions.filter((item) => candidateHasField(selected, item.id)).map((item) => item.id),
+                    ))}>全选</button>
                   </div>
                   <div className="field-chips">
-                    {fieldOptions.map((field) => (
-                      <button
-                        key={field.id}
-                        className={cn(fields.has(field.id) && 'is-active')}
-                        onClick={() => toggleField(field.id)}
-                      >
-                        <span>{fields.has(field.id) && <Check size={11} />}</span>
-                        {field.label}
-                      </button>
-                    ))}
+                    {fieldOptions.map((field) => {
+                      const available = candidateHasField(selected, field.id);
+                      return (
+                        <button
+                          key={field.id}
+                          className={cn(available && fields.has(field.id) && 'is-active')}
+                          disabled={!available}
+                          onClick={() => toggleField(field.id)}
+                        >
+                          <span>{available && fields.has(field.id) && <Check size={11} />}</span>
+                          {field.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -219,10 +236,12 @@ export function CandidateDrawer({
                   <DiffRow
                     label="音轨"
                     current={track.trackNumber ? `${track.trackNumber} / ${track.trackTotal || '—'}` : '空'}
-                    candidate={`${selected.trackNumber.value} / ${selected.trackTotal.value}`}
+                    candidate={selected.trackNumber.value > 0
+                      ? `${selected.trackNumber.value} / ${selected.trackTotal.value || '—'}`
+                      : '来源未提供'}
                     active={fields.has('track')}
                   />
-                  <DiffRow label="年份" current={String(track.year || '空')} candidate={String(selected.year.value)} active={fields.has('year')} />
+                  <DiffRow label="年份" current={String(track.year || '空')} candidate={String(selected.year.value || '来源未提供')} active={fields.has('year')} />
                   <DiffRow label="风格" current={track.genres.join(', ') || '空'} candidate={selected.genres.value.join(', ')} active={fields.has('genres')} />
                 </div>
 
@@ -233,7 +252,12 @@ export function CandidateDrawer({
                     <span><strong>封面</strong><small>{selected.hasArtwork ? '有可用图片' : '当前来源不提供'}</small></span>
                   </label>
                   <label className={cn(selected.hasLyrics && 'is-available')}>
-                    <input type="checkbox" disabled={!selected.hasLyrics} />
+                    <input
+                      type="checkbox"
+                      disabled={!selected.hasLyrics || !selected.lyrics?.value}
+                      checked={includeLyrics}
+                      onChange={(event) => setIncludeLyrics(event.target.checked)}
+                    />
                     <Music2 size={16} />
                     <span><strong>歌词</strong><small>{selected.hasLyrics ? '含同步歌词' : '可改用 LRCLIB'}</small></span>
                   </label>
@@ -280,4 +304,16 @@ function DiffRow({label, current, candidate, active}: {label: string; current: s
       <span className={cn(!same && active && 'is-changed')}>{candidate}</span>
     </div>
   );
+}
+
+function candidateHasField(candidate: MatchCandidate, field: FieldID): boolean {
+  switch (field) {
+    case 'title': return Boolean(candidate.title.value);
+    case 'artists': return candidate.artists.value.length > 0;
+    case 'album': return Boolean(candidate.album.value);
+    case 'albumArtists': return candidate.albumArtists.value.length > 0;
+    case 'track': return candidate.trackNumber.value > 0 || candidate.trackTotal.value > 0 || candidate.discNumber.value > 0;
+    case 'year': return candidate.year.value > 0;
+    case 'genres': return candidate.genres.value.length > 0;
+  }
 }

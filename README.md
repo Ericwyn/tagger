@@ -14,13 +14,15 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 曲库、曲目列表、曲目详情、搜索筛选和重新扫描 API。
 - revision 冲突检查、显式字段 patch、临时副本、写后重读验证和原子替换。
 - 前端标签表单已经接通真实安全写入 API。
-- 前端生产构建读取真实 Go API；尚未接通的抓取器、任务和历史页面继续使用明确标注的原型数据。
+- MusicBrainz、LRCLIB、Apple/iTunes 官方数据源策略、统一候选评分和多源失败隔离。
+- 前端数据源设置、候选搜索、字段选择和 LRCLIB 歌词采用已经接通真实 Go API。
+- 前端生产构建读取真实 Go API；任务和历史页面暂时继续使用明确标注的原型数据。
 
 正在实现：
 
 - SQLite 修订历史和恢复。
 - SQLite 持久化扫描索引和任务。
-- MusicBrainz、LRCLIB、Apple Music、网易云、酷我等 provider 策略。
+- 网易云、酷我实验性 provider 的实际适配、缓存与配置健康检查。
 
 写标签会直接修改曲库中的音乐文件。首次使用前请确认音乐目录有独立备份；revision 冲突和写后验证不能代替文件系统备份。
 
@@ -81,6 +83,7 @@ internal/domain/     前后端统一领域模型
 internal/scanner/    文件发现、并发提取和归一化
 internal/tags/       标签引擎接口与 TagLib-WASM 适配器
 internal/library/    线程安全的曲库查询服务
+internal/providers/  抓取策略、统一评分和官方数据源客户端
 internal/server/     REST API、健康检查和 SPA 静态资源
 frontend/            React 工作台
 web/                 嵌入式前端资源

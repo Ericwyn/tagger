@@ -6,8 +6,8 @@ web/dist/*
 
 # Go build output
 /dist/
-tagger
-tagger.exe
+/tagger
+/tagger.exe
 
 # Local tooling and editor state
 .DS_Store

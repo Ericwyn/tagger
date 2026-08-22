@@ -92,4 +92,24 @@ describe('real API client', () => {
     expect(serialized).not.toHaveProperty('trackNumber');
     expect(serialized).not.toHaveProperty('trackTotal');
   });
+
+  it('searches real provider candidates and lists provider health', async () => {
+    const candidate = {id: 'cand-1', providerId: 'musicbrainz', title: {value: 'Song', source: 'MusicBrainz'}};
+    const provider = {id: 'musicbrainz', name: 'MusicBrainz', health: 'ready', enabled: true};
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: {candidates: [candidate], providers: {musicbrainz: {status: 'ok'}}}}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: [provider]}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.searchCandidates({...track, artists: ['Artist'], album: 'Album', durationSeconds: 180} as Track)).resolves.toEqual([candidate]);
+    await expect(api.listProviders()).resolves.toEqual([provider]);
+    const searchInit = fetcher.mock.calls[0][1] as RequestInit;
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/tracks/search');
+    expect(JSON.parse(String(searchInit.body))).toEqual(expect.objectContaining({
+      fileId: 'trk-1',
+      query: {title: 'Song', artists: ['Artist'], album: 'Album', durationSeconds: 180},
+      limitPerProvider: 5,
+    }));
+    expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers');
+  });
 });

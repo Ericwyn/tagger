@@ -38,14 +38,14 @@ export async function updateTrack(trackId: string, patch: TrackPatch): Promise<T
   return result.track;
 }
 
-// Provider, job and revision views remain intentionally backed by the mock
-// strategy until their corresponding Go modules are connected.
+// Job and revision views remain intentionally backed by the mock strategy
+// until their corresponding persistent Go modules are connected.
 export function searchCandidates(track: Track): Promise<MatchCandidate[]> {
-  return mock.searchCandidates(track);
+  return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track);
 }
 
 export function listProviders(): Promise<ProviderConfig[]> {
-  return mock.listProviders();
+  return apiReadMode === 'mock' ? mock.listProviders() : real.listProviders();
 }
 
 export function listJobs(): Promise<Job[]> {

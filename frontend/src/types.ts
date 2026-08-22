@@ -82,6 +82,7 @@ export interface MatchCandidate {
   discNumber: CandidateField<number>;
   durationSeconds: CandidateField<number>;
   genres: CandidateField<string[]>;
+  lyrics?: CandidateField<string>;
   hasLyrics: boolean;
   hasArtwork: boolean;
   coverTone: CoverTone;

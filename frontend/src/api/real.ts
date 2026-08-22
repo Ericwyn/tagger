@@ -1,4 +1,4 @@
-import type {LibrarySummary, Track, TrackPatch} from '@/types';
+import type {LibrarySummary, MatchCandidate, ProviderConfig, Track, TrackPatch} from '@/types';
 
 interface DataEnvelope<T> {
   data: T;
@@ -102,6 +102,31 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
           dryRun: false,
         }),
       });
+    },
+
+    async searchCandidates(track: Track): Promise<MatchCandidate[]> {
+      const result = await request<{candidates: MatchCandidate[]; providers: Record<string, unknown>}>(
+        '/api/v1/matches/tracks/search',
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            fileId: track.id,
+            query: {
+              title: track.title,
+              artists: track.artists,
+              album: track.album,
+              durationSeconds: track.durationSeconds,
+            },
+            limitPerProvider: 5,
+          }),
+        },
+      );
+      return result.candidates;
+    },
+
+    listProviders(): Promise<ProviderConfig[]> {
+      return request<ProviderConfig[]>('/api/v1/providers');
     },
   };
 }

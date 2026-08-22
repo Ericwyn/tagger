@@ -1,0 +1,40 @@
+package itunes
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/ericwyn/tagger/internal/providers"
+)
+
+func TestSearchMapsAppleCatalogResult(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		query := request.URL.Query()
+		if query.Get("country") != "CN" || query.Get("media") != "music" || query.Get("entity") != "song" || query.Get("limit") != "3" {
+			t.Errorf("query = %v", query)
+		}
+		body := `{"resultCount":1,"results":[{"trackId":99,"trackName":"再回首","artistName":"姜育恒","collectionName":"多年以后","collectionArtistName":"姜育恒","trackNumber":1,"trackCount":10,"discNumber":1,"discCount":1,"releaseDate":"1989-01-01T00:00:00Z","primaryGenreName":"Mandopop","trackTimeMillis":255000,"artworkUrl100":"https://example.test/100x100bb.jpg"}]}`
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+
+	client := New(Config{BaseURL: "https://itunes.test/search", Country: "CN", Client: httpClient})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "再回首", Artists: []string{"姜育恒"}}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].ExternalID != "99" || candidates[0].TrackTotal != 10 || candidates[0].Year != 1989 {
+		t.Fatalf("candidate = %#v", candidates)
+	}
+	if candidates[0].ArtworkURL != "https://example.test/600x600bb.jpg" {
+		t.Fatalf("artwork = %q", candidates[0].ArtworkURL)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}
