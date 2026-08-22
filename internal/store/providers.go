@@ -116,3 +116,50 @@ func (s *Store) SaveProviderEnabled(ctx context.Context, providerID string, enab
 		providerID, enabled, formatTime(s.now().UTC()))
 	return err
 }
+
+// LoadProviderConfigurations returns the persisted strategy-owned settings.
+// Unknown provider IDs are intentionally retained so upgrading the binary
+// does not silently discard settings for an adapter that is temporarily not
+// registered.
+func (s *Store) LoadProviderConfigurations(ctx context.Context) (map[string]map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT provider_id, config_json FROM provider_settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]map[string]string)
+	for rows.Next() {
+		var id string
+		var payload []byte
+		if err := rows.Scan(&id, &payload); err != nil {
+			return nil, err
+		}
+		values := make(map[string]string)
+		if len(payload) > 0 && string(payload) != "{}" {
+			if err := json.Unmarshal(payload, &values); err != nil {
+				return nil, fmt.Errorf("decode provider configuration %s: %w", id, err)
+			}
+		}
+		result[id] = values
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) SaveProviderConfiguration(ctx context.Context, providerID string, values map[string]string) error {
+	if values == nil {
+		values = map[string]string{}
+	}
+	payload, err := json.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("encode provider configuration: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO provider_settings(provider_id, enabled, config_json, updated_at)
+		VALUES(?, COALESCE((SELECT enabled FROM provider_settings WHERE provider_id=?), 1), ?, ?)
+		ON CONFLICT(provider_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at`,
+		providerID, providerID, payload, formatTime(s.now().UTC()))
+	if err != nil {
+		return fmt.Errorf("save provider configuration: %w", err)
+	}
+	return nil
+}

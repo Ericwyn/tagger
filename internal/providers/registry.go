@@ -14,6 +14,8 @@ import (
 var ErrProviderNotFound = errors.New("provider not found")
 var ErrArtworkReferenceNotFound = errors.New("artwork reference not found")
 var ErrProviderUnavailable = errors.New("provider is unavailable")
+var ErrProviderNotConfigurable = errors.New("provider does not expose runtime configuration")
+var ErrProviderConfigInvalid = errors.New("provider configuration is invalid")
 
 type Persistence interface {
 	LoadProviderCache(context.Context, string) ([]byte, bool, error)
@@ -24,6 +26,8 @@ type Persistence interface {
 	DeleteExpiredArtworkReferences(context.Context) error
 	LoadProviderSettings(context.Context) (map[string]bool, error)
 	SaveProviderEnabled(context.Context, string, bool) error
+	LoadProviderConfigurations(context.Context) (map[string]map[string]string, error)
+	SaveProviderConfiguration(context.Context, string, map[string]string) error
 }
 
 type ArtworkReference struct {
@@ -41,11 +45,13 @@ type Registry struct {
 	persistence Persistence
 	settingsMu  sync.RWMutex
 	enabled     map[string]bool
+	configs     map[string]map[string]string
+	configError map[string]string
 }
 
 func NewRegistry(strategies ...Strategy) *Registry {
 	registry := &Registry{
-		strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies)), artworks: make(map[string]ArtworkReference), enabled: make(map[string]bool),
+		strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies)), artworks: make(map[string]ArtworkReference), enabled: make(map[string]bool), configs: make(map[string]map[string]string), configError: make(map[string]string),
 	}
 	for _, strategy := range strategies {
 		if strategy == nil {
@@ -75,6 +81,10 @@ func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) 
 	if err := persistence.DeleteExpiredArtworkReferences(ctx); err != nil {
 		return err
 	}
+	configurations, err := persistence.LoadProviderConfigurations(ctx)
+	if err != nil {
+		return err
+	}
 	payload, err := persistence.LoadArtworkReferences(ctx)
 	if err != nil {
 		return err
@@ -92,7 +102,23 @@ func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) 
 	r.artworkMu.Unlock()
 	r.settingsMu.Lock()
 	r.enabled = settings
+	r.configs = cloneProviderConfigurations(configurations)
 	r.settingsMu.Unlock()
+	for id, values := range configurations {
+		strategy, found := r.strategies[id]
+		if !found {
+			continue
+		}
+		configurable, ok := strategy.(Configurable)
+		if !ok || len(values) == 0 {
+			continue
+		}
+		if err := configurable.Configure(values); err != nil {
+			r.settingsMu.Lock()
+			r.configError[id] = err.Error()
+			r.settingsMu.Unlock()
+		}
+	}
 	return persistence.DeleteExpiredProviderCache(ctx)
 }
 
@@ -118,17 +144,97 @@ func (r *Registry) SetEnabled(ctx context.Context, id string, enabled bool) (Des
 
 func (r *Registry) descriptor(id string) Descriptor {
 	descriptor := r.strategies[id].Descriptor()
+	if configurable, ok := r.strategies[id].(Configurable); ok {
+		descriptor.Config = sanitizeConfigFields(configurable.ConfigFields())
+	}
 	r.settingsMu.RLock()
 	enabled, overridden := r.enabled[id]
+	configError := r.configError[id]
 	r.settingsMu.RUnlock()
 	if overridden {
 		descriptor.Enabled = enabled
+	}
+	if configError != "" {
+		descriptor.ConfigError = configError
+		if descriptor.Enabled {
+			descriptor.Health = HealthMisconfigured
+		}
 	}
 	if !descriptor.Enabled {
 		descriptor.Health = HealthDisabled
 	}
 	descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
 	return descriptor
+}
+
+// SetConfig applies only the supplied keys. Omitting a key keeps its current
+// value, which lets the UI leave masked secrets untouched.
+func (r *Registry) SetConfig(ctx context.Context, id string, values map[string]string) (Descriptor, error) {
+	strategy, found := r.strategies[id]
+	if !found {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderNotFound, id)
+	}
+	configurable, ok := strategy.(Configurable)
+	if !ok {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderNotConfigurable, id)
+	}
+	schema := configurable.ConfigFields()
+	allowed := make(map[string]struct{}, len(schema))
+	for _, field := range schema {
+		allowed[field.Key] = struct{}{}
+	}
+	for key := range values {
+		if _, exists := allowed[key]; !exists {
+			return Descriptor{}, fmt.Errorf("%w: unknown field %q", ErrProviderConfigInvalid, key)
+		}
+	}
+	if err := configurable.Configure(values); err != nil {
+		return Descriptor{}, fmt.Errorf("%w: %v", ErrProviderConfigInvalid, err)
+	}
+	r.settingsMu.Lock()
+	if r.configs[id] == nil {
+		r.configs[id] = make(map[string]string)
+	}
+	for key, value := range values {
+		r.configs[id][key] = value
+	}
+	delete(r.configError, id)
+	configuration := cloneStringMap(r.configs[id])
+	r.settingsMu.Unlock()
+	if r.persistence != nil {
+		if err := r.persistence.SaveProviderConfiguration(ctx, id, configuration); err != nil {
+			return Descriptor{}, err
+		}
+	}
+	return r.descriptor(id), nil
+}
+
+func sanitizeConfigFields(fields []ConfigField) []ConfigField {
+	result := make([]ConfigField, len(fields))
+	for index, field := range fields {
+		if field.Secret {
+			field.Configured = field.Configured || field.Value != ""
+			field.Value = ""
+		}
+		result[index] = field
+	}
+	return result
+}
+
+func cloneProviderConfigurations(values map[string]map[string]string) map[string]map[string]string {
+	result := make(map[string]map[string]string, len(values))
+	for id, config := range values {
+		result[id] = cloneStringMap(config)
+	}
+	return result
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error) {

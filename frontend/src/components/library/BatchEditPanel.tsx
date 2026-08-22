@@ -90,6 +90,8 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
   const [templateName, setTemplateName] = useState('');
   const [templateMessage, setTemplateMessage] = useState('');
   const [artworkAction, setArtworkAction] = useState<'keep' | 'replace' | 'delete'>('keep');
+  const [artworkSource, setArtworkSource] = useState<'upload' | 'track'>('upload');
+  const [artworkSourceTrackId, setArtworkSourceTrackId] = useState('');
   const [artworkFile, setArtworkFile] = useState<File>();
   const [artworkMaxSize, setArtworkMaxSize] = useState(0);
 
@@ -102,6 +104,8 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
       setTemplateName('');
       setTemplateMessage('');
       setArtworkAction('keep');
+      setArtworkSource('upload');
+      setArtworkSourceTrackId('');
       setArtworkFile(undefined);
       setArtworkMaxSize(0);
     }
@@ -182,9 +186,11 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
         before: track.artworkCount > 0 ? `${track.artworkCount} 张嵌入封面` : '无封面',
         after: artworkAction === 'delete'
           ? '删除封面'
-          : artworkFile
-            ? `${artworkFile.name}${artworkMaxSize ? ` · ${artworkMaxSize}×${artworkMaxSize}` : ''}`
-            : '等待选择图片',
+            : artworkFile
+              ? `${artworkFile.name}${artworkMaxSize ? ` · ${artworkMaxSize}×${artworkMaxSize}` : ''}`
+              : artworkSourceTrackId
+                ? `取自 ${tracks.find((item) => item.id === artworkSourceTrackId)?.title || '已选曲目'}${artworkMaxSize ? ` · ${artworkMaxSize}×${artworkMaxSize}` : ''}`
+              : '等待选择图片',
       });
     }
     return {track, changes};
@@ -195,8 +201,18 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
   const writableCount = tracks.filter((track) => track.writable).length;
   const readOnlyCount = tracks.length - writableCount;
   const invalidReplace = operations.some((operation) => operation.mode === 'replace' && !operation.find?.trim());
-  const artworkReady = artworkAction !== 'replace' || Boolean(artworkFile);
+  const artworkSourceTrack = tracks.find((track) => track.id === artworkSourceTrackId);
+  const artworkReady = artworkAction !== 'replace' || Boolean(artworkFile || artworkSourceTrack);
   const canApply = !saving && !invalidReplace && artworkReady && (operations.length > 0 || sequenceTracks || artworkAction !== 'keep') && writableCount > 0;
+  const apply = () => {
+    if (artworkAction === 'keep') {
+      void onApply(operations, sequenceTracks);
+      return;
+    }
+    const artwork: BatchArtworkInput = {action: artworkAction, file: artworkFile, maxSize: artworkMaxSize};
+    if (artworkSourceTrack) artwork.sourceTrack = artworkSourceTrack;
+    void onApply(operations, sequenceTracks, artwork);
+  };
 
   return (
     <div className="candidate-layer batch-edit-layer">
@@ -293,12 +309,19 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
             </label>
             {artworkAction === 'replace' && (
               <div className="batch-artwork-replace">
-                <input className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" id="batch-artwork-input" onChange={(event) => { setArtworkFile(event.target.files?.[0]); event.target.value = ''; }} />
-                <label className="secondary-button batch-artwork-file" htmlFor="batch-artwork-input"><Upload size={15} /> {artworkFile ? artworkFile.name : '选择封面图片'}</label>
+                <label className="batch-artwork-source"><span>封面来源</span><select aria-label="封面来源" value={artworkSource} onChange={(event) => { const source = event.target.value as 'upload' | 'track'; setArtworkSource(source); if (source === 'upload') setArtworkSourceTrackId(''); else { setArtworkFile(undefined); setArtworkSourceTrackId(tracks.find((track) => track.artworkCount > 0)?.id ?? ''); } }}><option value="upload">从本地上传</option><option value="track" disabled={tracks.every((track) => track.artworkCount === 0)}>从选中歌曲提取</option></select></label>
+                {artworkSource === 'upload' ? (
+                  <>
+                    <input className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" id="batch-artwork-input" onChange={(event) => { setArtworkFile(event.target.files?.[0]); setArtworkSourceTrackId(''); event.target.value = ''; }} />
+                    <label className="secondary-button batch-artwork-file" htmlFor="batch-artwork-input"><Upload size={15} /> {artworkFile ? artworkFile.name : '选择封面图片'}</label>
+                  </>
+                ) : (
+                  <label className="batch-artwork-source"><span>选择歌曲</span><select aria-label="封面来源曲目" value={artworkSourceTrackId} onChange={(event) => setArtworkSourceTrackId(event.target.value)}>{tracks.filter((track) => track.artworkCount > 0).map((track) => <option key={track.id} value={track.id}>{track.title || track.fileName} · {track.artworkWidth && track.artworkHeight ? `${track.artworkWidth}×${track.artworkHeight}` : '已有封面'}</option>)}</select></label>
+                )}
                 <label className="batch-artwork-size"><span>写入尺寸</span><select aria-label="批量封面写入尺寸" value={artworkMaxSize} onChange={(event) => setArtworkMaxSize(Number(event.target.value))}><option value={0}>保留原图</option><option value={1000}>居中裁剪至 1000×1000</option><option value={500}>居中裁剪至 500×500</option></select></label>
               </div>
             )}
-            {artworkAction === 'replace' && !artworkFile && <small className="batch-artwork-hint"><ImagePlus size={14} /> 请选择图片后才会启用批量写入。</small>}
+            {artworkAction === 'replace' && !artworkFile && !artworkSourceTrack && <small className="batch-artwork-hint"><ImagePlus size={14} /> 请选择本地图片或已有封面后才会启用批量写入。</small>}
           </section>
 
           <section className="batch-edit-section batch-edit-preview">
@@ -321,7 +344,7 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
 
         <footer className="batch-edit-footer">
           <button className="secondary-button" onClick={onClose}>取消</button>
-          <button className="primary-button" disabled={!canApply} onClick={() => void (artworkAction === 'keep' ? onApply(operations, sequenceTracks) : onApply(operations, sequenceTracks, {action: artworkAction, file: artworkFile, maxSize: artworkMaxSize}))}>
+          <button className="primary-button" disabled={!canApply} onClick={apply}>
             {saving ? <LoaderCircle className="spin" size={15} /> : <Wand2 size={15} />}
             {saving ? '正在逐文件写入…' : `应用到 ${writableCount} 首`}
           </button>

@@ -2050,7 +2050,8 @@ func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {
 }
 
 type providerUpdateRequest struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool             `json:"enabled,omitempty"`
+	Config  map[string]string `json:"config,omitempty"`
 }
 
 func (s *Server) handleProviderUpdate(ctx context.Context, c *app.RequestContext) {
@@ -2063,13 +2064,28 @@ func (s *Server) handleProviderUpdate(ctx context.Context, c *app.RequestContext
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
 		return
 	}
-	descriptor, err := s.providers.SetEnabled(ctx, c.Param("id"), request.Enabled)
+	if request.Enabled == nil && request.Config == nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "至少提供 enabled 或 config")
+		return
+	}
+	var descriptor providers.Descriptor
+	var err error
+	if request.Enabled != nil {
+		descriptor, err = s.providers.SetEnabled(ctx, c.Param("id"), *request.Enabled)
+	}
+	if err == nil && request.Config != nil {
+		descriptor, err = s.providers.SetConfig(ctx, c.Param("id"), request.Config)
+	}
 	if errors.Is(err, providers.ErrProviderNotFound) {
 		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
 		return
 	}
 	if errors.Is(err, providers.ErrProviderUnavailable) {
 		s.writeError(c, consts.StatusUnprocessableEntity, "provider_unavailable", err.Error())
+		return
+	}
+	if errors.Is(err, providers.ErrProviderNotConfigurable) || errors.Is(err, providers.ErrProviderConfigInvalid) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "provider_config_invalid", err.Error())
 		return
 	}
 	if err != nil {
@@ -2093,7 +2109,7 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusUnprocessableEntity, "provider_disabled", "请先启用数据来源")
 		return
 	}
-	query := providers.Query{Title: "Imagine", Artists: []string{"John Lennon"}}
+	query := providers.Query{Title: "最佳歌手", Artists: []string{"许嵩"}}
 	limit := 1
 	probeArtwork := false
 	logs := []providerTestLog{{Level: "info", Stage: "request", Message: "开始数据源测试"}}

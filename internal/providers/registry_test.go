@@ -20,6 +20,32 @@ type countingStrategy struct {
 	calls      int
 }
 
+type configurableStrategy struct {
+	config map[string]string
+}
+
+func (strategy *configurableStrategy) Descriptor() Descriptor {
+	return Descriptor{ID: "configurable", Name: "Configurable", Enabled: true, Health: HealthReady}
+}
+
+func (strategy *configurableStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
+	return []Candidate{{ProviderID: "configurable", ExternalID: strategy.config["baseUrl"], Title: "Song"}}, nil
+}
+
+func (strategy *configurableStrategy) ConfigFields() []ConfigField {
+	return []ConfigField{{Key: "baseUrl", Label: "Base URL", Type: "url", Value: strategy.config["baseUrl"]}, {Key: "auth", Label: "Auth", Type: "password", Value: strategy.config["auth"], Secret: true}}
+}
+
+func (strategy *configurableStrategy) Configure(values map[string]string) error {
+	if strategy.config == nil {
+		strategy.config = make(map[string]string)
+	}
+	for key, value := range values {
+		strategy.config[key] = value
+	}
+	return nil
+}
+
 func (strategy *countingStrategy) Descriptor() Descriptor { return strategy.descriptor }
 func (strategy *countingStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
 	strategy.calls++
@@ -151,5 +177,20 @@ func TestRegistryRejectsEnablingUnavailableExperimentalProvider(t *testing.T) {
 	_, err := registry.SetEnabled(context.Background(), "netease", true)
 	if !errors.Is(err, ErrProviderUnavailable) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRegistryAppliesAndMasksProviderConfiguration(t *testing.T) {
+	strategy := &configurableStrategy{config: map[string]string{"baseUrl": "https://initial.test", "auth": "secret"}}
+	registry := NewRegistry(strategy)
+	descriptor, err := registry.SetConfig(context.Background(), "configurable", map[string]string{"baseUrl": "https://updated.test", "auth": "new-secret"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(descriptor.Config) != 2 || descriptor.Config[0].Value != "https://updated.test" || descriptor.Config[1].Value != "" || !descriptor.Config[1].Configured {
+		t.Fatalf("descriptor config = %#v", descriptor.Config)
+	}
+	if strategy.config["baseUrl"] != "https://updated.test" || strategy.config["auth"] != "new-secret" {
+		t.Fatalf("strategy config = %#v", strategy.config)
 	}
 }

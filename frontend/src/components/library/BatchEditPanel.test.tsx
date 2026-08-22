@@ -120,4 +120,19 @@ describe('BatchEditPanel', () => {
 
     expect(onApply).toHaveBeenCalledWith([], false, {action: 'replace', file, maxSize: 500});
   });
+
+  it('can reuse an embedded cover from one selected song', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    const source = {...track, id: 'trk-source', title: '封面来源曲目', artworkCount: 1, artworkWidth: 1200, artworkHeight: 1200};
+    const target = {...track, id: 'trk-target', title: '被覆盖曲目', artworkCount: 0};
+    render(<BatchEditPanel open tracks={[source, target]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+
+    await user.selectOptions(screen.getByLabelText('批量封面操作'), 'replace');
+    await user.selectOptions(screen.getByLabelText('封面来源'), 'track');
+    await user.selectOptions(screen.getByLabelText('封面来源曲目'), 'trk-source');
+    await user.click(screen.getByRole('button', {name: /应用到 2 首/}));
+
+    expect(onApply).toHaveBeenCalledWith([], false, {action: 'replace', sourceTrack: source, maxSize: 0});
+  });
 });

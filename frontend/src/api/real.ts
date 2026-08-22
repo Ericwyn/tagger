@@ -379,7 +379,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       }).then(normalizeTrackResult);
     },
 
-    writeArtwork(track: Track, file: File, maxSize = 0): Promise<ArtworkWriteResult> {
+	writeArtwork(track: Track, file: File, maxSize = 0): Promise<ArtworkWriteResult> {
 	  const query = maxSize > 0 ? `?max_size=${maxSize}` : '';
 	  return request<ArtworkWriteResult>(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0${query}`, {
 		method: 'PUT',
@@ -388,9 +388,22 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  }).then(normalizeTrackResult);
 	},
 
-	updateProvider(providerId: string, enabled: boolean): Promise<ProviderConfig> {
+	async readArtwork(track: Track, index = 0): Promise<File> {
+	  const token = storedAuthToken();
+	  const response = await fetcher(`/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/${index}?revision=${encodeURIComponent(track.revision)}`, {
+	    headers: {Accept: 'image/*', ...(token ? {Authorization: `Bearer ${token}`} : {})},
+	  });
+	  if (!response.ok) throw new APIError(response.status, 'artwork_read_failed', `读取封面失败（HTTP ${response.status}）`);
+	  const blob = await response.blob();
+	  return new File([blob], `${track.fileName}.cover`, {type: blob.type || 'application/octet-stream'});
+	},
+
+	updateProvider(providerId: string, enabled?: boolean, config?: Record<string, string>): Promise<ProviderConfig> {
+	  const body: Record<string, unknown> = {};
+	  if (enabled !== undefined) body.enabled = enabled;
+	  if (config !== undefined) body.config = config;
 	  return request<ProviderConfig>(`/api/v1/providers/${encodeURIComponent(providerId)}`, {
-		method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled}),
+		method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
 	  });
 	},
 

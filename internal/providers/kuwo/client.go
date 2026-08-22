@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -22,9 +23,11 @@ type Config struct {
 	LyricsRIDEndpoint  string
 	LyricsFileEndpoint string
 	UserAgent          string
+	Auth               string
 	RateInterval       time.Duration
 }
 type Client struct {
+	mu     sync.RWMutex
 	config Config
 	http   *http.Client
 	gate   *providers.Gate
@@ -59,7 +62,72 @@ func (c *Client) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "kuwo", Name: "酷我音乐", ShortName: "KW", Description: "中文曲库、同步歌词与封面实验性来源", Capabilities: []string{"歌曲", "专辑", "音轨", "歌词", "同步歌词", "封面"}, Health: providers.HealthDegraded, Enabled: false, Experimental: true, Accent: "#d69e2e", QuotaLabel: "实验性网页接口 · 默认关闭"}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "endpoint", Label: "搜索 API URL", Type: "url", Value: c.config.Endpoint, Required: true},
+		{Key: "lyricsEndpoint", Label: "歌词 JSON URL", Type: "url", Value: c.config.LyricsEndpoint, Required: true},
+		{Key: "lyricsRidEndpoint", Label: "歌词 RID URL", Type: "url", Value: c.config.LyricsRIDEndpoint, Required: true},
+		{Key: "lyricsFileEndpoint", Label: "歌词文件 URL", Type: "url", Value: c.config.LyricsFileEndpoint, Required: true},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
+		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "endpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "endpoint")
+			if err != nil {
+				return err
+			}
+			c.config.Endpoint = endpoint
+		case "lyricsEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricsEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.LyricsEndpoint = endpoint
+		case "lyricsRidEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricsRidEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.LyricsRIDEndpoint = endpoint
+		case "lyricsFileEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricsFileEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.LyricsFileEndpoint = endpoint
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.config.UserAgent = strings.TrimSpace(value)
+		case "auth":
+			c.config.Auth = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if limit <= 0 {
 		limit = 5
 	}
@@ -187,6 +255,9 @@ func (c *Client) getBody(ctx context.Context, endpoint string, headers map[strin
 	request.Header.Set("User-Agent", c.config.UserAgent)
 	request.Header.Set("Referer", "https://www.kuwo.cn/")
 	request.Header.Set("Origin", "https://www.kuwo.cn")
+	if strings.TrimSpace(c.config.Auth) != "" {
+		request.Header.Set("Authorization", strings.TrimSpace(c.config.Auth))
+	}
 	for name, value := range headers {
 		request.Header.Set(name, value)
 	}

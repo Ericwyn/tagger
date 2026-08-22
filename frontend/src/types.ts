@@ -201,6 +201,7 @@ export interface BatchEditSelection {
 export interface BatchArtworkInput {
   action: 'replace' | 'delete';
   file?: File;
+  sourceTrack?: Track;
   maxSize?: number;
 }
 
@@ -243,6 +244,18 @@ export interface RevisionDiff {
 
 export type ProviderHealth = 'ready' | 'degraded' | 'misconfigured' | 'disabled';
 
+export interface ProviderConfigField {
+  key: string;
+  label: string;
+  type: 'text' | 'url' | 'password' | 'number' | string;
+  description?: string;
+  placeholder?: string;
+  secret?: boolean;
+  required?: boolean;
+  value?: string;
+  configured?: boolean;
+}
+
 export interface ProviderConfig {
   id: string;
   name: string;
@@ -254,6 +267,8 @@ export interface ProviderConfig {
   experimental?: boolean;
   accent: string;
   quotaLabel: string;
+  config?: ProviderConfigField[];
+  configError?: string;
 }
 
 export interface ProviderTestResult {

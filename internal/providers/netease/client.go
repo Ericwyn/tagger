@@ -2,11 +2,13 @@ package netease
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -18,10 +20,12 @@ type Config struct {
 	LyricEndpoint string
 	AlbumEndpoint string
 	UserAgent     string
+	Auth          string
 	RateInterval  time.Duration
 }
 
 type Client struct {
+	mu     sync.RWMutex
 	config Config
 	http   *http.Client
 	gate   *providers.Gate
@@ -59,7 +63,65 @@ func (c *Client) Descriptor() providers.Descriptor {
 	}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "endpoint", Label: "搜索 API URL", Type: "url", Value: c.config.Endpoint, Required: true},
+		{Key: "lyricEndpoint", Label: "歌词 API URL", Type: "url", Value: c.config.LyricEndpoint, Required: true},
+		{Key: "albumEndpoint", Label: "专辑 API URL", Type: "url", Value: c.config.AlbumEndpoint, Required: true},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
+		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "endpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "endpoint")
+			if err != nil {
+				return err
+			}
+			c.config.Endpoint = endpoint
+		case "lyricEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.LyricEndpoint = endpoint
+		case "albumEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "albumEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.AlbumEndpoint = endpoint
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.config.UserAgent = strings.TrimSpace(value)
+		case "auth":
+			c.config.Auth = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if limit <= 0 {
 		limit = 5
 	}
@@ -100,7 +162,7 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			"total":  {"true"},
 		}
 		var response searchResponse
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(), &response); err != nil {
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
 			if index == 0 {
 				return nil, err
 			}
@@ -173,7 +235,7 @@ func (c *Client) fetchLyrics(ctx context.Context, id int64) (string, error) {
 	}
 	values := url.Values{"id": {strconv.FormatInt(id, 10)}, "lv": {"-1"}, "tv": {"-1"}}
 	var response lyricResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricEndpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricEndpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
 		return "", err
 	}
 	// Prefer original lyrics. YRC/KLyric are still useful when an ordinary LRC
@@ -196,7 +258,7 @@ func (c *Client) fetchArtwork(ctx context.Context, albumID int64) (string, error
 		} `json:"album"`
 	}
 	endpoint := strings.TrimRight(c.config.AlbumEndpoint, "/") + "/" + strconv.FormatInt(albumID, 10) + "?ext=true"
-	if err := providers.GetJSONWithHeaders(ctx, c.http, endpoint, c.config.UserAgent, neteaseHeaders(), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, endpoint, c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
 		return "", err
 	}
 	artwork := strings.TrimPrefix(strings.TrimSpace(response.Album.PictureURL), "http://")
@@ -337,8 +399,12 @@ func levenshtein(left, right []rune) int {
 	return previous[len(right)]
 }
 
-func neteaseHeaders() map[string]string {
-	return map[string]string{"Origin": "https://music.163.com", "Referer": "https://music.163.com/"}
+func neteaseHeaders(auth string) map[string]string {
+	result := map[string]string{"Origin": "https://music.163.com", "Referer": "https://music.163.com/"}
+	if strings.TrimSpace(auth) != "" {
+		result["Authorization"] = strings.TrimSpace(auth)
+	}
+	return result
 }
 
 func abs(value int64) int64 {

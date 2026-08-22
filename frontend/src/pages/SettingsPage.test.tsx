@@ -22,6 +22,7 @@ import {SettingsPage} from '@/pages/SettingsPage';
 const provider: ProviderConfig = {
   id: 'musicbrainz', name: 'MusicBrainz', shortName: 'MB', description: '结构化音乐资料',
   capabilities: ['歌曲', '封面'], health: 'ready', enabled: true, accent: '#e84b2c', quotaLabel: '1 req/s',
+  config: [{key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/', required: true}],
 };
 
 const library: LibrarySummary = {
@@ -44,7 +45,9 @@ describe('SettingsPage provider diagnostics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem('tagger-history-retention');
+    localStorage.removeItem('tagger-provider-test-query-v1');
     api.listProviders.mockResolvedValue([provider]);
+    api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
     api.getLibrary.mockResolvedValue(library);
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
@@ -63,7 +66,7 @@ describe('SettingsPage provider diagnostics', () => {
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
 
     expect(await screen.findByRole('heading', {name: '音乐数据源'})).toBeInTheDocument();
-    await user.click(screen.getByRole('button', {name: '测试查询'}));
+    await user.click(await screen.findByRole('button', {name: '测试查询'}));
     expect(screen.getByRole('dialog', {name: '数据源搜索测试'})).toBeInTheDocument();
     await user.clear(screen.getByRole('textbox', {name: '测试歌曲名'}));
     await user.type(screen.getByRole('textbox', {name: '测试歌曲名'}), '再回首');
@@ -79,6 +82,31 @@ describe('SettingsPage provider diagnostics', () => {
     expect(screen.getByText(/\[00:01\.00\] 第一行歌词/)).toBeInTheDocument();
     expect(screen.getByText(/抓取与封面探测日志/)).toBeInTheDocument();
     expect(screen.getByText('封面探测成功')).toBeInTheDocument();
+  });
+
+  it('uses the Chinese default query and remembers later test input', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(await screen.findByRole('button', {name: '测试查询'}));
+    expect(screen.getByRole('textbox', {name: '测试歌曲名'})).toHaveValue('最佳歌手');
+    expect(screen.getByRole('textbox', {name: '测试歌手'})).toHaveValue('许嵩');
+    await user.clear(screen.getByRole('textbox', {name: '测试歌曲名'}));
+    await user.type(screen.getByRole('textbox', {name: '测试歌曲名'}), '新测试歌曲');
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('tagger-provider-test-query-v1') || '{}')).toMatchObject({title: '新测试歌曲', artists: ['许嵩']}));
+  });
+
+  it('opens strategy-owned fields and persists a provider configuration', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(await screen.findByRole('button', {name: '配置'}));
+    expect(screen.getByRole('dialog', {name: '数据源配置'})).toBeInTheDocument();
+    const baseURL = screen.getByRole('textbox', {name: 'API Base URL'});
+    await user.clear(baseURL);
+    await user.type(baseURL, 'https://mirror.example.test/recording/');
+    await user.click(screen.getByRole('button', {name: '保存并应用'}));
+    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(provider, true, {baseUrl: 'https://mirror.example.test/recording/'}));
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('配置已保存'));
   });
 
   it('loads the configured library and runs a real rescan action', async () => {

@@ -32,6 +32,12 @@ func (serverProvider) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "test-provider", Name: "Test Provider", Enabled: true, Health: providers.HealthReady}
 }
 
+func (serverProvider) ConfigFields() []providers.ConfigField {
+	return []providers.ConfigField{{Key: "baseUrl", Label: "Base URL", Type: "url", Value: "https://example.test"}}
+}
+
+func (serverProvider) Configure(map[string]string) error { return nil }
+
 func (serverProvider) Search(_ context.Context, query providers.Query, _ int) ([]providers.Candidate, error) {
 	return []providers.Candidate{{
 		ProviderID: "test-provider", ExternalID: "external-1", Title: query.Title,
@@ -604,6 +610,12 @@ func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 	tested := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", nil)
 	if tested.Code != 200 || !containsJSON(tested.Body.Bytes(), `"status":"ok"`) {
 		t.Fatalf("test provider = %d %s", tested.Code, tested.Body.String())
+	}
+	configBody := []byte(`{"config":{"baseUrl":"https://configured.example.test"}}`)
+	configured := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/providers/test-provider",
+		&ut.Body{Body: bytes.NewReader(configBody), Len: len(configBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if configured.Code != 200 || !containsJSON(configured.Body.Bytes(), `"key":"baseUrl"`) {
+		t.Fatalf("provider config = %d %s", configured.Code, configured.Body.String())
 	}
 	customBody := []byte(`{"query":{"title":"自定义测试","artists":["测试歌手"],"album":"测试专辑","durationSeconds":201},"limit":3,"probeArtwork":false}`)
 	custom := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", &ut.Body{Body: bytes.NewReader(customBody), Len: len(customBody)},

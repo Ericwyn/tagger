@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, updateMatchItem, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, subscribeJobEvents, updateMatchItem, waitForJob} from '@/api';
 import type {Job, MatchCandidate, MatchItem, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -109,6 +109,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
   useEffect(() => {
     let active = true;
+    let stopJobEvents: (() => void) | undefined;
     void listTracks().then(async (allTracks) => {
       const ids = trackIds.length ? new Set(trackIds) : new Set(allTracks.filter((track) => track.album === '安泊猜想').map((track) => track.id));
       let next = allTracks.filter((track) => ids.has(track.id));
@@ -123,7 +124,14 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
         if (created) {
           if (active) setJob(created);
+          if (apiReadMode === 'real' && !matchJobId) {
+            stopJobEvents = subscribeJobEvents(created.id, (next) => {
+              if (active) setJob(next);
+            });
+          }
           const completed = matchJobId ? created : await waitForJob(created.id);
+          stopJobEvents?.();
+          stopJobEvents = undefined;
           if (active) setJob(completed);
           const matchItems = await listMatchItems(created.id);
           if (matchJobId && trackIds.length === 0) {
@@ -166,7 +174,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     }).catch(() => {
       if (active) setLoading(false);
     });
-    return () => { active = false; };
+    return () => { active = false; stopJobEvents?.(); };
   }, [matchJobId, trackIds]);
 
   const sourceOptions = useMemo(() => {
@@ -279,7 +287,17 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   };
 
   if (loading) {
-    return <div className="app-loading"><LoaderCircle className="spin" size={22} /> 正在整理候选结果…</div>;
+    const progress = job?.total ? Math.round((job.processed / job.total) * 100) : 0;
+    return (
+      <div className="review-loading">
+        <LoaderCircle className="spin" size={24} />
+        <div>
+          <strong>正在抓取候选结果…</strong>
+          <p>{job?.detail || '正在准备批量补全任务'}</p>
+          {job && <><div className="review-loading-bar"><span style={{width: `${progress}%`}} /></div><small>{job.processed} / {job.total} 首 · {progress}%</small></>}
+        </div>
+      </div>
+    );
   }
 
   return (

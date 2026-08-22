@@ -2,10 +2,30 @@ package providers
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/domain"
 )
+
+func ParseRateInterval(value string) (time.Duration, error) {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed < 0 || parsed > 60000 {
+		return 0, fmt.Errorf("rateIntervalMs 必须是 0 到 60000 之间的整数")
+	}
+	return time.Duration(parsed) * time.Millisecond, nil
+}
+
+func ValidateHTTPURL(value, field string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", fmt.Errorf("%s 必须是 HTTP(S) URL", field)
+	}
+	return strings.TrimSpace(parsed.String()), nil
+}
 
 type Health string
 
@@ -16,17 +36,41 @@ const (
 	HealthDisabled      Health = "disabled"
 )
 
+// ConfigField describes one strategy-owned runtime setting. Values are kept
+// on the strategy and returned to the UI only after the registry masks secret
+// fields. A strategy may choose a text, password or number input type.
+type ConfigField struct {
+	Key         string `json:"key"`
+	Label       string `json:"label"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Value       string `json:"value,omitempty"`
+	Configured  bool   `json:"configured,omitempty"`
+}
+
+// Configurable is implemented by providers that can apply their endpoint,
+// credential and transport settings without rebuilding the process.
+type Configurable interface {
+	ConfigFields() []ConfigField
+	Configure(map[string]string) error
+}
+
 type Descriptor struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	ShortName    string   `json:"shortName"`
-	Description  string   `json:"description"`
-	Capabilities []string `json:"capabilities"`
-	Health       Health   `json:"health"`
-	Enabled      bool     `json:"enabled"`
-	Experimental bool     `json:"experimental,omitempty"`
-	Accent       string   `json:"accent"`
-	QuotaLabel   string   `json:"quotaLabel"`
+	ID           string        `json:"id"`
+	Name         string        `json:"name"`
+	ShortName    string        `json:"shortName"`
+	Description  string        `json:"description"`
+	Capabilities []string      `json:"capabilities"`
+	Health       Health        `json:"health"`
+	Enabled      bool          `json:"enabled"`
+	Experimental bool          `json:"experimental,omitempty"`
+	Accent       string        `json:"accent"`
+	QuotaLabel   string        `json:"quotaLabel"`
+	Config       []ConfigField `json:"config,omitempty"`
+	ConfigError  string        `json:"configError,omitempty"`
 }
 
 type Query struct {

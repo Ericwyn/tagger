@@ -43,6 +43,12 @@ func TestPatchFromCandidateDistinguishesOmittedAndEmptyFieldLists(t *testing.T) 
 	}
 }
 
+func TestFormatMatchProgressIncludesProviderAndCandidateCounts(t *testing.T) {
+	if got := formatMatchProgress(3, 10, 9, 14); got != "已分析 3/10 首曲目 · 已查询 9 次数据源 · 返回 14 个候选" {
+		t.Fatalf("progress = %q", got)
+	}
+}
+
 func TestPatchFromCandidateIncludesSelectedExtendedFields(t *testing.T) {
 	candidate := providers.MatchCandidate{
 		Comment:              providers.Field[string]{Value: "liner note"},

@@ -377,6 +377,14 @@ describe('real API client', () => {
 	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers/apple/test');
   });
 
+  it('sends strategy-owned provider configuration without exposing secret values', async () => {
+    const provider = {id: 'lrcapi', name: 'LrcApi', health: 'degraded', enabled: false, config: [{key: 'auth', secret: true}]};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: provider}), {status: 200}));
+    const api = createRealAPI(fetcher);
+    await expect(api.updateProvider('lrcapi', false, {baseUrl: 'https://lrc.example/jsonapi', auth: 'secret'})).resolves.toEqual(provider);
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({enabled: false, config: {baseUrl: 'https://lrc.example/jsonapi', auth: 'secret'}});
+  });
+
   it('sends a custom provider diagnostic query with artwork probing enabled', async () => {
     const provider = {id: 'netease', name: '网易云音乐', health: 'ready', enabled: true};
     const query = {title: '再回首', artists: ['姜育恒'], album: '多年以后', durationSeconds: 248};
@@ -450,6 +458,17 @@ describe('real API client', () => {
 	const deleteInit = fetcher.mock.calls[1][1] as RequestInit;
 	expect(deleteInit.method).toBe('DELETE');
 	expect(deleteInit.headers).toEqual(expect.objectContaining({'If-Match': '"art-rev-2"'}));
+  });
+
+  it('reads an embedded cover as a reusable batch source file', async () => {
+    const fullTrack = {...track, fileName: 'source.flac', revision: 'rev-1'} as Track;
+    const fetcher = vi.fn().mockResolvedValue(new Response(new Blob(['cover'], {type: 'image/png'}), {status: 200, headers: {'Content-Type': 'image/png'}}));
+    const api = createRealAPI(fetcher);
+    const file = await api.readArtwork(fullTrack);
+    expect(file.name).toBe('source.flac.cover');
+    expect(file.type).toBe('image/png');
+    expect(file.size).toBeGreaterThan(0);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/tracks/trk-1/artwork/0?revision=rev-1', expect.any(Object));
   });
 
   it('applies a server-retained provider artwork candidate', async () => {

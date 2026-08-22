@@ -233,9 +233,16 @@ func TestProviderCacheExpiryAndSettings(t *testing.T) {
 	if err := dataStore.SaveProviderEnabled(context.Background(), "apple", false); err != nil {
 		t.Fatal(err)
 	}
+	if err := dataStore.SaveProviderConfiguration(context.Background(), "apple", map[string]string{"baseUrl": "https://example.test/search", "auth": "secret"}); err != nil {
+		t.Fatal(err)
+	}
 	settings, err := dataStore.LoadProviderSettings(context.Background())
 	if err != nil || settings["apple"] {
 		t.Fatalf("settings = %#v err=%v", settings, err)
+	}
+	configurations, err := dataStore.LoadProviderConfigurations(context.Background())
+	if err != nil || configurations["apple"]["baseUrl"] != "https://example.test/search" || configurations["apple"]["auth"] != "secret" {
+		t.Fatalf("provider configurations = %#v err=%v", configurations, err)
 	}
 	now = now.Add(2 * time.Hour)
 	_, found, err = dataStore.LoadProviderCache(context.Background(), "key")

@@ -42,10 +42,25 @@ const healthText = {
 };
 
 const defaultTestQuery: CandidateSearchQuery = {
-  title: 'Imagine', artists: ['John Lennon'], album: '', durationSeconds: 0,
+  title: '最佳歌手', artists: ['许嵩'], album: '', durationSeconds: 0,
 };
 
 const historyRetentionKey = 'tagger-history-retention';
+const providerTestQueryKey = 'tagger-provider-test-query-v1';
+
+function readProviderTestQuery(): CandidateSearchQuery {
+  try {
+    const raw = JSON.parse(localStorage.getItem(providerTestQueryKey) || '') as Partial<CandidateSearchQuery>;
+    return {
+      title: typeof raw.title === 'string' && raw.title.trim() ? raw.title : defaultTestQuery.title,
+      artists: Array.isArray(raw.artists) ? raw.artists.filter((item): item is string => typeof item === 'string') : defaultTestQuery.artists,
+      album: typeof raw.album === 'string' ? raw.album : defaultTestQuery.album,
+      durationSeconds: typeof raw.durationSeconds === 'number' && Number.isFinite(raw.durationSeconds) ? Math.max(0, raw.durationSeconds) : defaultTestQuery.durationSeconds,
+    };
+  } catch {
+    return defaultTestQuery;
+  }
+}
 
 function readHistoryRetention(): HistoryRetention {
   const value = Number(localStorage.getItem(historyRetentionKey));
@@ -72,10 +87,14 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testingId, setTestingId] = useState<string>();
   const [testProviderId, setTestProviderId] = useState<string>();
-  const [testQuery, setTestQuery] = useState<CandidateSearchQuery>(defaultTestQuery);
-  const [testArtistInput, setTestArtistInput] = useState(defaultTestQuery.artists.join(' / '));
+  const [testQuery, setTestQuery] = useState<CandidateSearchQuery>(readProviderTestQuery);
+  const [testArtistInput, setTestArtistInput] = useState(() => readProviderTestQuery().artists.join(' / '));
   const [testResponse, setTestResponse] = useState<ProviderTestResponse>();
   const [testError, setTestError] = useState('');
+  const [configProviderId, setConfigProviderId] = useState<string>();
+  const [configValues, setConfigValues] = useState<Record<string, string>>({});
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState('');
   const [library, setLibrary] = useState<LibrarySummary>();
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryScanning, setLibraryScanning] = useState(false);
@@ -86,6 +105,17 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   useEffect(() => {
     listProviders().then(setProviders);
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(providerTestQueryKey, JSON.stringify({
+        ...testQuery,
+        artists: testArtistInput.split(/[,，/]/).map((item) => item.trim()).filter(Boolean),
+      }));
+    } catch {
+      // Browser storage may be disabled; the current session still works.
+    }
+  }, [testArtistInput, testQuery]);
 
   const loadLibrary = async () => {
     setLibraryLoading(true);
@@ -166,6 +196,42 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     setTestProviderId(provider.id);
     setTestResponse(undefined);
     setTestError('');
+  };
+
+  const openProviderConfig = (provider: ProviderConfig) => {
+    setConfigProviderId(provider.id);
+    setConfigError('');
+    setConfigValues(Object.fromEntries((provider.config ?? []).map((field) => [field.key, field.secret ? '' : field.value ?? ''])));
+  };
+
+  const saveProviderConfig = async (event: FormEvent) => {
+    event.preventDefault();
+    const provider = providers.find((item) => item.id === configProviderId);
+    if (!provider) return;
+    const fields = provider.config ?? [];
+    const config: Record<string, string> = {};
+    for (const field of fields) {
+      const value = (configValues[field.key] ?? '').trim();
+      if (field.required && !value) {
+        setConfigError(`请填写${field.label}`);
+        return;
+      }
+      // A blank password means “keep the existing secret”, not “erase it”.
+      if (field.secret && !value) continue;
+      config[field.key] = value;
+    }
+    setConfigSaving(true);
+    setConfigError('');
+    try {
+      const updated = await updateProvider(provider, provider.enabled, config);
+      setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setConfigProviderId(undefined);
+      onNotice(`${provider.name} 配置已保存并立即生效`);
+    } catch (error) {
+      setConfigError(error instanceof Error ? error.message : '数据源配置保存失败');
+    } finally {
+      setConfigSaving(false);
+    }
   };
 
   const executeProviderTest = async (event: FormEvent) => {
@@ -267,6 +333,50 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     );
   })() : null;
 
+  const providerConfigPanel = configProviderId ? (() => {
+    const provider = providers.find((item) => item.id === configProviderId);
+    if (!provider) return null;
+    return createPortal(
+      <div className="provider-test-overlay">
+        <button className="provider-test-backdrop" aria-label="关闭数据源配置" onClick={() => setConfigProviderId(undefined)} />
+        <section className="provider-config-panel" role="dialog" aria-modal="true" aria-label="数据源配置">
+          <div className="provider-test-head">
+            <div>
+              <span className="eyebrow">PROVIDER CONFIGURATION</span>
+              <h3>配置 {provider.name}</h3>
+              <p>这些字段由当前策略声明，保存后会立即用于后续搜索；不会写入音乐文件。</p>
+            </div>
+            <button className="icon-button" title="关闭数据源配置" onClick={() => setConfigProviderId(undefined)}><X size={17} /></button>
+          </div>
+          <form className="provider-config-form" onSubmit={(event) => void saveProviderConfig(event)}>
+            {(provider.config ?? []).map((field) => (
+              <label key={field.key}>
+                <span>{field.label}{field.required && <em>必填</em>}</span>
+                <input
+                  aria-label={field.label}
+                  type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : field.type === 'url' ? 'url' : 'text'}
+                  value={configValues[field.key] ?? ''}
+                  placeholder={field.secret && field.configured ? '已配置，留空保持不变' : field.placeholder}
+                  onChange={(event) => setConfigValues((current) => ({...current, [field.key]: event.target.value}))}
+                />
+                {field.description && <small>{field.description}</small>}
+              </label>
+            ))}
+            {configError && <div className="provider-test-error"><CircleAlert size={14} /> {configError}</div>}
+            <div className="provider-config-actions">
+              <button className="secondary-button" type="button" onClick={() => setConfigProviderId(undefined)}>取消</button>
+              <button className="primary-button" type="submit" disabled={configSaving}>
+                {configSaving ? <LoaderCircle size={14} className="spin" /> : <Save size={14} />}
+                {configSaving ? '保存中…' : '保存并应用'}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>,
+      document.body,
+    );
+  })() : null;
+
   return (
     <div className="section-page settings-page">
       <header className="section-hero">
@@ -331,12 +441,14 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                         <TestTube2 size={13} />
                         测试查询
                       </button>
-                      <button>配置</button>
+                      <button onClick={() => openProviderConfig(provider)}>配置</button>
                     </div>
+                    {provider.configError && <small className="provider-config-error">配置未生效：{provider.configError}</small>}
                   </article>
                 ))}
               </div>
               {providerTestPanel}
+              {providerConfigPanel}
 			  <div className="settings-policy-note">
 				<ShieldCheck size={18} />
 				<div><strong>来源用途策略</strong><span>远程封面只通过后端候选 ID、安全下载和图片验证后写入；实验性来源需要已实现适配器才能启用。</span></div>

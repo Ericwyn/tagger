@@ -232,6 +232,11 @@ export const providerConfigs: ProviderConfig[] = [
     enabled: true,
     accent: '#e84b2c',
     quotaLabel: '1 req/s · 正常',
+    config: [
+      {key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/'},
+      {key: 'userAgent', label: 'User-Agent', type: 'text', value: 'Tagger/dev'},
+      {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '1000'},
+    ],
   },
   {
     id: 'lrclib',
@@ -243,6 +248,11 @@ export const providerConfigs: ProviderConfig[] = [
     enabled: true,
     accent: '#27645b',
     quotaLabel: '礼貌限流 · 正常',
+    config: [
+      {key: 'baseUrl', label: '精确查询 URL', type: 'url', value: 'https://lrclib.net/api/get'},
+      {key: 'searchUrl', label: '宽搜索 URL', type: 'url', value: 'https://lrclib.net/api/search'},
+      {key: 'userAgent', label: 'User-Agent', type: 'text', value: 'Tagger/dev'},
+    ],
   },
   {
     id: 'apple',
@@ -254,6 +264,11 @@ export const providerConfigs: ProviderConfig[] = [
     enabled: false,
     accent: '#1d4ed8',
     quotaLabel: '需要 Developer Token',
+    config: [
+      {key: 'baseUrl', label: 'Search API URL', type: 'url', value: 'https://itunes.apple.com/search'},
+      {key: 'country', label: '地区代码', type: 'text', value: 'CN'},
+      {key: 'userAgent', label: 'User-Agent', type: 'text', value: 'Tagger/dev'},
+    ],
   },
   {
     id: 'netease',
@@ -266,6 +281,11 @@ export const providerConfigs: ProviderConfig[] = [
     experimental: true,
     accent: '#d62d20',
     quotaLabel: '实验性 · 3 分钟前成功',
+    config: [
+      {key: 'endpoint', label: '搜索 API URL', type: 'url', value: 'https://music.163.com/api/cloudsearch/pc'},
+      {key: 'lyricEndpoint', label: '歌词 API URL', type: 'url', value: 'https://music.163.com/api/song/lyric'},
+      {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+    ],
   },
   {
     id: 'kuwo',
@@ -278,6 +298,11 @@ export const providerConfigs: ProviderConfig[] = [
     experimental: true,
     accent: '#e0a000',
     quotaLabel: '未启用',
+    config: [
+      {key: 'endpoint', label: '搜索 API URL', type: 'url', value: 'https://search.kuwo.cn/r.s'},
+      {key: 'lyricsEndpoint', label: '歌词 JSON URL', type: 'url', value: 'https://www.kuwo.cn/newh5/singles/songinfoandlrc'},
+      {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+    ],
   },
   {
     id: 'kugou',
@@ -290,6 +315,10 @@ export const providerConfigs: ProviderConfig[] = [
     experimental: true,
     accent: '#14a86b',
     quotaLabel: '实验性 · 默认关闭',
+    config: [
+      {key: 'searchEndpoint', label: '搜索 API URL', type: 'url', value: 'https://mobilecdn.kugou.com/api/v3/search/song'},
+      {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+    ],
   },
   {
     id: 'lrcapi',
@@ -302,6 +331,11 @@ export const providerConfigs: ProviderConfig[] = [
     experimental: true,
     accent: '#8067d8',
     quotaLabel: '实验性 · 可配置地址',
+    config: [
+      {key: 'baseUrl', label: '歌词 JSON API URL', type: 'url', value: 'https://api.lrc.cx/jsonapi'},
+      {key: 'coverUrl', label: '封面 API URL', type: 'url', value: 'https://api.lrc.cx/cover'},
+      {key: 'auth', label: 'Authorization', type: 'password', secret: true, configured: false},
+    ],
   },
 ];
 

@@ -3,10 +3,12 @@ package lrclib
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -21,6 +23,7 @@ type Config struct {
 }
 
 type Client struct {
+	mu        sync.RWMutex
 	baseURL   string
 	searchURL string
 	userAgent string
@@ -56,7 +59,55 @@ func (c *Client) Descriptor() providers.Descriptor {
 	}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "baseUrl", Label: "精确查询 URL", Type: "url", Value: c.baseURL, Required: true},
+		{Key: "searchUrl", Label: "宽搜索 URL", Type: "url", Value: c.searchURL, Required: true},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "baseUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "baseUrl")
+			if err != nil {
+				return err
+			}
+			c.baseURL = endpoint
+		case "searchUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "searchUrl")
+			if err != nil {
+				return err
+			}
+			c.searchURL = endpoint
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.userAgent = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if strings.TrimSpace(query.Title) == "" {
 		return []providers.Candidate{}, nil
 	}

@@ -111,6 +111,7 @@ func main() {
 			payload.Limit = 5
 		}
 		failed, succeeded := 0, 0
+		providerQueries, candidateCount := 0, 0
 		for index, trackID := range payload.TrackIDs {
 			track, err := libraryService.Track(trackID)
 			if err != nil {
@@ -122,6 +123,8 @@ func main() {
 					failed++
 					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()})
 				} else {
+					providerQueries += len(result.Providers)
+					candidateCount += len(result.Candidates)
 					state := "review"
 					if len(result.Candidates) == 0 {
 						state = "no_match"
@@ -133,7 +136,7 @@ func main() {
 					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON})
 				}
 			}
-			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, fmt.Sprintf("已分析 %d/%d 首曲目", index+1, len(payload.TrackIDs))); err != nil {
+			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, formatMatchProgress(index+1, len(payload.TrackIDs), providerQueries, candidateCount)); err != nil {
 				return err
 			}
 		}
@@ -296,6 +299,10 @@ func main() {
 		"version", version.Version,
 	)
 	srv.Spin()
+}
+
+func formatMatchProgress(processed, total, providerQueries, candidateCount int) string {
+	return fmt.Sprintf("已分析 %d/%d 首曲目 · 已查询 %d 次数据源 · 返回 %d 个候选", processed, total, providerQueries, candidateCount)
 }
 
 func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.Writer, dataStore *store.Store) jobs.Handler {

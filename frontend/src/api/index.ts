@@ -147,9 +147,11 @@ export async function createBatchEditJob(items: BatchEditSelection[], operations
   if (artwork) {
     payload = {action: artwork.action, maxSize: artwork.maxSize ?? 0};
     if (artwork.action === 'replace') {
-      if (!artwork.file) throw new Error('请选择要批量写入的封面');
-      payload.data = await encodeArtworkFile(artwork.file);
-      payload.mime = artwork.file.type || 'application/octet-stream';
+      let file = artwork.file;
+      if (!file && artwork.sourceTrack) file = await real.readArtwork(artwork.sourceTrack);
+      if (!file) throw new Error('请选择要批量写入的封面');
+      payload.data = await encodeArtworkFile(file);
+      payload.mime = file.type || 'application/octet-stream';
     }
   }
   return real.createBatchEditJob(items, operations, sequenceTracks, payload);
@@ -206,10 +208,15 @@ export function listProviders(): Promise<ProviderConfig[]> {
   return apiReadMode === 'mock' ? mock.listProviders() : real.listProviders();
 }
 
-export function updateProvider(provider: ProviderConfig, enabled: boolean): Promise<ProviderConfig> {
+export function updateProvider(provider: ProviderConfig, enabled: boolean, config?: Record<string, string>): Promise<ProviderConfig> {
   return apiReadMode === 'mock'
-	? Promise.resolve({...provider, enabled, health: enabled ? provider.health === 'disabled' ? 'ready' : provider.health : 'disabled'})
-	: real.updateProvider(provider.id, enabled);
+	? Promise.resolve({...provider, enabled, config: provider.config?.map((field) => config?.[field.key] !== undefined ? {...field, value: field.secret ? undefined : config[field.key], configured: field.secret ? Boolean(config[field.key]) : field.configured} : field), health: enabled ? provider.health === 'disabled' ? 'ready' : provider.health : 'disabled'})
+	: real.updateProvider(provider.id, enabled, config);
+}
+
+export function readArtwork(track: Track): Promise<File> {
+  if (apiReadMode === 'mock') return Promise.reject(new Error('Mock 模式没有真实封面文件'));
+  return real.readArtwork(track);
 }
 
 export async function testProvider(provider: ProviderConfig, query?: CandidateSearchQuery): Promise<ProviderTestResponse> {

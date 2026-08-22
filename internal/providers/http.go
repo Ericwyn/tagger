@@ -87,16 +87,21 @@ type Gate struct {
 func NewGate(interval time.Duration) *Gate { return &Gate{interval: interval} }
 
 func (g *Gate) Wait(ctx context.Context) error {
-	if g == nil || g.interval <= 0 {
+	if g == nil {
 		return nil
 	}
 	g.mu.Lock()
+	interval := g.interval
+	if interval <= 0 {
+		g.mu.Unlock()
+		return nil
+	}
 	now := time.Now()
 	reserved := g.next
 	if reserved.Before(now) {
 		reserved = now
 	}
-	g.next = reserved.Add(g.interval)
+	g.next = reserved.Add(interval)
 	g.mu.Unlock()
 
 	if delay := time.Until(reserved); delay > 0 {
@@ -109,4 +114,22 @@ func (g *Gate) Wait(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (g *Gate) SetInterval(interval time.Duration) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.interval = interval
+	g.mu.Unlock()
+}
+
+func (g *Gate) Interval() time.Duration {
+	if g == nil {
+		return 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.interval
 }

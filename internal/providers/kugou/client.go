@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -22,10 +23,12 @@ type Config struct {
 	LyricsDownloadURL string
 	ArtworkEndpoint   string
 	UserAgent         string
+	Auth              string
 	RateInterval      time.Duration
 }
 
 type Client struct {
+	mu     sync.RWMutex
 	config Config
 	http   *http.Client
 	gate   *providers.Gate
@@ -66,7 +69,72 @@ func (c *Client) Descriptor() providers.Descriptor {
 	}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "searchEndpoint", Label: "搜索 API URL", Type: "url", Value: c.config.SearchEndpoint, Required: true},
+		{Key: "lyricsSearchUrl", Label: "歌词搜索 URL", Type: "url", Value: c.config.LyricsSearchURL, Required: true},
+		{Key: "lyricsDownloadUrl", Label: "歌词下载 URL", Type: "url", Value: c.config.LyricsDownloadURL, Required: true},
+		{Key: "artworkEndpoint", Label: "封面 API URL", Type: "url", Value: c.config.ArtworkEndpoint, Required: true},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
+		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "searchEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "searchEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.SearchEndpoint = endpoint
+		case "lyricsSearchUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricsSearchUrl")
+			if err != nil {
+				return err
+			}
+			c.config.LyricsSearchURL = endpoint
+		case "lyricsDownloadUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "lyricsDownloadUrl")
+			if err != nil {
+				return err
+			}
+			c.config.LyricsDownloadURL = endpoint
+		case "artworkEndpoint":
+			endpoint, err := providers.ValidateHTTPURL(value, "artworkEndpoint")
+			if err != nil {
+				return err
+			}
+			c.config.ArtworkEndpoint = endpoint
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.config.UserAgent = strings.TrimSpace(value)
+		case "auth":
+			c.config.Auth = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if limit <= 0 {
 		limit = 5
 	}
@@ -96,7 +164,7 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			"showtype": {"1"},
 		}
 		var response searchResponse
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.SearchEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(), &response); err != nil {
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.SearchEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &response); err != nil {
 			searchErr = err
 			if index == 0 {
 				return nil, err
@@ -158,7 +226,7 @@ func (c *Client) fetchLyrics(ctx context.Context, hash string) (string, error) {
 		"album_audio_id": {""},
 	}
 	var search lyricSearchResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsSearchURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(), &search); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsSearchURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &search); err != nil {
 		return "", err
 	}
 	if len(search.Candidates) == 0 {
@@ -181,7 +249,7 @@ func (c *Client) fetchLyrics(ctx context.Context, hash string) (string, error) {
 		"charset":   {"utf8"},
 	}
 	var download lyricDownloadResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsDownloadURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(), &download); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsDownloadURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &download); err != nil {
 		return "", err
 	}
 	return decodeLyrics(download.Content)
@@ -201,7 +269,7 @@ func (c *Client) fetchArtwork(ctx context.Context, hash, albumID string) (string
 		"_":        {strconv.FormatInt(time.Now().UnixMilli(), 10)},
 	}
 	var response artworkResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.ArtworkEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.ArtworkEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &response); err != nil {
 		return "", err
 	}
 	imageURL := strings.TrimSpace(response.Data.Image)
@@ -387,8 +455,12 @@ func parseDuration(value stringOrNumber) int64 {
 	return number
 }
 
-func kugouHeaders() map[string]string {
-	return map[string]string{"Referer": "https://www.kugou.com/", "Origin": "https://www.kugou.com"}
+func kugouHeaders(auth string) map[string]string {
+	result := map[string]string{"Referer": "https://www.kugou.com/", "Origin": "https://www.kugou.com"}
+	if strings.TrimSpace(auth) != "" {
+		result["Authorization"] = strings.TrimSpace(auth)
+	}
+	return result
 }
 
 func max(left, right int) int {

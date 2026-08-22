@@ -8,10 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -27,6 +29,7 @@ type Config struct {
 }
 
 type Client struct {
+	mu                                 sync.RWMutex
 	baseURL, coverURL, auth, userAgent string
 	http                               *http.Client
 	gate                               *providers.Gate
@@ -64,7 +67,58 @@ func (c *Client) Descriptor() providers.Descriptor {
 	}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "baseUrl", Label: "歌词 JSON API URL", Type: "url", Value: c.baseURL, Required: true},
+		{Key: "coverUrl", Label: "封面 API URL", Type: "url", Value: c.coverURL, Required: true},
+		{Key: "auth", Label: "Authorization", Type: "password", Value: c.auth, Secret: true, Placeholder: "可选鉴权令牌"},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "baseUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "baseUrl")
+			if err != nil {
+				return err
+			}
+			c.baseURL = endpoint
+		case "coverUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "coverUrl")
+			if err != nil {
+				return err
+			}
+			c.coverURL = endpoint
+		case "auth":
+			c.auth = strings.TrimSpace(value)
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.userAgent = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if strings.TrimSpace(query.Title) == "" {
 		return []providers.Candidate{}, nil
 	}

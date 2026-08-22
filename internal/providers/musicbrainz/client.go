@@ -2,10 +2,12 @@ package musicbrainz
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
@@ -19,6 +21,7 @@ type Config struct {
 }
 
 type Client struct {
+	mu        sync.RWMutex
 	baseURL   string
 	userAgent string
 	http      *http.Client
@@ -50,7 +53,48 @@ func (c *Client) Descriptor() providers.Descriptor {
 	}
 }
 
+func (c *Client) ConfigFields() []providers.ConfigField {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return []providers.ConfigField{
+		{Key: "baseUrl", Label: "API Base URL", Type: "url", Value: c.baseURL, Required: true, Description: "MusicBrainz recording 查询地址"},
+		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true, Description: "请保留可联系的应用标识"},
+		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10), Description: "避免触发官方 API 限流"},
+	}
+}
+
+func (c *Client) Configure(values map[string]string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key, value := range values {
+		switch key {
+		case "baseUrl":
+			endpoint, err := providers.ValidateHTTPURL(value, "baseUrl")
+			if err != nil {
+				return err
+			}
+			c.baseURL = strings.TrimRight(endpoint, "/") + "/"
+		case "userAgent":
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("userAgent 不能为空")
+			}
+			c.userAgent = strings.TrimSpace(value)
+		case "rateIntervalMs":
+			interval, err := providers.ParseRateInterval(value)
+			if err != nil {
+				return err
+			}
+			c.gate.SetInterval(interval)
+		default:
+			return fmt.Errorf("未知配置项 %q", key)
+		}
+	}
+	return nil
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if err := c.gate.Wait(ctx); err != nil {
 		return nil, err
 	}
