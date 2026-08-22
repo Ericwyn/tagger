@@ -60,6 +60,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
+  const [candidateFocus, setCandidateFocus] = useState<'metadata' | 'lyrics'>('metadata');
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [mobileInspector, setMobileInspector] = useState(false);
@@ -176,8 +177,9 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
 	  }
 	};
 
-  const openCandidateSearch = async () => {
+  const openCandidateSearch = async (focus: 'metadata' | 'lyrics' = 'metadata') => {
     if (!activeTrack) return;
+    setCandidateFocus(focus);
     setCandidateOpen(true);
     setCandidateLoading(true);
     setCandidates([]);
@@ -404,6 +406,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         track={activeTrack}
         candidates={candidates}
         loading={candidateLoading}
+        focus={candidateFocus}
         onClose={() => setCandidateOpen(false)}
 		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options.artwork)}
       />

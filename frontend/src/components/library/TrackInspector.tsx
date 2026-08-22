@@ -29,7 +29,7 @@ interface TrackInspectorProps {
   saving: boolean;
   mobileOpen: boolean;
   onCloseMobile: () => void;
-  onSearch: () => void;
+  onSearch: (focus?: 'metadata' | 'lyrics') => void;
   onSave: (patch: TrackPatch) => Promise<void>;
   onArtworkChange: (file: File | null) => Promise<void>;
 }
@@ -256,7 +256,7 @@ export function TrackInspector({
           <div className="inspector-pane tag-form">
             <div className="form-section-head">
               <span>基本信息</span>
-              <button onClick={onSearch}><Sparkles size={14} /> 从数据源补全</button>
+              <button onClick={() => onSearch()}><Sparkles size={14} /> 从数据源补全</button>
             </div>
             <label className="field-row">
               <span>标题</span>
@@ -402,7 +402,7 @@ export function TrackInspector({
 			  <button className="secondary-button" disabled={saving} onClick={() => artworkInput.current?.click()}>
 				<Upload size={15} /> {saving ? '写入中…' : '上传封面'}
 			  </button>
-			  <button className="secondary-button" onClick={onSearch}><Search size={15} /> 在线查找</button>
+			  <button className="secondary-button" onClick={() => onSearch()}><Search size={15} /> 在线查找</button>
             </div>
 			{track.artworkCount > 0 && (
 			  <button
@@ -430,7 +430,7 @@ export function TrackInspector({
                 <span>同步歌词 / LRC</span>
                 <small>{draft.lyrics ? '检测到时间轴' : '当前没有歌词'}</small>
               </div>
-              <button><Sparkles size={14} /> 查找歌词</button>
+              <button onClick={() => onSearch('lyrics')}><Sparkles size={14} /> 查找歌词</button>
             </div>
             <textarea
               value={draft.lyrics}

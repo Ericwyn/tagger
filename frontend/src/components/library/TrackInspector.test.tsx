@@ -98,4 +98,24 @@ describe('TrackInspector', () => {
     expect(screen.getByText('TITLE')).toBeInTheDocument();
     expect(screen.getAllByText('再回首').length).toBeGreaterThanOrEqual(1);
   });
+
+  it('opens a lyrics-focused provider search from the lyrics tab', async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={onSearch}
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole('tab', {name: '歌词'}));
+    await user.click(screen.getByRole('button', {name: '查找歌词'}));
+    expect(onSearch).toHaveBeenCalledWith('lyrics');
+  });
 });

@@ -20,6 +20,7 @@ interface CandidateDrawerProps {
   track: Track | null;
   candidates: MatchCandidate[];
   loading: boolean;
+  focus?: 'metadata' | 'lyrics';
   onClose: () => void;
   onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean}) => Promise<void>;
 }
@@ -41,6 +42,7 @@ export function CandidateDrawer({
   track,
   candidates,
   loading,
+  focus = 'metadata',
   onClose,
   onApply,
 }: CandidateDrawerProps) {
@@ -52,18 +54,14 @@ export function CandidateDrawer({
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
-    setIncludeLyrics(false);
+	const first = candidates[0];
+	setIncludeLyrics(focus === 'lyrics' && Boolean(first?.hasLyrics && first.lyrics?.value));
 	setIncludeArtwork(false);
-  }, [candidates]);
+  }, [candidates, focus]);
 
   useEffect(() => {
     if (!open) setSelectedId(null);
   }, [open]);
-
-  useEffect(() => {
-    setIncludeLyrics(false);
-	setIncludeArtwork(false);
-  }, [selectedId]);
 
   const selected = useMemo(
     () => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0],
@@ -73,7 +71,9 @@ export function CandidateDrawer({
   useEffect(() => {
     if (!selected) return;
     setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
-  }, [selected]);
+	setIncludeLyrics(focus === 'lyrics' && Boolean(selected.hasLyrics && selected.lyrics?.value));
+	setIncludeArtwork(false);
+  }, [focus, selected]);
 
   if (!open || !track) return null;
 

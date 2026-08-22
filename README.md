@@ -35,6 +35,7 @@ Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指
 - 曲目 Inspector 的试听按钮已接入真实 `/api/v1/tracks/:id/audio` Range 流，支持 MP3/FLAC/WAV、ETag 缓存和断点请求；Mock 模式仍使用本地预览。
 - 任务中心会轮询并展示批量编辑的逐文件状态、失败原因和字段 diff；任务快照仍是重启和 SSE 断线后的事实来源。
 - Inspector 可以通过 `/api/v1/tracks/:id/raw-tags` 读取并展开 TagLib 原始 PropertyMap，保留多值和格式专有键用于诊断；Mock 模式提供规范化预览。
+- Inspector 的歌词页“查找歌词”会打开 Provider 候选并默认勾选歌词资产；仍由用户确认后写入，不会因打开搜索而自动改文件。
 
 正在实现：
 

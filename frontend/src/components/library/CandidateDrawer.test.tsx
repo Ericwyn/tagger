@@ -90,3 +90,19 @@ it('passes an explicit artwork choice without exposing the remote URL', async ()
   await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
   expect(onApply.mock.calls[0][2]).toEqual({artwork: true});
 });
+
+it('focuses the lyrics asset when opened from the lyrics inspector tab', () => {
+  render(
+    <CandidateDrawer
+      open
+      track={track}
+      candidates={[candidate]}
+      loading={false}
+      focus="lyrics"
+      onClose={() => undefined}
+      onApply={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(screen.getByRole('checkbox', {name: /歌词/})).toBeChecked();
+});
