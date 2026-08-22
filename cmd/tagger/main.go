@@ -235,8 +235,11 @@ func main() {
 
 func patchFromCandidate(candidate providers.MatchCandidate, fields []string) domain.TagPatch {
 	selected := make(map[string]bool, len(fields))
-	if len(fields) == 0 {
-		for _, field := range []string{"title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "year", "genres", "lyrics"} {
+	// A nil field list is the backwards-compatible default (all fields). An
+	// explicitly empty JSON array means the reviewer deselected every field and
+	// must produce a no-op patch instead of silently re-enabling all fields.
+	if fields == nil {
+		for _, field := range []string{"title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics"} {
 			selected[field] = true
 		}
 	} else {

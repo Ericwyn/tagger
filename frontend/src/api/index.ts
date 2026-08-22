@@ -50,7 +50,7 @@ export async function waitForJob(jobId: string, timeoutMs = 5 * 60_000): Promise
 	if (job.state === 'succeeded' || job.state === 'partial' || job.state === 'failed' || job.state === 'review') return job;
 	await new Promise((resolve) => window.setTimeout(resolve, 350));
   }
-  throw new Error('等待扫描任务超时');
+  throw new Error('等待后台任务超时');
 }
 
 export async function createMatchJob(trackIds: string[]): Promise<Job | null> {
