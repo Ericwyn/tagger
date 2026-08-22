@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   getLibrary: vi.fn(),
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
+  getSystem: vi.fn(),
   candidateArtworkURL: vi.fn(() => undefined),
 }));
 
@@ -45,6 +46,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.getLibrary.mockResolvedValue(library);
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
+    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090'});
     api.testProvider.mockResolvedValue({
       provider,
       result: {status: 'ok', count: 1, latencyMs: 42},
@@ -90,5 +92,18 @@ describe('SettingsPage provider diagnostics', () => {
     await waitFor(() => expect(api.rescanLibrary).toHaveBeenCalledWith('lib-test'));
     expect(api.waitForJob).toHaveBeenCalledWith('job-scan');
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('曲库扫描完成'));
+  });
+
+  it('shows the startup HTTP listener as read-only and exposes history retention choices', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', {name: /系统/}));
+    expect(await screen.findByText('127.0.0.1:8090')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue('127.0.0.1:8090')).not.toBeInTheDocument();
+    const retention = screen.getByRole('combobox', {name: '历史保留次数'});
+    expect([...retention.querySelectorAll('option')].map((option) => option.textContent)).toEqual(['最近 3 次', '最近 5 次', '最近 10 次', '最近 20 次']);
+    await user.selectOptions(retention, '5');
+    expect(localStorage.getItem('tagger-history-retention')).toBe('5');
   });
 });

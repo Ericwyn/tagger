@@ -7,13 +7,18 @@ import {
   SunMedium,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import type {PageID} from '@/types';
+import {GlobalPlayer} from '@/components/GlobalPlayer';
+import type {PageID, Track} from '@/types';
 
 interface TopBarProps {
   page: PageID;
   onNavigate: (page: PageID) => void;
   dark: boolean;
   onToggleTheme: () => void;
+  playerTrack: Track | null;
+  playerPlaying: boolean;
+  onPlayerPlayingChange: (playing: boolean) => void;
+  onPlayerClose: () => void;
 }
 
 const navItems: Array<{id: PageID; label: string; icon: typeof LibraryBig}> = [
@@ -23,7 +28,7 @@ const navItems: Array<{id: PageID; label: string; icon: typeof LibraryBig}> = [
   {id: 'settings', label: '设置', icon: Settings2},
 ];
 
-export function TopBar({page, onNavigate, dark, onToggleTheme}: TopBarProps) {
+export function TopBar({page, onNavigate, dark, onToggleTheme, playerTrack, playerPlaying, onPlayerPlayingChange, onPlayerClose}: TopBarProps) {
   return (
     <header className="top-bar">
       <button className="brand-block" onClick={() => onNavigate('library')} aria-label="返回曲库">
@@ -50,6 +55,8 @@ export function TopBar({page, onNavigate, dark, onToggleTheme}: TopBarProps) {
           </button>
         ))}
       </nav>
+
+      <GlobalPlayer track={playerTrack} playing={playerPlaying} onPlayingChange={onPlayerPlayingChange} onClose={onPlayerClose} />
 
       <div className="top-actions">
         <button className="icon-button" title={dark ? '切换浅色主题' : '切换深色主题'} onClick={onToggleTheme}>

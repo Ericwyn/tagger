@@ -61,6 +61,11 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 		t.Fatalf("health = %d %s", health.Code, health.Body.String())
 	}
 
+	system := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/system", nil)
+	if system.Code != 200 || !containsJSON(system.Body.Bytes(), `"listen":"127.0.0.1:0"`) {
+		t.Fatalf("system = %d %s", system.Code, system.Body.String())
+	}
+
 	libraries := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/libraries", nil)
 	if libraries.Code != 200 || !containsJSON(libraries.Body.Bytes(), `"trackCount":2`) {
 		t.Fatalf("libraries = %d %s", libraries.Code, libraries.Body.String())
@@ -70,7 +75,6 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	if tracks.Code != 200 || !containsJSON(tracks.Body.Bytes(), `"total":1`) || !containsJSON(tracks.Body.Bytes(), `"title":"Beta"`) {
 		t.Fatalf("tracks = %d %s", tracks.Code, tracks.Body.String())
 	}
-
 	var listEnvelope struct {
 		Data struct {
 			Tracks []struct {
@@ -84,6 +88,10 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	}
 	if err := json.Unmarshal(allTracks.Body.Bytes(), &listEnvelope); err != nil || len(listEnvelope.Data.Tracks) != 2 {
 		t.Fatalf("decode tracks: %v body=%s", err, allTracks.Body.String())
+	}
+	rescan := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/"+listEnvelope.Data.Tracks[0].ID+"/scan", nil)
+	if rescan.Code != 200 || !containsJSON(rescan.Body.Bytes(), `"id":"`+listEnvelope.Data.Tracks[0].ID+`"`) {
+		t.Fatalf("single track scan = %d %s", rescan.Code, rescan.Body.String())
 	}
 	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+listEnvelope.Data.Tracks[0].ID, nil)
 	if detail.Code != 200 || detail.Result().Header.Get("ETag") == "" {
@@ -673,20 +681,20 @@ func TestMatchReviewStateAPIUpdatesPersistedDecision(t *testing.T) {
 	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: track.ID, State: "review", Candidates: candidates}); err != nil {
 		t.Fatal(err)
 	}
-	body := []byte(`{"state":"accepted","selectedCandidateId":"candidate-review","fields":["title","comment"],"artwork":true}`)
+	body := []byte(`{"state":"accepted","selectedCandidateId":"candidate-review","fields":["title","comment"],"artwork":true,"artworkMaxSize":500}`)
 	accepted := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
 		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
-	if accepted.Code != 200 || !containsJSON(accepted.Body.Bytes(), `"state":"accepted"`) || !containsJSON(accepted.Body.Bytes(), `"selectedCandidateId":"candidate-review"`) || !containsJSON(accepted.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(accepted.Body.Bytes(), `"reviewArtwork":true`) {
+	if accepted.Code != 200 || !containsJSON(accepted.Body.Bytes(), `"state":"accepted"`) || !containsJSON(accepted.Body.Bytes(), `"selectedCandidateId":"candidate-review"`) || !containsJSON(accepted.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(accepted.Body.Bytes(), `"reviewArtwork":true`) || !containsJSON(accepted.Body.Bytes(), `"reviewArtworkMaxSize":500`) {
 		t.Fatalf("accepted review state = %d %s", accepted.Code, accepted.Body.String())
 	}
 	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
-	if err != nil || item.State != "accepted" || item.SelectedCandidateID != "candidate-review" || len(item.ReviewFields) != 2 || !item.ReviewArtwork {
+	if err != nil || item.State != "accepted" || item.SelectedCandidateID != "candidate-review" || len(item.ReviewFields) != 2 || !item.ReviewArtwork || item.ReviewArtworkMaxSize != 500 {
 		t.Fatalf("accepted item = %#v err=%v", item, err)
 	}
 	skippedBody := []byte(`{"state":"skipped"}`)
 	skipped := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID,
 		&ut.Body{Body: bytes.NewReader(skippedBody), Len: len(skippedBody)}, ut.Header{Key: "content-type", Value: "application/json"})
-	if skipped.Code != 200 || !containsJSON(skipped.Body.Bytes(), `"state":"skipped"`) || !containsJSON(skipped.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(skipped.Body.Bytes(), `"reviewArtwork":true`) {
+	if skipped.Code != 200 || !containsJSON(skipped.Body.Bytes(), `"state":"skipped"`) || !containsJSON(skipped.Body.Bytes(), `"reviewFields":["title","comment"]`) || !containsJSON(skipped.Body.Bytes(), `"reviewArtwork":true`) || !containsJSON(skipped.Body.Bytes(), `"reviewArtworkMaxSize":500`) {
 		t.Fatalf("skipped review state = %d %s", skipped.Code, skipped.Body.String())
 	}
 	invalidBody := []byte(`{"state":"accepted","selectedCandidateId":"missing"}`)
@@ -764,11 +772,24 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = s.store.CreateRevision(context.Background(), domain.Revision{
+		ID: "revlog-test-2", LibraryID: s.library.Library().ID, TrackID: track.ID,
+		TrackTitle: "Changed song again", FileName: "changed.flac", Action: "再次修改", Source: "手工编辑",
+		BaseRevision: "after", ResultRevision: "after-2", CoverTone: domain.CoverMoss,
+		Diff: []domain.RevisionDiff{{Field: "title", Operation: domain.OperationSet, Before: "Changed song", After: "Changed song again"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	list := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions", nil)
 	if list.Code != 200 || !containsJSON(list.Body.Bytes(), `"id":"revlog-test"`) ||
 		!containsJSON(list.Body.Bytes(), `"before":"Old"`) || !containsJSON(list.Body.Bytes(), `"currentRevision":"`+track.Revision+`"`) {
 		t.Fatalf("revision list = %d %s", list.Code, list.Body.String())
+	}
+	limited := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions?limit=1", nil)
+	if limited.Code != 200 || !containsJSON(limited.Body.Bytes(), `"id":"revlog-test-2"`) || containsJSON(limited.Body.Bytes(), `"id":"revlog-test"`) {
+		t.Fatalf("limited revision list = %d %s", limited.Code, limited.Body.String())
 	}
 	detail := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/"+created.ID, nil)
 	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"resultRevision":"after"`) {

@@ -26,12 +26,13 @@ import {
   getLibrary,
   listTracks,
   rescanLibrary,
+  rescanTrack,
   searchCandidates,
   updateArtwork,
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
+import type {BatchArtworkInput, CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
@@ -258,6 +259,20 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
 	  }
 	};
 
+	const refreshActiveTrack = async () => {
+		if (!activeTrack || saving) return;
+		setSaving(true);
+		try {
+			const updated = await rescanTrack(activeTrack.id);
+			setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+			onNotice('已重新读取当前音乐文件的标签、封面和技术信息');
+		} catch (error) {
+			onNotice(error instanceof Error ? error.message : '单曲扫描失败');
+		} finally {
+			setSaving(false);
+		}
+	};
+
   const toggleTrack = (id: string) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -279,14 +294,14 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     });
   };
 
-	const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean) => {
+	const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
     const selectedTracks = tracks.filter((track) => selectedIds.has(track.id));
     const failed = new Set<string>();
     let succeeded = 0;
     setSaving(true);
     if (apiReadMode === 'real') {
       try {
-        const job = await createBatchEditJob(selectedTracks.map((track) => ({trackId: track.id, baseRevision: track.revision})), operations, sequenceTracks);
+		const job = await createBatchEditJob(selectedTracks.map((track) => ({trackId: track.id, baseRevision: track.revision})), operations, sequenceTracks, artwork);
         setBatchEditOpen(false);
         setSelectedIds(new Set());
         onNotice(job ? `批量编辑任务已创建：${job.id}` : '批量编辑任务已创建');
@@ -303,9 +318,15 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
           failed.add(track.id);
           continue;
         }
-        try {
-          const updated = await updateTrack(track.id, buildBatchPatch(track, operations, sequenceTracks ? {index, total: selectedTracks.length} : undefined));
-          setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+		try {
+		  let updated = track;
+		  if (operations.length > 0 || sequenceTracks) {
+			updated = await updateTrack(track.id, buildBatchPatch(track, operations, sequenceTracks ? {index, total: selectedTracks.length} : undefined));
+		  }
+		  if (artwork) {
+			updated = await updateArtwork(track.id, artwork.action === 'delete' ? null : artwork.file ?? null, artwork.maxSize ?? 0);
+		  }
+		  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
           succeeded += 1;
         } catch {
           failed.add(track.id);
@@ -316,9 +337,9 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     }
     setBatchEditOpen(false);
     setSelectedIds(failed);
-    onNotice(failed.size === 0
-      ? `已安全写入 ${succeeded} 首曲目的批量标签修改`
-      : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
+	  onNotice(failed.size === 0
+	    ? `已安全写入 ${succeeded} 首曲目的批量${artwork ? '标签与封面' : '标签'}修改`
+	    : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
 	};
 
   const applySnapshot = async (updates: SnapshotUpdate[]) => {
@@ -511,6 +532,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
 		onSearch={openCandidateSearch}
 		onSave={async (patch, options) => { await saveTrack(patch, options); }}
 		onArtworkChange={changeArtwork}
+		onRescan={refreshActiveTrack}
 		playerTrackId={playerTrackId}
 		playerPlaying={playerPlaying}
 		onPlayTrack={onPlayTrack}

@@ -40,6 +40,7 @@ type Server struct {
 	store           *store.Store
 	jobs            *jobs.Manager
 	frontend        fs.FS
+	listen          string
 	version         string
 	tagEngineInfo   string
 	authToken       string
@@ -60,6 +61,7 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 		providers:     providerRegistry,
 		store:         dataStore,
 		frontend:      frontend,
+		listen:        listen,
 		version:       version,
 		tagEngineInfo: tagEngineInfo,
 		downloadArtwork: func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
@@ -90,6 +92,7 @@ func (s *Server) routes() {
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
+	api.POST("/tracks/:id/scan", s.handleTrackScan)
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.GET("/tracks/:id/raw-tags", s.handleRawTags)
@@ -173,6 +176,7 @@ func (s *Server) handleSystem(_ context.Context, c *app.RequestContext) {
 	s.writeData(c, map[string]string{
 		"version":    s.version,
 		"tag_engine": s.tagEngineInfo,
+		"listen":     s.listen,
 	})
 }
 
@@ -532,6 +536,7 @@ type matchReviewUpdateRequest struct {
 	SelectedCandidateID string   `json:"selectedCandidateId,omitempty"`
 	Fields              []string `json:"fields,omitempty"`
 	Artwork             *bool    `json:"artwork,omitempty"`
+	ArtworkMaxSize      *int     `json:"artworkMaxSize,omitempty"`
 }
 
 type matchQueryFields struct {
@@ -621,6 +626,7 @@ func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) 
 	item.SelectedCandidateID = ""
 	item.ReviewFields = nil
 	item.ReviewArtwork = false
+	item.ReviewArtworkMaxSize = 0
 	item.Error = ""
 	item.State = "review"
 	if len(result.Candidates) == 0 {
@@ -704,6 +710,13 @@ func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestCont
 	if request.Artwork != nil {
 		item.ReviewArtwork = *request.Artwork
 	}
+	if request.ArtworkMaxSize != nil {
+		if err := validateArtworkMaxSize(*request.ArtworkMaxSize); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", err.Error())
+			return
+		}
+		item.ReviewArtworkMaxSize = *request.ArtworkMaxSize
+	}
 	if err := s.store.UpsertMatchItem(ctx, item); err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
 		return
@@ -725,11 +738,12 @@ func (s *Server) handleBatchEditItems(ctx context.Context, c *app.RequestContext
 }
 
 type writeSelection struct {
-	TrackID      string   `json:"trackId"`
-	CandidateID  string   `json:"candidateId"`
-	BaseRevision string   `json:"baseRevision"`
-	Fields       []string `json:"fields"`
-	Artwork      bool     `json:"artwork,omitempty"`
+	TrackID        string   `json:"trackId"`
+	CandidateID    string   `json:"candidateId"`
+	BaseRevision   string   `json:"baseRevision"`
+	Fields         []string `json:"fields"`
+	Artwork        bool     `json:"artwork,omitempty"`
+	ArtworkMaxSize int      `json:"artworkMaxSize,omitempty"`
 }
 
 type matchWriteRequest struct {
@@ -759,6 +773,16 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "items 不能为空且请求 JSON 必须有效")
 		return
 	}
+	for _, selection := range request.Items {
+		if err := validateArtworkMaxSize(selection.ArtworkMaxSize); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", err.Error())
+			return
+		}
+		if !selection.Artwork && selection.ArtworkMaxSize != 0 {
+			s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", "未选择写入封面时不能设置封面尺寸")
+			return
+		}
+	}
 	payload, _ := json.Marshal(struct {
 		MatchJobID string           `json:"matchJobId"`
 		Items      []writeSelection `json:"items"`
@@ -778,6 +802,7 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 		item.SelectedCandidateID = selection.CandidateID
 		item.ReviewFields = append([]string(nil), selection.Fields...)
 		item.ReviewArtwork = selection.Artwork
+		item.ReviewArtworkMaxSize = selection.ArtworkMaxSize
 		if itemErr := s.store.UpsertMatchItem(ctx, item); itemErr != nil {
 			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
 			return
@@ -798,6 +823,20 @@ func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {
 		"tracks": tracks,
 		"total":  len(tracks),
 	})
+}
+
+func (s *Server) handleTrackScan(ctx context.Context, c *app.RequestContext) {
+	track, err := s.library.RescanTrack(ctx, c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "track_scan_failed", err.Error())
+		return
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, track)
 }
 
 func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {
@@ -826,8 +865,28 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 	if len(payload.Items) == 0 || len(payload.Items) > 1000 {
 		return fmt.Errorf("items 必须在 1 到 1000 之间")
 	}
-	if len(payload.Operations) == 0 && !payload.SequenceTracks {
-		return fmt.Errorf("至少选择一个字段操作或音轨序号操作")
+	if len(payload.Operations) == 0 && !payload.SequenceTracks && payload.Artwork == nil {
+		return fmt.Errorf("至少选择一个字段操作、音轨序号操作或封面操作")
+	}
+	if payload.Artwork != nil {
+		if payload.Artwork.Action != domain.BatchArtworkReplace && payload.Artwork.Action != domain.BatchArtworkDelete {
+			return fmt.Errorf("不支持的批量封面操作：%s", payload.Artwork.Action)
+		}
+		if err := validateArtworkMaxSize(payload.Artwork.MaxSize); err != nil {
+			return err
+		}
+		if payload.Artwork.Action == domain.BatchArtworkReplace {
+			if payload.Artwork.Data == "" || strings.TrimSpace(payload.Artwork.MIME) == "" {
+				return fmt.Errorf("替换封面必须提供图片数据和 MIME")
+			}
+			data, err := base64.StdEncoding.DecodeString(payload.Artwork.Data)
+			if err != nil {
+				return fmt.Errorf("批量封面数据不是有效 base64")
+			}
+			if _, err := artwork.Validate(data, payload.Artwork.MIME); err != nil {
+				return fmt.Errorf("批量封面校验失败：%w", err)
+			}
+		}
 	}
 	allowed := map[string]bool{
 		"title": true, "artists": true, "album": true, "albumArtists": true, "year": true, "genres": true,
@@ -1044,7 +1103,7 @@ func (s *Server) handleLyricsSidecarMutation(ctx context.Context, c *app.Request
 		return
 	}
 	if result.Changed {
-		if err := s.library.Rescan(ctx); err != nil {
+		if _, err := s.library.RescanTrack(ctx, track.ID); err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "sidecar 已写入，但重新索引失败："+err.Error())
 			return
 		}
@@ -1311,7 +1370,7 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 		s.writeData(c, map[string]any{"track": track, "write": result})
 		return
 	}
-	if err := s.library.Rescan(ctx); err != nil {
+	if _, err := s.library.RescanTrack(ctx, ref.ID); err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但重新索引失败："+err.Error())
 		return
 	}
@@ -1373,7 +1432,16 @@ func (s *Server) handleRevisions(ctx context.Context, c *app.RequestContext) {
 		s.writeData(c, []revisionResponse{})
 		return
 	}
-	revisions, err := s.store.ListRevisions(ctx, 100)
+	limit := 100
+	if raw := strings.TrimSpace(string(c.Query("limit"))); raw != "" {
+		if parsed, parseErr := strconv.Atoi(raw); parseErr == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	revisions, err := s.store.ListRevisions(ctx, limit)
 	if err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
 		return
@@ -1555,7 +1623,7 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		return
 	}
 	if result.Changed {
-		if err := s.library.Rescan(ctx); err != nil {
+		if _, err := s.library.RescanTrack(ctx, revision.TrackID); err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已恢复，但重新索引失败："+err.Error())
 			return
 		}
@@ -1743,10 +1811,17 @@ func artworkResizeQuery(c *app.RequestContext) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("max_size must be 500 or 1000")
 	}
-	if parsed != 500 && parsed != 1000 {
-		return 0, fmt.Errorf("max_size must be 500 or 1000")
+	if err := validateArtworkMaxSize(parsed); err != nil {
+		return 0, err
 	}
 	return parsed, nil
+}
+
+func validateArtworkMaxSize(value int) error {
+	if value != 0 && value != 500 && value != 1000 {
+		return fmt.Errorf("封面尺寸必须为原图、500 或 1000")
+	}
+	return nil
 }
 
 func (s *Server) handleDeleteArtwork(ctx context.Context, c *app.RequestContext) {
@@ -1796,7 +1871,7 @@ func (s *Server) handleArtworkMutation(ctx context.Context, c *app.RequestContex
 
 func (s *Server) finishArtworkMutation(ctx context.Context, c *app.RequestContext, ref library.FileRef, result filewrite.ArtworkResult, action, source string) {
 	if result.Changed {
-		if err := s.library.Rescan(ctx); err != nil {
+		if _, err := s.library.RescanTrack(ctx, ref.ID); err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "封面已写入，但重新索引失败："+err.Error())
 			return
 		}

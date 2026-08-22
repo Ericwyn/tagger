@@ -3,6 +3,8 @@ export type InspectorTab = 'tags' | 'artwork' | 'lyrics' | 'technical' | 'histor
 export type TrackFormat = 'flac' | 'mp3' | 'wav';
 export type CoverTone = 'vermilion' | 'moss' | 'cobalt' | 'sand' | 'charcoal' | 'jade';
 export type TrackHealth = 'complete' | 'missing-artwork' | 'missing-lyrics' | 'needs-review' | 'parse-error';
+export const historyRetentionOptions = [3, 5, 10, 20] as const;
+export type HistoryRetention = typeof historyRetentionOptions[number];
 
 export interface TrackProperties {
   container: string;
@@ -168,6 +170,7 @@ export interface MatchItem {
   selectedCandidateId?: string;
   reviewFields?: string[] | null;
   reviewArtwork?: boolean;
+  reviewArtworkMaxSize?: number;
   error?: string;
   updatedAt?: string;
 }
@@ -178,6 +181,7 @@ export interface WriteSelection {
   baseRevision: string;
   fields: string[];
   artwork?: boolean;
+  artworkMaxSize?: number;
 }
 
 export type BatchEditMode = 'set' | 'append' | 'delete' | 'replace';
@@ -192,6 +196,12 @@ export interface BatchEditOperation {
 export interface BatchEditSelection {
   trackId: string;
   baseRevision: string;
+}
+
+export interface BatchArtworkInput {
+  action: 'replace' | 'delete';
+  file?: File;
+  maxSize?: number;
 }
 
 export type BatchEditItemState = 'pending' | 'written' | 'failed';

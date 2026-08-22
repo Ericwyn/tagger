@@ -2,7 +2,6 @@ import {useEffect, useState} from 'react';
 import {AnimatePresence, motion} from 'motion/react';
 import {CheckCircle2, KeyRound, LoaderCircle, X} from 'lucide-react';
 import {TopBar} from '@/components/TopBar';
-import {GlobalPlayer} from '@/components/GlobalPlayer';
 import {APIError, apiReadMode, getSystem, setAuthToken} from '@/api';
 import {HistoryPage} from '@/pages/HistoryPage';
 import {JobsPage} from '@/pages/JobsPage';
@@ -86,9 +85,17 @@ export function App() {
   }
 
   return (
-    <div className={`app-shell${playerTrack ? ' has-player' : ''}`}>
-      <TopBar page={page} onNavigate={setPage} dark={dark} onToggleTheme={() => setDark((value) => !value)} />
-      <GlobalPlayer track={playerTrack} playing={playerPlaying} onPlayingChange={setPlayerPlaying} onClose={() => { setPlayerPlaying(false); setPlayerTrack(null); }} />
+    <div className="app-shell">
+      <TopBar
+        page={page}
+        onNavigate={setPage}
+        dark={dark}
+        onToggleTheme={() => setDark((value) => !value)}
+        playerTrack={playerTrack}
+        playerPlaying={playerPlaying}
+        onPlayerPlayingChange={setPlayerPlaying}
+        onPlayerClose={() => { setPlayerPlaying(false); setPlayerTrack(null); }}
+      />
       <main className="app-main">
         <AnimatePresence mode="wait">
           <motion.div

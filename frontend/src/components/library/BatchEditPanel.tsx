@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Check, ChevronDown, LoaderCircle, Wand2, X} from 'lucide-react';
+import {Check, ChevronDown, ImagePlus, LoaderCircle, Upload, Wand2, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
-import type {BatchEditOperation, Track, TrackPatch} from '@/types';
+import type {BatchArtworkInput, BatchEditOperation, Track, TrackPatch} from '@/types';
 
 type EditableField = 'title' | 'artists' | 'album' | 'albumArtists' | 'year' | 'genres' | 'comment' | 'composers' | 'conductor' | 'lyricists' | 'copyright' | 'bpm' | 'isrc';
 type OperationMode = '' | 'set' | 'append' | 'delete' | 'replace';
@@ -47,7 +47,7 @@ interface BatchEditPanelProps {
   tracks: Track[];
   saving: boolean;
   onClose: () => void;
-  onApply: (operations: BatchOperation[], sequenceTracks: boolean) => Promise<void>;
+  onApply: (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => Promise<void>;
 }
 
 const fields: Array<{id: EditableField; label: string; kind: 'text' | 'list' | 'number'; allowAppend?: boolean}> = [
@@ -89,6 +89,9 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
   const [selectedTemplateID, setSelectedTemplateID] = useState('');
   const [templateName, setTemplateName] = useState('');
   const [templateMessage, setTemplateMessage] = useState('');
+  const [artworkAction, setArtworkAction] = useState<'keep' | 'replace' | 'delete'>('keep');
+  const [artworkFile, setArtworkFile] = useState<File>();
+  const [artworkMaxSize, setArtworkMaxSize] = useState(0);
 
   useEffect(() => {
     if (open) {
@@ -98,6 +101,9 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
       setSelectedTemplateID('');
       setTemplateName('');
       setTemplateMessage('');
+      setArtworkAction('keep');
+      setArtworkFile(undefined);
+      setArtworkMaxSize(0);
     }
   }, [open]);
 
@@ -131,8 +137,8 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
       setTemplateMessage('请输入模板名称');
       return;
     }
-    if (operations.length === 0 && !sequenceTracks) {
-      setTemplateMessage('至少选择一个字段操作或音轨规则');
+    if (operations.length === 0 && !sequenceTracks && artworkAction === 'keep') {
+		setTemplateMessage('至少选择一个字段操作、音轨规则或封面操作');
       return;
     }
     const existing = templates.find((item) => item.name === name);
@@ -170,15 +176,27 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
     if (sequenceTracks && track.trackNumber !== index + 1) {
       changes.push({label: '音轨', before: track.trackNumber ? `${track.trackNumber} / ${track.trackTotal || '—'}` : '空', after: `${index + 1} / ${tracks.length}`});
     }
+    if (artworkAction !== 'keep') {
+      changes.push({
+        label: '封面',
+        before: track.artworkCount > 0 ? `${track.artworkCount} 张嵌入封面` : '无封面',
+        after: artworkAction === 'delete'
+          ? '删除封面'
+          : artworkFile
+            ? `${artworkFile.name}${artworkMaxSize ? ` · ${artworkMaxSize}×${artworkMaxSize}` : ''}`
+            : '等待选择图片',
+      });
+    }
     return {track, changes};
-  }), [operations, sequenceTracks, tracks]);
+  }), [artworkAction, artworkFile, artworkMaxSize, operations, sequenceTracks, tracks]);
 
   if (!open) return null;
 
   const writableCount = tracks.filter((track) => track.writable).length;
   const readOnlyCount = tracks.length - writableCount;
   const invalidReplace = operations.some((operation) => operation.mode === 'replace' && !operation.find?.trim());
-  const canApply = !saving && !invalidReplace && (operations.length > 0 || sequenceTracks) && writableCount > 0;
+  const artworkReady = artworkAction !== 'replace' || Boolean(artworkFile);
+  const canApply = !saving && !invalidReplace && artworkReady && (operations.length > 0 || sequenceTracks || artworkAction !== 'keep') && writableCount > 0;
 
   return (
     <div className="candidate-layer batch-edit-layer">
@@ -263,6 +281,26 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
             <span><strong>按当前选中顺序生成音轨号</strong><small>从 1 开始，并把总音轨数设为 {tracks.length}</small></span>
           </label>
 
+          <section className="batch-edit-section batch-artwork-section">
+            <div className="batch-edit-section-head"><span>批量封面操作</span><small>对选中曲目使用同一张图片或删除现有封面</small></div>
+            <label className="batch-artwork-action">
+              <span>操作</span>
+              <select aria-label="批量封面操作" value={artworkAction} onChange={(event) => setArtworkAction(event.target.value as typeof artworkAction)}>
+                <option value="keep">保持不变</option>
+                <option value="replace">替换为同一张图片</option>
+                <option value="delete">删除现有封面</option>
+              </select>
+            </label>
+            {artworkAction === 'replace' && (
+              <div className="batch-artwork-replace">
+                <input className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" id="batch-artwork-input" onChange={(event) => { setArtworkFile(event.target.files?.[0]); event.target.value = ''; }} />
+                <label className="secondary-button batch-artwork-file" htmlFor="batch-artwork-input"><Upload size={15} /> {artworkFile ? artworkFile.name : '选择封面图片'}</label>
+                <label className="batch-artwork-size"><span>写入尺寸</span><select aria-label="批量封面写入尺寸" value={artworkMaxSize} onChange={(event) => setArtworkMaxSize(Number(event.target.value))}><option value={0}>保留原图</option><option value={1000}>居中裁剪至 1000×1000</option><option value={500}>居中裁剪至 500×500</option></select></label>
+              </div>
+            )}
+            {artworkAction === 'replace' && !artworkFile && <small className="batch-artwork-hint"><ImagePlus size={14} /> 请选择图片后才会启用批量写入。</small>}
+          </section>
+
           <section className="batch-edit-section batch-edit-preview">
             <div className="batch-edit-section-head"><span>差异预览</span><small>最多显示前 20 首</small></div>
             {previews.length === 0 || previews.every((preview) => preview.changes.length === 0) ? (
@@ -283,7 +321,7 @@ export function BatchEditPanel({open, tracks, saving, onClose, onApply}: BatchEd
 
         <footer className="batch-edit-footer">
           <button className="secondary-button" onClick={onClose}>取消</button>
-          <button className="primary-button" disabled={!canApply} onClick={() => void onApply(operations, sequenceTracks)}>
+          <button className="primary-button" disabled={!canApply} onClick={() => void (artworkAction === 'keep' ? onApply(operations, sequenceTracks) : onApply(operations, sequenceTracks, {action: artworkAction, file: artworkFile, maxSize: artworkMaxSize}))}>
             {saving ? <LoaderCircle className="spin" size={15} /> : <Wand2 size={15} />}
             {saving ? '正在逐文件写入…' : `应用到 ${writableCount} 首`}
           </button>

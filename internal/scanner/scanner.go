@@ -158,6 +158,29 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 
 func (s *Scanner) Root() string { return s.opts.Root }
 
+// ScanTrack re-reads one already-indexed relative path without walking the
+// rest of the library. Callers must provide a relative, non-symlinked path;
+// the same format and metadata normalization as a full scan is used.
+func (s *Scanner) ScanTrack(ctx context.Context, relativePath string) (domain.Track, error) {
+	relativePath = filepath.ToSlash(strings.TrimSpace(relativePath))
+	clean := filepath.Clean(filepath.FromSlash(relativePath))
+	if relativePath == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return domain.Track{}, fmt.Errorf("invalid relative track path")
+	}
+	absolutePath := filepath.Join(s.opts.Root, clean)
+	info, err := os.Lstat(absolutePath)
+	if err != nil {
+		return domain.Track{}, err
+	}
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return domain.Track{}, fmt.Errorf("track path is not a regular audio file")
+	}
+	if !isSupportedAudio(absolutePath) {
+		return domain.Track{}, fmt.Errorf("unsupported audio format: %s", filepath.Ext(absolutePath))
+	}
+	return s.extract(ctx, absolutePath)
+}
+
 func (s *Scanner) discover(ctx context.Context) ([]string, []string, error) {
 	paths := make([]string, 0, 256)
 	warnings := make([]string, 0)

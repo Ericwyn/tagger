@@ -21,8 +21,23 @@ type BatchEditItem struct {
 	BaseRevision string `json:"baseRevision"`
 }
 
+type BatchArtworkAction string
+
+const (
+	BatchArtworkReplace BatchArtworkAction = "replace"
+	BatchArtworkDelete  BatchArtworkAction = "delete"
+)
+
+type BatchArtwork struct {
+	Action  BatchArtworkAction `json:"action"`
+	Data    string             `json:"data,omitempty"` // base64-encoded validated image bytes
+	MIME    string             `json:"mime,omitempty"`
+	MaxSize int                `json:"maxSize,omitempty"`
+}
+
 type BatchEditPayload struct {
 	Items          []BatchEditItem      `json:"items"`
 	Operations     []BatchEditOperation `json:"operations"`
 	SequenceTracks bool                 `json:"sequenceTracks"`
+	Artwork        *BatchArtwork        `json:"artwork,omitempty"`
 }

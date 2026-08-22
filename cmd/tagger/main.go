@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -143,11 +144,12 @@ func main() {
 		var payload struct {
 			MatchJobID string `json:"matchJobId"`
 			Items      []struct {
-				TrackID      string   `json:"trackId"`
-				CandidateID  string   `json:"candidateId"`
-				BaseRevision string   `json:"baseRevision"`
-				Fields       []string `json:"fields"`
-				Artwork      bool     `json:"artwork"`
+				TrackID        string   `json:"trackId"`
+				CandidateID    string   `json:"candidateId"`
+				BaseRevision   string   `json:"baseRevision"`
+				Fields         []string `json:"fields"`
+				Artwork        bool     `json:"artwork"`
+				ArtworkMaxSize int      `json:"artworkMaxSize"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
@@ -184,6 +186,14 @@ func main() {
 			var artworkTarget *artwork.Asset
 			if err == nil && item.Artwork {
 				artworkTarget, err = prepareCandidateArtwork(ctx, providerRegistry, candidate, defaultArtworkDownloader)
+				if err == nil && item.ArtworkMaxSize > 0 {
+					resized, resizeErr := artwork.ResizeSquare(*artworkTarget, item.ArtworkMaxSize)
+					if resizeErr != nil {
+						err = fmt.Errorf("裁剪候选封面：%w", resizeErr)
+					} else {
+						artworkTarget = &resized
+					}
+				}
 			}
 			var artworkResult *filewrite.ArtworkResult
 			artworkFailedAfterTags := false
@@ -219,11 +229,11 @@ func main() {
 				if artworkFailedAfterTags {
 					state = "artwork_failed"
 				}
-				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: state, Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, ReviewFields: append([]string(nil), item.Fields...), ReviewArtwork: item.Artwork, Error: err.Error()}); persistErr != nil {
+				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: state, Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, ReviewFields: append([]string(nil), item.Fields...), ReviewArtwork: item.Artwork, ReviewArtworkMaxSize: item.ArtworkMaxSize, Error: err.Error()}); persistErr != nil {
 					return fmt.Errorf("persist failed match item %s: %w", item.TrackID, persistErr)
 				}
 			} else {
-				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "written", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, ReviewFields: append([]string(nil), item.Fields...), ReviewArtwork: item.Artwork}); persistErr != nil {
+				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "written", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, ReviewFields: append([]string(nil), item.Fields...), ReviewArtwork: item.Artwork, ReviewArtworkMaxSize: item.ArtworkMaxSize}); persistErr != nil {
 					return fmt.Errorf("persist written match item %s: %w", item.TrackID, persistErr)
 				}
 			}
@@ -292,14 +302,34 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 			return err
 		}
+		var batchArtwork *artwork.Asset
+		if payload.Artwork != nil && payload.Artwork.Action == domain.BatchArtworkReplace {
+			data, err := base64.StdEncoding.DecodeString(payload.Artwork.Data)
+			if err != nil {
+				return fmt.Errorf("decode batch artwork: %w", err)
+			}
+			asset, err := artwork.Validate(data, payload.Artwork.MIME)
+			if err != nil {
+				return fmt.Errorf("validate batch artwork: %w", err)
+			}
+			if payload.Artwork.MaxSize > 0 {
+				asset, err = artwork.ResizeSquare(asset, payload.Artwork.MaxSize)
+				if err != nil {
+					return fmt.Errorf("resize batch artwork: %w", err)
+				}
+			}
+			batchArtwork = &asset
+		}
 		completed := make([]struct {
-			track  domain.Track
-			result filewrite.Result
+			track         domain.Track
+			result        filewrite.Result
+			artworkResult *filewrite.ArtworkResult
 		}, 0, len(payload.Items))
 		failed := 0
 		for index, item := range payload.Items {
 			track, err := libraryService.Track(item.TrackID)
 			var result filewrite.Result
+			var completedArtworkResult *filewrite.ArtworkResult
 			if err == nil {
 				ref, refErr := libraryService.FileRef(item.TrackID)
 				if refErr != nil {
@@ -310,6 +340,23 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 						baseRevision = track.Revision
 					}
 					result, err = tagWriter.Write(ctx, ref, baseRevision, patchFromBatchEdit(track, payload.Operations, payload.SequenceTracks, index, len(payload.Items)), false)
+					if err == nil && payload.Artwork != nil {
+						var target *artwork.Asset
+						if payload.Artwork.Action == domain.BatchArtworkReplace {
+							target = batchArtwork
+						}
+						artworkResult, artworkErr := tagWriter.WriteArtwork(ctx, ref, result.CurrentRevision, 0, target, false)
+						if artworkErr != nil {
+							err = artworkErr
+						} else {
+							result.Changed = result.Changed || artworkResult.Changed
+							result.CurrentRevision = artworkResult.CurrentRevision
+							result.Diff = append(result.Diff, artworkResult.Diff...)
+							result.Warnings = append(result.Warnings, artworkResult.Warnings...)
+							artworkResultCopy := artworkResult
+							completedArtworkResult = &artworkResultCopy
+						}
+					}
 				}
 			}
 			state := "written"
@@ -326,9 +373,10 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 			}
 			if err == nil {
 				completed = append(completed, struct {
-					track  domain.Track
-					result filewrite.Result
-				}{track: track, result: result})
+					track         domain.Track
+					result        filewrite.Result
+					artworkResult *filewrite.ArtworkResult
+				}{track: track, result: result, artworkResult: completedArtworkResult})
 			}
 			if progressErr := progress(index+1, len(payload.Items), len(completed), failed, fmt.Sprintf("已编辑 %d/%d 首曲目", index+1, len(payload.Items))); progressErr != nil {
 				return progressErr
@@ -348,11 +396,21 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 			if err != nil {
 				return err
 			}
+			action := "批量编辑标签"
+			if item.artworkResult != nil {
+				action = "批量编辑标签与封面"
+			}
+			var beforeArtwork, afterArtwork *domain.ArtworkSnapshot
+			if item.artworkResult != nil {
+				beforeArtwork = artworkRevisionSnapshot(item.artworkResult.Before)
+				afterArtwork = artworkRevisionSnapshot(item.artworkResult.After)
+			}
 			if _, err := dataStore.CreateRevision(ctx, domain.Revision{
 				LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
-				Action: "批量编辑标签", Source: "批量编辑", BaseRevision: item.result.BaseRevision,
+				Action: action, Source: "批量编辑", BaseRevision: item.result.BaseRevision,
 				ResultRevision: track.Revision, Diff: item.result.Diff, CoverTone: track.CoverTone,
 				BeforeTags: item.result.BeforeTags, AfterTags: item.result.AfterTags,
+				BeforeArtwork: beforeArtwork, AfterArtwork: afterArtwork,
 			}); err != nil {
 				return err
 			}

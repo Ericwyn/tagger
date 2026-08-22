@@ -9,6 +9,7 @@ describe('Tagger app prototype', () => {
 
   it('loads the TestMusic library and active track inspector', async () => {
     render(<App />);
+    expect(screen.getByText('无播放歌曲')).toBeInTheDocument();
     expect(await screen.findByRole('heading', {name: '全部音乐'})).toBeInTheDocument();
     expect(await screen.findByRole('heading', {name: '再回首'})).toBeInTheDocument();
     expect(screen.getByText('24 首曲目 · 15 首无损音频')).toBeInTheDocument();
@@ -41,6 +42,8 @@ describe('Tagger app prototype', () => {
     await user.click(screen.getByTitle('试听'));
     expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
     expect(screen.getByTitle('暂停播放')).toBeInTheDocument();
+    await user.click(screen.getByTitle('开启单曲循环'));
+    expect(screen.getByTitle('关闭单曲循环')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', {name: /任务/}));
     expect(await screen.findByRole('heading', {name: '任务中心'})).toBeInTheDocument();

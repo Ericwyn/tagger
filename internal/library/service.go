@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/scanner"
@@ -85,6 +86,30 @@ func (s *Service) Rescan(ctx context.Context) error {
 	return nil
 }
 
+// RescanTrack refreshes one indexed file in place. It deliberately does not
+// walk or parse the rest of the library, which keeps post-write refreshes and
+// manual diagnostics responsive for large collections.
+func (s *Service) RescanTrack(ctx context.Context, id string) (domain.Track, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+
+	current, err := s.Track(id)
+	if err != nil {
+		return domain.Track{}, err
+	}
+	track, scanErr := s.scanner.ScanTrack(ctx, current.RelativePath)
+	if track.ID == "" {
+		return domain.Track{}, scanErr
+	}
+	s.applyTrack(track)
+	if s.repo != nil {
+		if persistErr := s.repo.SaveScan(ctx, s.scanner.Root(), s.snapshotResult()); persistErr != nil {
+			return track, fmt.Errorf("persist track scan: %w", persistErr)
+		}
+	}
+	return track, scanErr
+}
+
 func (s *Service) apply(result scanner.Result) {
 	byID := make(map[string]domain.Track, len(result.Tracks))
 	for _, track := range result.Tracks {
@@ -97,6 +122,31 @@ func (s *Service) apply(result scanner.Result) {
 	s.byID = byID
 	s.report = result.Report
 	s.mu.Unlock()
+}
+
+func (s *Service) applyTrack(track domain.Track) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.byID == nil {
+		s.byID = make(map[string]domain.Track)
+	}
+	clone := cloneTrack(track)
+	s.byID[track.ID] = clone
+	for index := range s.tracks {
+		if s.tracks[index].ID == track.ID {
+			s.tracks[index] = clone
+			break
+		}
+	}
+	now := time.Now().UTC()
+	s.library.LastScanLabel = now.Format("2006-01-02 15:04")
+	s.report.CompletedAt = now.Format(time.RFC3339)
+}
+
+func (s *Service) snapshotResult() scanner.Result {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return scanner.Result{Library: cloneLibrary(s.library), Tracks: cloneTracks(s.tracks), Report: s.report}
 }
 
 func (s *Service) Library() domain.LibrarySummary {

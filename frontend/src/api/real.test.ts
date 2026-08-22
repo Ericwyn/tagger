@@ -19,10 +19,10 @@ describe('real API client', () => {
   it('probes system and forwards the optional single-user token', async () => {
     localStorage.setItem('tagger-auth-token', 'secret-token');
     try {
-      const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {version: 'dev', tag_engine: 'taglib'}}), {status: 200}));
+      const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8080'}}), {status: 200}));
       const api = createRealAPI(fetcher);
 
-      await expect(api.getSystem()).resolves.toEqual({version: 'dev', tag_engine: 'taglib'});
+      await expect(api.getSystem()).resolves.toEqual({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8080'});
       expect((fetcher.mock.calls[0][1] as RequestInit).headers).toEqual(expect.objectContaining({Authorization: 'Bearer secret-token'}));
     } finally {
       localStorage.removeItem('tagger-auth-token');
@@ -60,6 +60,15 @@ describe('real API client', () => {
 
     await expect(api.rescanLibrary('lib/a')).resolves.toEqual(result);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
+  });
+
+  it('rescans only the selected track', async () => {
+    const refreshed = {...track, title: 'Refreshed', composers: [], artists: ['Artist']} as Track;
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: refreshed}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.rescanTrack('trk/1')).resolves.toEqual(normalizeTrack(refreshed));
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/tracks/trk%2F1/scan', expect.objectContaining({method: 'POST'}));
   });
 
   it('lists and retrieves persistent jobs', async () => {
@@ -134,6 +143,20 @@ describe('real API client', () => {
 		items: [{trackId: 'trk-1', baseRevision: 'rev-1'}],
 		operations: [{field: 'genres', mode: 'append', value: 'Live'}], sequenceTracks: true,
 	});
+  });
+
+  it('serializes a shared batch artwork payload for replacement and resize', async () => {
+    const job = {id: 'job-art-edit', kind: 'batch_edit', state: 'waiting', title: 'Edit', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));
+    const api = createRealAPI(fetcher);
+    await expect(api.createBatchEditJob(
+      [{trackId: 'trk-1', baseRevision: 'rev-1'}], [], false,
+      {action: 'replace', data: 'iVBORw0KGgo=', mime: 'image/png', maxSize: 500},
+    )).resolves.toEqual(job);
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({
+      items: [{trackId: 'trk-1', baseRevision: 'rev-1'}], operations: [], sequenceTracks: false,
+      artwork: {action: 'replace', data: 'iVBORw0KGgo=', mime: 'image/png', maxSize: 500},
+    });
   });
 
   it('lists batch edit item snapshots for the job detail view', async () => {
@@ -366,6 +389,14 @@ describe('real API client', () => {
 
     await expect(api.listRevisions()).resolves.toEqual([revision]);
     expect(fetcher).toHaveBeenCalledWith('/api/v1/revisions', expect.any(Object));
+  });
+
+  it('requests a bounded revision history window when configured', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: []}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.listRevisions(5)).resolves.toEqual([]);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/revisions?limit=5', expect.any(Object));
   });
 
   it('previews and executes revision restore with the current revision guard', async () => {

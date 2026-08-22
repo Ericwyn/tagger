@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import {Pause, Play, X} from 'lucide-react';
+import {Pause, Play, Repeat1, X} from 'lucide-react';
 import {audioURL} from '@/api';
 import {cn, formatDuration} from '@/lib/utils';
 import type {Track} from '@/types';
@@ -14,6 +14,7 @@ interface GlobalPlayerProps {
 export function GlobalPlayer({track, playing, onPlayingChange, onClose}: GlobalPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [singleLoop, setSingleLoop] = useState(false);
   const source = track ? audioURL(track) : undefined;
 
   useEffect(() => {
@@ -33,6 +34,10 @@ export function GlobalPlayer({track, playing, onPlayingChange, onClose}: GlobalP
   }, [source, track?.id]);
 
   useEffect(() => {
+    if (audioRef.current) audioRef.current.loop = singleLoop;
+  }, [singleLoop]);
+
+  useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !source) return;
     if (playing && audio.paused) {
@@ -42,11 +47,9 @@ export function GlobalPlayer({track, playing, onPlayingChange, onClose}: GlobalP
     }
   }, [playing, source, onPlayingChange]);
 
-  if (!track) return null;
-
   const toggle = () => {
     const audio = audioRef.current;
-    if (!source || !audio) {
+    if (!track || !source || !audio) {
       onPlayingChange(!playing);
       return;
     }
@@ -58,7 +61,10 @@ export function GlobalPlayer({track, playing, onPlayingChange, onClose}: GlobalP
     }
   };
 
-  const progress = track.durationSeconds > 0 ? Math.min(100, (currentTime / track.durationSeconds) * 100) : 0;
+  const seek = (value: number) => {
+    setCurrentTime(value);
+    if (audioRef.current && track) audioRef.current.currentTime = value;
+  };
 
   return (
     <div className="global-player" role="region" aria-label="全局播放器">
@@ -68,21 +74,30 @@ export function GlobalPlayer({track, playing, onPlayingChange, onClose}: GlobalP
         onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
         onPlay={() => onPlayingChange(true)}
         onPause={() => onPlayingChange(false)}
-        onEnded={() => onPlayingChange(false)}
+        onEnded={() => onPlayingChange(singleLoop ? true : false)}
         onError={() => onPlayingChange(false)}
       />
-      <button className="global-player-toggle" title={playing ? '暂停播放' : '继续播放'} onClick={toggle}>
+      <button className="global-player-toggle" disabled={!track} title={track ? (playing ? '暂停播放' : '继续播放') : '暂无播放歌曲'} onClick={toggle}>
         {playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
       </button>
       <div className="global-player-copy">
-        <strong>{track.title || track.fileName}</strong>
-        <span>{track.artists.join(' / ') || '未知艺术家'} · {track.album || '未知专辑'}</span>
+        <strong>{track ? (track.title || track.fileName) : '无播放歌曲'}</strong>
+        <span>{track ? `${track.artists.join(' / ') || '未知艺术家'} · ${track.album || '未知专辑'}` : '从曲库选择一首歌曲开始播放'}</span>
       </div>
-      <div className="global-player-progress" aria-label="播放进度">
-        <i style={{width: `${progress}%`}} />
-      </div>
-      <span className="global-player-time">{formatDuration(Math.round(currentTime))} / {formatDuration(track.durationSeconds)}</span>
-      <button className={cn('icon-button', 'global-player-close')} title="关闭播放器" onClick={onClose}><X size={15} /></button>
+      <input
+        className="global-player-progress"
+        type="range"
+        min={0}
+        max={track?.durationSeconds || 0}
+        step={0.1}
+        value={track ? Math.min(currentTime, track.durationSeconds || 0) : 0}
+        aria-label="播放进度"
+        disabled={!track || track.durationSeconds <= 0}
+        onChange={(event) => seek(Number(event.target.value))}
+      />
+      <span className="global-player-time">{track ? `${formatDuration(Math.round(currentTime))} / ${formatDuration(track.durationSeconds)}` : '— / —'}</span>
+      <button className={cn('icon-button', 'global-player-loop', singleLoop && 'is-active')} disabled={!track} aria-pressed={singleLoop} title={singleLoop ? '关闭单曲循环' : '开启单曲循环'} onClick={() => setSingleLoop((value) => !value)}><Repeat1 size={16} /></button>
+      <button className={cn('icon-button', 'global-player-close')} disabled={!track} title="关闭播放器" onClick={onClose}><X size={15} /></button>
     </div>
   );
 }

@@ -22,8 +22,9 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getLibrary, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, waitForJob} from '@/api';
-import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, ProviderConfig, ProviderTestResponse} from '@/types';
+import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, waitForJob} from '@/api';
+import type {SystemInfo} from '@/api/real';
+import {historyRetentionOptions, type CandidateSearchQuery, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
@@ -43,6 +44,13 @@ const healthText = {
 const defaultTestQuery: CandidateSearchQuery = {
   title: 'Imagine', artists: ['John Lennon'], album: '', durationSeconds: 0,
 };
+
+const historyRetentionKey = 'tagger-history-retention';
+
+function readHistoryRetention(): HistoryRetention {
+  const value = Number(localStorage.getItem(historyRetentionKey));
+  return historyRetentionOptions.includes(value as HistoryRetention) ? value as HistoryRetention : 20;
+}
 
 function formatLogDetails(details: Record<string, string | number | boolean | string[] | undefined> | undefined): string {
   if (!details) return '';
@@ -72,6 +80,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryScanning, setLibraryScanning] = useState(false);
   const [libraryError, setLibraryError] = useState('');
+  const [systemInfo, setSystemInfo] = useState<SystemInfo>();
+  const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
 
   useEffect(() => {
     listProviders().then(setProviders);
@@ -92,6 +102,17 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   useEffect(() => {
     if (tab === 'libraries') void loadLibrary();
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'system') return;
+    void getSystem().then(setSystemInfo).catch(() => setSystemInfo(undefined));
+  }, [tab]);
+
+  const updateHistoryRetention = (value: HistoryRetention) => {
+    setHistoryRetention(value);
+    localStorage.setItem(historyRetentionKey, String(value));
+    onNotice(`历史列表将显示最近 ${value} 次修订`);
+  };
 
   const runLibraryScan = async () => {
     if (!library || libraryScanning) return;
@@ -354,7 +375,11 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <section>
                   <div className="system-icon"><ServerCog size={19} /></div>
                   <div><strong>HTTP 服务</strong><p>默认仅监听本机，外网访问建议使用 HTTPS 反向代理。</p></div>
-                  <label><span>监听地址</span><input defaultValue="127.0.0.1:8080" /></label>
+                  <div className="system-readonly">
+                    <span>启动监听</span>
+                    <code>{systemInfo?.listen || '由 --listen / TAGGER_LISTEN 决定'}</code>
+                    <small>服务启动后不能热切换；修改启动参数后请重新启动。</small>
+                  </div>
                 </section>
                 <section>
                   <div className="system-icon"><KeyRound size={19} /></div>
@@ -364,17 +389,27 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <section>
                   <div className="system-icon"><ShieldCheck size={19} /></div>
                   <div><strong>安全写入</strong><p>临时副本、重读校验、原子替换和标签历史。</p></div>
-                  <label className="inline-switch"><input type="checkbox" defaultChecked /> 启用写前历史</label>
+                  <label className="switch-control">
+                    <input type="checkbox" defaultChecked role="switch" aria-label="启用写前历史" />
+                    <span className="switch-track" aria-hidden="true"><span /></span>
+                    <span>启用写前历史</span>
+                  </label>
                 </section>
                 <section>
                   <div className="system-icon"><Database size={19} /></div>
                   <div><strong>历史保留</strong><p>标签和封面修订按内容 hash 去重保存。</p></div>
-                  <label><span>每文件</span><select defaultValue="20"><option value="20">最近 20 次</option><option>最近 50 次</option></select></label>
+                  <label className="system-select"><span>每文件</span><select aria-label="历史保留次数" value={historyRetention} onChange={(event) => updateHistoryRetention(Number(event.target.value) as HistoryRetention)}>
+                    {historyRetentionOptions.map((value) => <option key={value} value={value}>最近 {value} 次</option>)}
+                  </select></label>
                 </section>
                 <section>
                   <div className="system-icon"><ImagePlus size={19} /></div>
                   <div><strong>封面占位</strong><p>没有真实封面时，列表和候选结果默认显示空白占位。</p></div>
-                  <label className="inline-switch"><input type="checkbox" checked={showGeneratedCovers} onChange={(event) => { onShowGeneratedCoversChange(event.target.checked); onNotice(event.target.checked ? '已启用生成式封面占位' : '已关闭生成式封面占位'); }} /> 使用生成式占位</label>
+                  <label className="switch-control">
+                    <input type="checkbox" checked={showGeneratedCovers} role="switch" aria-label="使用生成式占位" onChange={(event) => { onShowGeneratedCoversChange(event.target.checked); onNotice(event.target.checked ? '已启用生成式封面占位' : '已关闭生成式封面占位'); }} />
+                    <span className="switch-track" aria-hidden="true"><span /></span>
+                    <span>使用生成式占位</span>
+                  </label>
                 </section>
               </div>
             </>

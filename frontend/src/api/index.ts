@@ -19,9 +19,12 @@ import type {
 	BatchEditItem,
 	BatchEditOperation,
 	BatchEditSelection,
+	BatchArtworkInput,
 	CandidateSearchQuery,
 	MatchQueryHistory,
 } from '@/types';
+import type {BatchArtworkPayload} from '@/api/real';
+import type {SystemInfo} from '@/api/real';
 
 export {APIError};
 
@@ -37,8 +40,8 @@ export async function getLibrary(): Promise<LibrarySummary> {
   return apiReadMode === 'mock' ? mock.getLibrary() : real.getLibrary();
 }
 
-export function getSystem(): Promise<{version: string; tag_engine: string}> {
-  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock'}) : real.getSystem();
+export function getSystem(): Promise<SystemInfo> {
+  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock'}) : real.getSystem();
 }
 
 export function setAuthToken(token: string): void {
@@ -50,6 +53,18 @@ export async function listTracks(): Promise<Track[]> {
   const tracks = await real.listTracks();
   realTrackCache = new Map(tracks.map((track) => [track.id, track]));
   return tracks;
+}
+
+export async function rescanTrack(trackId: string): Promise<Track> {
+  if (apiReadMode === 'mock') {
+    const tracks = await mock.listTracks();
+    const track = tracks.find((item) => item.id === trackId);
+    if (!track) throw new Error('track_not_found');
+    return track;
+  }
+  const track = await real.rescanTrack(trackId);
+  realTrackCache.set(track.id, track);
+  return track;
 }
 
 export async function rescanLibrary(libraryId: string): Promise<Job | null> {
@@ -86,9 +101,9 @@ export async function listMatchItems(jobId: string): Promise<MatchItem[]> {
   return real.listMatchItems(jobId);
 }
 
-export async function updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean): Promise<MatchItem | null> {
+export async function updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean, artworkMaxSize?: number): Promise<MatchItem | null> {
   if (apiReadMode === 'mock') return null;
-  return real.updateMatchItem(jobId, trackId, state, selectedCandidateId, fields, artwork);
+  return real.updateMatchItem(jobId, trackId, state, selectedCandidateId, fields, artwork, artworkMaxSize);
 }
 
 export async function rematchMatchItem(jobId: string, trackId: string, track: Track, query?: CandidateSearchQuery, providerIds: string[] = []): Promise<MatchItem | null> {
@@ -111,9 +126,28 @@ export async function createWriteJob(matchJobId: string, items: WriteSelection[]
   return real.createWriteJob(matchJobId, items);
 }
 
-export async function createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job | null> {
+async function encodeArtworkFile(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, Math.min(index + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+export async function createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput): Promise<Job | null> {
   if (apiReadMode === 'mock') return null;
-  return real.createBatchEditJob(items, operations, sequenceTracks);
+  let payload: BatchArtworkPayload | undefined;
+  if (artwork) {
+    payload = {action: artwork.action, maxSize: artwork.maxSize ?? 0};
+    if (artwork.action === 'replace') {
+      if (!artwork.file) throw new Error('请选择要批量写入的封面');
+      payload.data = await encodeArtworkFile(artwork.file);
+      payload.mime = artwork.file.type || 'application/octet-stream';
+    }
+  }
+  return real.createBatchEditJob(items, operations, sequenceTracks, payload);
 }
 
 export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {
@@ -194,8 +228,8 @@ export function subscribeJobEvents(jobId: string, onJob: (job: Job) => void): ()
   return apiReadMode === 'mock' ? () => undefined : real.subscribeJobEvents(jobId, onJob);
 }
 
-export function listRevisions(): Promise<Revision[]> {
-  return apiReadMode === 'mock' ? mock.listRevisions() : real.listRevisions();
+export function listRevisions(limit = 100): Promise<Revision[]> {
+  return apiReadMode === 'mock' ? mock.listRevisions(limit) : real.listRevisions(limit);
 }
 
 export function previewRevisionRestore(revision: Revision): Promise<RestorePreview> {

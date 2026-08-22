@@ -146,9 +146,9 @@ export async function listJobs(): Promise<Job[]> {
   return structuredClone(jobs);
 }
 
-export async function listRevisions(): Promise<Revision[]> {
+export async function listRevisions(limit = 100): Promise<Revision[]> {
   await wait();
-  return structuredClone(revisions);
+  return structuredClone(revisions.slice(0, Math.max(0, limit)));
 }
 
 export function resetMockState(): void {

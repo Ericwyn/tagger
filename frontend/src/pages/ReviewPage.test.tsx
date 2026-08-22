@@ -18,6 +18,9 @@ describe('ReviewPage field selection', () => {
 	const artworkToggle = screen.getByRole('button', {name: '采用替换封面'});
 	await user.click(artworkToggle);
 	expect(screen.getByRole('button', {name: '取消采用替换封面'})).toHaveClass('is-checked');
+	const artworkSize = screen.getByRole('combobox', {name: '审核封面写入尺寸'});
+	await user.selectOptions(artworkSize, '500');
+	expect(artworkSize).toHaveValue('500');
 	});
 
   it('moves to the next track after accepting and cycles alternative candidates', async () => {

@@ -1,8 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -63,6 +68,12 @@ func TestBatchEditWorkerWithCopiedTestMusic(t *testing.T) {
 			{Field: "title", Mode: domain.BatchEditReplace, Find: track.Title, Value: replacedTitle},
 		},
 		SequenceTracks: true,
+		Artwork: &domain.BatchArtwork{
+			Action:  domain.BatchArtworkReplace,
+			Data:    batchArtworkData(t),
+			MIME:    "image/png",
+			MaxSize: 500,
+		},
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -77,20 +88,35 @@ func TestBatchEditWorkerWithCopiedTestMusic(t *testing.T) {
 		t.Fatalf("job = %#v", job)
 	}
 	items, err := dataStore.ListBatchEditItems(context.Background(), created.ID)
-	if err != nil || len(items) != 1 || items[0].State != "written" || !strings.Contains(string(items[0].Diff), "genres") {
+	if err != nil || len(items) != 1 || items[0].State != "written" || !strings.Contains(string(items[0].Diff), "genres") || !strings.Contains(string(items[0].Diff), "artwork") {
 		t.Fatalf("items = %#v err=%v", items, err)
 	}
 	updated, err := service.Track(track.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Title != replacedTitle || updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || !slices.Contains(updated.Genres, "Live") {
+	if updated.Title != replacedTitle || updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || !slices.Contains(updated.Genres, "Live") || updated.ArtworkWidth != 500 || updated.ArtworkHeight != 500 {
 		t.Fatalf("updated track = %#v", updated)
 	}
 	revisions, err := dataStore.ListRevisions(context.Background(), 10)
-	if err != nil || len(revisions) != 1 || revisions[0].Action != "批量编辑标签" {
+	if err != nil || len(revisions) != 1 || revisions[0].Action != "批量编辑标签与封面" {
 		t.Fatalf("revisions = %#v err=%v", revisions, err)
 	}
+}
+
+func batchArtworkData(t *testing.T) string {
+	t.Helper()
+	canvas := image.NewRGBA(image.Rect(0, 0, 1200, 1000))
+	for y := 0; y < canvas.Bounds().Dy(); y++ {
+		for x := 0; x < canvas.Bounds().Dx(); x++ {
+			canvas.SetRGBA(x, y, color.RGBA{R: uint8(x % 255), G: uint8(y % 255), B: 90, A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, canvas); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(encoded.Bytes())
 }
 
 func waitBatchEditJob(t *testing.T, manager *jobs.Manager, id string) domain.Job {

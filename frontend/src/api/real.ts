@@ -23,6 +23,13 @@ import type {
 	LyricsSidecarWriteResult,
 } from '@/types';
 
+export interface BatchArtworkPayload {
+  action: 'replace' | 'delete';
+  data?: string;
+  mime?: string;
+  maxSize?: number;
+}
+
 interface DataEnvelope<T> {
   data: T;
 }
@@ -52,6 +59,7 @@ export interface ScanResult {
 export interface SystemInfo {
   version: string;
   tag_engine: string;
+  listen?: string;
 }
 
 interface FieldOperation<T> {
@@ -162,10 +170,14 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return libraries[0];
     },
 
-    async listTracks(): Promise<Track[]> {
-      const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks');
-      return (result.tracks ?? []).map(normalizeTrack);
-    },
+	async listTracks(): Promise<Track[]> {
+	  const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks');
+	  return (result.tracks ?? []).map(normalizeTrack);
+	},
+
+	rescanTrack(trackId: string): Promise<Track> {
+	  return request<Track>(`/api/v1/tracks/${encodeURIComponent(trackId)}/scan`, {method: 'POST'}).then(normalizeTrack);
+	},
 
 	async rescanLibrary(libraryId: string): Promise<Job> {
 	  return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
@@ -218,11 +230,11 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
 	},
 
-	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean): Promise<MatchItem> {
+	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean, artworkMaxSize?: number): Promise<MatchItem> {
 	  return request<MatchItem>(`/api/v1/matches/jobs/${encodeURIComponent(jobId)}/items/${encodeURIComponent(trackId)}`, {
 		method: 'PATCH',
 		headers: {'Content-Type': 'application/json'},
-		body: JSON.stringify({state, selectedCandidateId, fields, artwork}),
+		body: JSON.stringify({state, selectedCandidateId, fields, artwork, artworkMaxSize}),
 	  });
 	},
 
@@ -240,10 +252,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
-	createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job> {
+	createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean, artwork?: BatchArtworkPayload): Promise<Job> {
 	  return request<Job>('/api/v1/tracks/batch-edit', {
 		method: 'POST', headers: {'Content-Type': 'application/json'},
-		body: JSON.stringify({items, operations, sequenceTracks}),
+		body: JSON.stringify({items, operations, sequenceTracks, ...(artwork ? {artwork} : {})}),
 	  });
 	},
 
@@ -337,8 +349,9 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return request<ProviderConfig[]>('/api/v1/providers');
     },
 
-    listRevisions(): Promise<Revision[]> {
-      return request<Revision[]>('/api/v1/revisions');
+    listRevisions(limit = 100): Promise<Revision[]> {
+      const query = limit > 0 && limit < 100 ? `?limit=${limit}` : '';
+      return request<Revision[]>(`/api/v1/revisions${query}`);
     },
 
     previewRevisionRestore(revisionId: string, baseRevision: string): Promise<RestorePreview> {

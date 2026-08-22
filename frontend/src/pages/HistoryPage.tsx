@@ -13,7 +13,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
 import {listRevisions, previewRevisionRestore, restoreRevision} from '@/api';
-import type {RestorePreview, Revision} from '@/types';
+import {historyRetentionOptions, type HistoryRetention, type RestorePreview, type Revision} from '@/types';
 
 interface HistoryPageProps {
   onNotice: (message: string) => void;
@@ -21,6 +21,12 @@ interface HistoryPageProps {
 }
 
 type HistoryDateFilter = 'all' | '30d';
+const historyRetentionKey = 'tagger-history-retention';
+
+function readHistoryRetention(): HistoryRetention {
+  const value = Number(localStorage.getItem(historyRetentionKey));
+  return historyRetentionOptions.includes(value as HistoryRetention) ? value as HistoryRetention : 20;
+}
 
 export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPageProps) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
@@ -32,9 +38,10 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
   const [restorePreview, setRestorePreview] = useState<RestorePreview>();
   const [restoreState, setRestoreState] = useState<'idle' | 'previewing' | 'restoring'>('idle');
   const [restoreError, setRestoreError] = useState('');
+  const [historyRetention] = useState<HistoryRetention>(readHistoryRetention);
 
   const reload = async () => {
-    const next = await listRevisions();
+    const next = await listRevisions(historyRetention);
     setRevisions(next);
     setActiveId(next[0]?.id);
     setState('ready');

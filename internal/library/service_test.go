@@ -115,3 +115,35 @@ func TestServiceLoadsPersistedIndexAndRescansOnDemand(t *testing.T) {
 		t.Fatalf("explicit rescan reads=%d, want 2", engine.reads.Load())
 	}
 }
+
+func TestServiceRescanTrackOnlyReadsRequestedFile(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"First.mp3", "Second.flac"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	engine := &countingServiceEngine{}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 2 {
+		t.Fatalf("initial reads = %d, want 2", engine.reads.Load())
+	}
+	tracks := service.ListTracks(TrackFilter{})
+	if len(tracks) != 2 {
+		t.Fatalf("tracks = %#v", tracks)
+	}
+	updated, err := service.RescanTrack(context.Background(), tracks[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != tracks[0].ID || engine.reads.Load() != 3 {
+		t.Fatalf("single scan updated=%#v reads=%d, want one additional read", updated, engine.reads.Load())
+	}
+}

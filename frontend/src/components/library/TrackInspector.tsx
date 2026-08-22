@@ -3,7 +3,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  CircleEllipsis,
   Copy,
   FileAudio2,
   History,
@@ -13,6 +12,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  RefreshCw,
   Save,
   Search,
   Sparkles,
@@ -33,6 +33,7 @@ interface TrackInspectorProps {
   onSearch: (focus?: 'metadata' | 'lyrics') => void;
   onSave: (patch: TrackPatch, options?: TrackSaveOptions) => Promise<void>;
   onArtworkChange: (file: File | null, maxSize?: number) => Promise<void>;
+  onRescan?: () => Promise<void>;
   playerTrackId?: string;
   playerPlaying?: boolean;
   onPlayTrack?: (track: Track) => void;
@@ -123,6 +124,7 @@ export function TrackInspector({
   onSearch,
   onSave,
   onArtworkChange,
+  onRescan,
   playerTrackId,
   playerPlaying,
   onPlayTrack,
@@ -271,7 +273,9 @@ export function TrackInspector({
             <span>{formatDuration(track.durationSeconds)}</span>
           </div>
         </div>
-        <button className="hero-more" title="更多曲目操作"><CircleEllipsis size={19} /></button>
+        <button className="hero-more" title="重新读取当前文件" disabled={saving || !onRescan} onClick={() => onRescan && void onRescan()}>
+          {saving ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={17} />}
+        </button>
       </div>
 
       <div className="inspector-tabs" role="tablist">

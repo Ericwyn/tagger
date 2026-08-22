@@ -106,4 +106,18 @@ describe('BatchEditPanel', () => {
     expect(screen.getByLabelText('专辑操作')).toHaveValue('set');
     expect(screen.getByLabelText('专辑值')).toHaveValue('现场精选');
   });
+
+  it('supports replacing the same embedded cover across the selected tracks', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn().mockResolvedValue(undefined);
+    render(<BatchEditPanel open tracks={[track]} saving={false} onClose={vi.fn()} onApply={onApply} />);
+
+    await user.selectOptions(screen.getByLabelText('批量封面操作'), 'replace');
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'batch-cover.png', {type: 'image/png'});
+    await user.upload(screen.getByLabelText('选择封面图片'), file);
+    await user.selectOptions(screen.getByLabelText('批量封面写入尺寸'), '500');
+    await user.click(screen.getByRole('button', {name: /应用到 1 首/}));
+
+    expect(onApply).toHaveBeenCalledWith([], false, {action: 'replace', file, maxSize: 500});
+  });
 });

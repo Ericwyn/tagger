@@ -35,6 +35,7 @@ interface ReviewItem {
   state: ReviewState;
   fields: string[];
   includeArtwork: boolean;
+  artworkMaxSize: number;
   error?: string;
 }
 
@@ -115,8 +116,9 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       let errorByTrack = new Map<string, string>();
       let matchStateByTrack = new Map<string, MatchItem['state']>();
       let selectedCandidateByTrack = new Map<string, string>();
-      let reviewFieldsByTrack = new Map<string, string[] | null | undefined>();
-      let reviewArtworkByTrack = new Map<string, boolean>();
+	  let reviewFieldsByTrack = new Map<string, string[] | null | undefined>();
+	  let reviewArtworkByTrack = new Map<string, boolean>();
+	  let reviewArtworkMaxSizeByTrack = new Map<string, number>();
       if (apiReadMode === 'real') {
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
         if (created) {
@@ -135,8 +137,9 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           selectedCandidateByTrack = new Map(matchItems
             .filter((item) => item.selectedCandidateId)
             .map((item) => [item.trackId, item.selectedCandidateId!] as const));
-          reviewFieldsByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewFields] as const));
-          reviewArtworkByTrack = new Map(matchItems.map((item) => [item.trackId, Boolean(item.reviewArtwork)] as const));
+		  reviewFieldsByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewFields] as const));
+		  reviewArtworkByTrack = new Map(matchItems.map((item) => [item.trackId, Boolean(item.reviewArtwork)] as const));
+		  reviewArtworkMaxSizeByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewArtworkMaxSize ?? 0] as const));
         }
       }
       const reviewed = next.map((track) => {
@@ -151,6 +154,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           candidates,
           fields: candidate ? (persistedFields == null ? availableFields(candidate) : persistedFields) : [],
           includeArtwork: reviewArtworkByTrack.get(track.id) ?? false,
+		  artworkMaxSize: reviewArtworkMaxSizeByTrack.get(track.id) ?? 0,
           error: errorByTrack.get(track.id),
           state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 ? 'accepted' as const : 'review' as const,
         };
@@ -191,9 +195,9 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, state} : item));
   };
 
-  const persistReviewState = (trackId: string, state: 'review' | 'accepted' | 'skipped', candidateId?: string, fields?: string[], artwork?: boolean) => {
+  const persistReviewState = (trackId: string, state: 'review' | 'accepted' | 'skipped', candidateId?: string, fields?: string[], artwork?: boolean, artworkMaxSize = 0) => {
     if (apiReadMode !== 'real' || !job) return;
-    void updateMatchItem(job.id, trackId, state, candidateId, fields, artwork).catch(() => undefined);
+    void updateMatchItem(job.id, trackId, state, candidateId, fields, artwork, artworkMaxSize).catch(() => undefined);
   };
 
   const toggleFields = (trackId: string, fields: string[]) => {
@@ -205,7 +209,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     const nextFields = [...next];
     const nextState = next.size === 0 && item.state === 'accepted' ? 'review' : item.state;
     setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, fields: nextFields, state: nextState} : entry));
-    persistReviewState(trackId, nextState, item.candidate?.id, nextFields, item.includeArtwork);
+    persistReviewState(trackId, nextState, item.candidate?.id, nextFields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0);
   };
 
   const toggleField = (trackId: string, field: string) => toggleFields(trackId, [field]);
@@ -225,15 +229,23 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     setItems((current) => current.map((entry) => entry.track.id === trackId
       ? {...entry, candidate: nextCandidate, fields: availableFields(nextCandidate), state: 'review'}
       : entry));
-    persistReviewState(trackId, 'review', nextCandidate.id, availableFields(nextCandidate), false);
+    persistReviewState(trackId, 'review', nextCandidate.id, availableFields(nextCandidate), false, 0);
   };
 
   const toggleArtwork = (trackId: string) => {
     const item = items.find((entry) => entry.track.id === trackId);
     if (!item) return;
     const includeArtwork = !item.includeArtwork;
-    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, includeArtwork} : entry));
-    persistReviewState(trackId, item.state, item.candidate?.id, item.fields, includeArtwork);
+    const artworkMaxSize = includeArtwork ? item.artworkMaxSize : 0;
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, includeArtwork, artworkMaxSize} : entry));
+    persistReviewState(trackId, item.state, item.candidate?.id, item.fields, includeArtwork, artworkMaxSize);
+  };
+
+  const setArtworkMaxSize = (trackId: string, artworkMaxSize: number) => {
+    const item = items.find((entry) => entry.track.id === trackId);
+    if (!item || !item.includeArtwork) return;
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, artworkMaxSize} : entry));
+    persistReviewState(trackId, item.state, item.candidate?.id, item.fields, true, artworkMaxSize);
   };
 
   const rematchCurrent = async () => {
@@ -252,6 +264,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           candidates,
           fields: candidate ? availableFields(candidate) : [],
           includeArtwork: false,
+          artworkMaxSize: 0,
           state: candidate ? 'review' : 'skipped',
           error: result.error,
         }
@@ -313,7 +326,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           onClick={() => {
             const highConfidence = items.filter((item) => item.candidate && item.candidate.score >= 0.92);
             setItems((current) => current.map((item) => item.candidate && item.candidate.score >= 0.92 ? {...item, state: 'accepted'} : item));
-            highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork));
+            highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0));
           }}
         >
           <Check size={15} /> 接受所有高置信
@@ -431,10 +444,27 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} />}
             </div>
 
+            {active.candidate.hasArtwork && (
+              <label className="review-artwork-size-control">
+                <span>封面写入尺寸</span>
+                <select
+                  aria-label="审核封面写入尺寸"
+                  value={active.artworkMaxSize}
+                  disabled={!active.includeArtwork}
+                  onChange={(event) => setArtworkMaxSize(active.track.id, Number(event.target.value))}
+                >
+                  <option value={0}>保留原图</option>
+                  <option value={1000}>居中裁剪至 1000×1000</option>
+                  <option value={500}>居中裁剪至 500×500</option>
+                </select>
+                <small>仅在勾选“替换封面”时写入；小于目标尺寸的图片不会被放大。</small>
+              </label>
+            )}
+
             <div className="review-detail-actions">
-              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
+              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
               <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => changeCandidate(active.track.id)}><ChevronRight size={15} /> 更换候选</button>
-              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id, active.fields, active.includeArtwork); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
+              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
             </div>
           </section>
         )}
@@ -469,7 +499,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 				await createWriteJob(job.id, items.filter((item) => item.state === 'accepted').map((item) => ({
 				  trackId: item.track.id, candidateId: item.candidate!.id, baseRevision: item.track.revision,
 				  fields: item.fields,
-				  artwork: item.includeArtwork,
+                  artwork: item.includeArtwork,
+                  artworkMaxSize: item.includeArtwork ? item.artworkMaxSize : 0,
 				})));
 			  } else {
 				await new Promise((resolve) => window.setTimeout(resolve, 700));
