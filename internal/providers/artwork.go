@@ -64,6 +64,10 @@ func validateArtworkURL(providerID, value string) (*url.URL, error) {
 		allowed = host == "coverartarchive.org" || host == "archive.org" || strings.HasSuffix(host, ".archive.org")
 	case "apple":
 		allowed = host == "mzstatic.com" || strings.HasSuffix(host, ".mzstatic.com")
+	case "netease":
+		allowed = host == "music.126.net" || strings.HasSuffix(host, ".music.126.net")
+	case "kuwo":
+		allowed = host == "kuwo.cn" || strings.HasSuffix(host, ".kuwo.cn")
 	}
 	if !allowed {
 		return nil, fmt.Errorf("%w: host %q is not allowed for %s", ErrUnsafeArtworkURL, host, providerID)

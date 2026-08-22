@@ -16,8 +16,10 @@ import (
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/providers/itunes"
+	"github.com/ericwyn/tagger/internal/providers/kuwo"
 	"github.com/ericwyn/tagger/internal/providers/lrclib"
 	"github.com/ericwyn/tagger/internal/providers/musicbrainz"
+	"github.com/ericwyn/tagger/internal/providers/netease"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/server"
 	"github.com/ericwyn/tagger/internal/store"
@@ -68,16 +70,8 @@ func main() {
 		musicbrainz.New(musicbrainz.Config{}),
 		lrclib.New(lrclib.Config{}),
 		itunes.New(itunes.Config{}),
-		providers.NewPlaceholder(providers.Descriptor{
-			ID: "netease", Name: "网易云音乐", ShortName: "NE", Description: "中文曲库、歌词与发行信息",
-			Capabilities: []string{"歌曲", "专辑", "歌词", "封面"}, Health: providers.HealthDisabled,
-			Enabled: false, Experimental: true, Accent: "#d62d20", QuotaLabel: "实验性适配器 · 尚未启用",
-		}),
-		providers.NewPlaceholder(providers.Descriptor{
-			ID: "kuwo", Name: "酷我音乐", ShortName: "KW", Description: "中文曲库补充来源",
-			Capabilities: []string{"歌曲", "歌词", "封面"}, Health: providers.HealthDisabled,
-			Enabled: false, Experimental: true, Accent: "#d69e2e", QuotaLabel: "实验性适配器 · 尚未启用",
-		}),
+		netease.New(netease.Config{}),
+		kuwo.New(kuwo.Config{}),
 	)
 	if err := providerRegistry.SetPersistence(context.Background(), dataStore); err != nil {
 		logger.Error("load provider persistence", "error", err)

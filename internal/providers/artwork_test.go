@@ -24,6 +24,8 @@ func TestValidateArtworkURLUsesProviderAllowlist(t *testing.T) {
 		{"musicbrainz", "https://coverartarchive.org/release/id/front-500"},
 		{"musicbrainz", "https://ia801.test.archive.org/file.jpg"},
 		{"apple", "https://is1-ssl.mzstatic.com/image/thumb.jpg"},
+		{"netease", "https://p1.music.126.net/cover.jpg"},
+		{"kuwo", "https://img1.kuwo.cn/cover.jpg"},
 	}
 	for _, item := range allowed {
 		if _, err := validateArtworkURL(item.provider, item.url); err != nil {
