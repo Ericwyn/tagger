@@ -10,12 +10,14 @@ import {
   KeyRound,
   LoaderCircle,
   Network,
+  Palette,
   Plus,
   RefreshCw,
   Save,
   ServerCog,
   ShieldCheck,
   TestTube2,
+  Type,
   ToggleLeft,
   ToggleRight,
   X,
@@ -24,12 +26,17 @@ import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
 import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, probeLibrary, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
+import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
   showGeneratedCovers: boolean;
   onShowGeneratedCoversChange: (value: boolean) => void;
+  theme?: ThemeID;
+  onThemeChange?: (value: ThemeID) => void;
+  font?: FontID;
+  onFontChange?: (value: FontID) => void;
 }
 
 type SettingsTab = 'libraries' | 'providers' | 'system';
@@ -82,7 +89,7 @@ function candidateAssetLabel(candidate: MatchCandidate): string {
   return assets.length > 0 ? assets.join(' + ') : '仅元数据';
 }
 
-export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCoversChange}: SettingsPageProps) {
+export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCoversChange, theme = 'ivory', onThemeChange = () => undefined, font = 'editorial', onFontChange = () => undefined}: SettingsPageProps) {
   const [tab, setTab] = useState<SettingsTab>('providers');
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testingId, setTestingId] = useState<string>();
@@ -581,6 +588,23 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <>
               <div className="settings-content-head"><div><h2>系统与安全</h2><p>单进程运行参数和文件修改保护。</p></div></div>
               <div className="system-settings">
+                <section className="theme-settings-row">
+                  <div className="system-icon"><Palette size={19} /></div>
+                  <div><strong>主题与字体</strong><p>配色和文字排版只保存在当前浏览器，不影响音乐文件。</p></div>
+                  <div className="theme-settings-controls">
+                    <div className="theme-option-grid" role="group" aria-label="界面主题">
+                      {themeOptions.map((option) => (
+                        <button key={option.id} type="button" className={cn('theme-option', theme === option.id && 'is-selected')} aria-pressed={theme === option.id} onClick={() => onThemeChange(option.id)}>
+                          <span className="theme-swatch" aria-hidden="true"><i style={{background: option.swatch[0]}} /><i style={{background: option.swatch[1]}} /><i style={{background: option.swatch[2]}} /></span>
+                          <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                        </button>
+                      ))}
+                    </div>
+                    <label className="system-select theme-font-select"><span><Type size={13} />界面字体</span><select aria-label="界面字体" value={font} onChange={(event) => onFontChange(event.target.value as FontID)}>
+                      {fontOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                    </select></label>
+                  </div>
+                </section>
                 <section>
                   <div className="system-icon"><ServerCog size={19} /></div>
                   <div><strong>HTTP 服务</strong><p>默认仅监听本机，外网访问建议使用 HTTPS 反向代理。</p></div>

@@ -5,7 +5,10 @@ import {App} from '@/App';
 import {resetMockState} from '@/mock/api';
 
 describe('Tagger app prototype', () => {
-  afterEach(() => resetMockState());
+  afterEach(() => {
+    resetMockState();
+    window.history.replaceState({}, '', '/');
+  });
 
   it('loads the TestMusic library and active track inspector', async () => {
     render(<App />);
@@ -18,12 +21,13 @@ describe('Tagger app prototype', () => {
     expect(screen.queryByTitle('账户与系统信息')).not.toBeInTheDocument();
   });
 
-  it('keeps the theme control beside settings and leaves the far right for the player', async () => {
+  it('keeps the navigation compact and leaves the far right for the player', async () => {
     render(<App />);
     const navigation = screen.getByRole('navigation', {name: '主导航'});
     const buttons = within(navigation).getAllByRole('button');
     expect(buttons[3]).toHaveTextContent('设置');
-    expect(buttons[4]).toHaveTextContent('主题');
+    expect(buttons).toHaveLength(4);
+    expect(screen.queryByTitle('切换深色主题')).not.toBeInTheDocument();
     expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
   });
 
@@ -41,6 +45,30 @@ describe('Tagger app prototype', () => {
     await user.click(screen.getByRole('button', {name: '设置'}));
     expect(await screen.findByRole('heading', {name: '设置'})).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('MusicBrainz')).toBeInTheDocument());
+  });
+
+  it('updates the browser URL and responds to browser back navigation', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', {name: '全部音乐'});
+    await user.click(screen.getByRole('button', {name: /任务/}));
+    expect(window.location.pathname).toBe('/jobs');
+    await user.click(screen.getByRole('button', {name: '历史'}));
+    expect(window.location.pathname).toBe('/history');
+    window.history.back();
+    expect(await screen.findByRole('heading', {name: '任务中心'})).toBeInTheDocument();
+  });
+
+  it('keeps theme and font choices inside settings', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', {name: '设置'}));
+    await screen.findByRole('heading', {name: '设置'});
+    await user.click(screen.getByRole('button', {name: /系统/}));
+    await user.click(screen.getByRole('button', {name: /灰绿色/}));
+    expect(document.documentElement.dataset.theme).toBe('sage');
+    await user.selectOptions(screen.getByRole('combobox', {name: '界面字体'}), 'clean');
+    expect(document.documentElement.dataset.font).toBe('clean');
   });
 
   it('keeps the global player mounted while changing pages', async () => {

@@ -8,13 +8,14 @@ import {JobsPage} from '@/pages/JobsPage';
 import {LibraryPage} from '@/pages/LibraryPage';
 import {ReviewPage} from '@/pages/ReviewPage';
 import {SettingsPage} from '@/pages/SettingsPage';
+import {pageRoute, readRoute, routePath, type AppRoute} from '@/lib/router';
+import {normalizeFont, normalizeTheme, type FontID, type ThemeID} from '@/theme';
 import type {PageID, Track} from '@/types';
 
 export function App() {
-  const [page, setPage] = useState<PageID>('library');
-  const [batchIds, setBatchIds] = useState<string[]>([]);
-  const [reviewJobId, setReviewJobId] = useState<string>();
-  const [dark, setDark] = useState(() => localStorage.getItem('tagger-theme') === 'dark');
+  const [route, setRoute] = useState<AppRoute>(() => readRoute());
+  const [theme, setTheme] = useState<ThemeID>(() => normalizeTheme(localStorage.getItem('tagger-theme-v2') ?? localStorage.getItem('tagger-theme')));
+  const [font, setFont] = useState<FontID>(() => normalizeFont(localStorage.getItem('tagger-font-v1')));
   const [notice, setNotice] = useState<string | null>(null);
   const [playerTrack, setPlayerTrack] = useState<Track | null>(null);
   const [playerPlaying, setPlayerPlaying] = useState(false);
@@ -23,9 +24,25 @@ export function App() {
   const [authError, setAuthError] = useState('');
 
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('tagger-theme', dark ? 'dark' : 'light');
-  }, [dark]);
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('tagger-theme-v2', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    document.documentElement.dataset.font = font;
+    localStorage.setItem('tagger-font-v1', font);
+  }, [font]);
+
+  useEffect(() => {
+    const handlePopState = () => setRoute(readRoute());
+    window.addEventListener('popstate', handlePopState);
+    const current = `${window.location.pathname}${window.location.search}`;
+    const canonical = routePath(route);
+    if (current !== canonical) window.history.replaceState({}, '', canonical);
+    return () => window.removeEventListener('popstate', handlePopState);
+    // Route is intentionally captured only on mount; browser navigation owns later updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('tagger-generated-covers', String(showGeneratedCovers));
@@ -45,17 +62,22 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  const openReview = (ids: string[]) => {
-    setBatchIds(ids);
-    setReviewJobId(undefined);
-    setPage('review');
+  const navigate = (nextRoute: AppRoute) => {
+    const nextPath = routePath(nextRoute);
+    const currentPath = `${window.location.pathname}${window.location.search}`;
+    if (currentPath === nextPath) {
+      setRoute(nextRoute);
+      return;
+    }
+    window.history.pushState({}, '', nextPath);
+    setRoute(nextRoute);
   };
 
-  const openReviewJob = (jobId: string) => {
-    setBatchIds([]);
-    setReviewJobId(jobId);
-    setPage('review');
-  };
+  const navigatePage = (nextPage: PageID) => navigate(pageRoute(nextPage));
+
+  const openReview = (ids: string[]) => navigate({page: 'review', batchIds: ids});
+
+  const openReviewJob = (jobId: string) => navigate({page: 'review', batchIds: [], reviewJobId: jobId});
 
   const playTrack = (track: Track) => {
     setPlayerTrack(track);
@@ -87,10 +109,8 @@ export function App() {
   return (
     <div className="app-shell">
       <TopBar
-        page={page}
-        onNavigate={setPage}
-        dark={dark}
-        onToggleTheme={() => setDark((value) => !value)}
+        page={route.page}
+        onNavigate={navigatePage}
         playerTrack={playerTrack}
         playerPlaying={playerPlaying}
         onPlayerPlayingChange={setPlayerPlaying}
@@ -99,29 +119,29 @@ export function App() {
       <main className="app-main">
         <AnimatePresence mode="wait">
           <motion.div
-            key={page}
+            key={route.page}
             className="page-motion"
             initial={{opacity: 0, y: 8}}
             animate={{opacity: 1, y: 0}}
             exit={{opacity: 0, y: -5}}
             transition={{duration: 0.22, ease: [0.22, 1, 0.36, 1]}}
           >
-            {page === 'library' && <LibraryPage onOpenReview={openReview} onNotice={setNotice} playerTrackId={playerTrack?.id} playerPlaying={playerPlaying} onPlayTrack={playTrack} onTogglePlayer={() => setPlayerPlaying((value) => !value)} showGeneratedCovers={showGeneratedCovers} />}
-            {page === 'review' && (
+            {route.page === 'library' && <LibraryPage onOpenReview={openReview} onNotice={setNotice} playerTrackId={playerTrack?.id} playerPlaying={playerPlaying} onPlayTrack={playTrack} onTogglePlayer={() => setPlayerPlaying((value) => !value)} showGeneratedCovers={showGeneratedCovers} />}
+            {route.page === 'review' && (
               <ReviewPage
-                trackIds={batchIds}
-                matchJobId={reviewJobId}
+                trackIds={route.batchIds}
+                matchJobId={route.reviewJobId}
                 showGeneratedCovers={showGeneratedCovers}
-                onBack={() => setPage('library')}
+                onBack={() => navigatePage('library')}
                 onComplete={() => {
                   setNotice('批量写入任务已创建，正在等待安全写入');
-                  setPage('jobs');
+                  navigatePage('jobs');
                 }}
               />
             )}
-            {page === 'jobs' && <JobsPage onOpenReview={openReviewJob} />}
-            {page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
-            {page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} />}
+            {route.page === 'jobs' && <JobsPage onOpenReview={openReviewJob} />}
+            {route.page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
+            {route.page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} theme={theme} onThemeChange={setTheme} font={font} onFontChange={setFont} />}
           </motion.div>
         </AnimatePresence>
       </main>

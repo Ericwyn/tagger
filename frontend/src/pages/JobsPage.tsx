@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {apiReadMode, cancelJob, listBatchEditItems, listJobs, listTracks, retryJob, subscribeJobEvents} from '@/api';
+import {ConfirmDialog} from '@/components/ConfirmDialog';
 import type {BatchEditItem, Job} from '@/types';
 
 interface JobsPageProps {
@@ -72,6 +73,9 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 	const [actionError, setActionError] = useState('');
 	const [batchItems, setBatchItems] = useState<BatchEditItem[]>([]);
 	const [trackNames, setTrackNames] = useState<Map<string, string>>(new Map());
+	const [discardJob, setDiscardJob] = useState<Job>();
+	const [discarding, setDiscarding] = useState(false);
+	const [discardError, setDiscardError] = useState('');
 
 	const refresh = () => listJobs().then((next) => {
 	  setJobs(next);
@@ -80,6 +84,21 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 
 	const updateJob = (next: Job) => {
 	  setJobs((current) => current.map((job) => job.id === next.id ? next : job));
+	};
+
+	const discardReviewJob = async () => {
+	  if (!discardJob || discarding) return;
+	  setDiscarding(true);
+	  setDiscardError('');
+	  try {
+	    const next = await cancelJob(discardJob.id);
+	    if (next) updateJob(next);
+	    setDiscardJob(undefined);
+	  } catch (error) {
+	    setDiscardError(error instanceof Error ? error.message : '丢弃审核任务失败');
+	  } finally {
+	    setDiscarding(false);
+	  }
 	};
 
   useEffect(() => {
@@ -228,11 +247,7 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
                 <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
                   <Sparkles size={15} /> 打开审核页
                 </button>
-                {apiReadMode === 'real' && <button className="danger-quiet full-button" onClick={() => {
-                  if (!window.confirm('丢弃这次待审核结果？不会修改音乐文件。')) return;
-                  setActionError('');
-                  void cancelJob(active.id).then((next) => { if (next) updateJob(next); }).catch((error) => setActionError(error instanceof Error ? error.message : '丢弃审核任务失败'));
-                }}>
+                {apiReadMode === 'real' && <button className="danger-quiet full-button" onClick={() => { setDiscardError(''); setDiscardJob(active); }}>
                   <X size={15} /> 丢弃审核任务
                 </button>}
               </>
@@ -257,6 +272,16 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
           </aside>
         )}
       </div>
+      <ConfirmDialog
+        open={Boolean(discardJob)}
+        title="丢弃待审核结果？"
+        description="这只会删除本次抓取的候选和审核快照，不会修改任何音乐文件。丢弃后才能安全切换到其他曲库。"
+        confirmLabel="确认丢弃"
+        busy={discarding}
+        error={discardError}
+        onCancel={() => { if (!discarding) { setDiscardJob(undefined); setDiscardError(''); } }}
+        onConfirm={() => void discardReviewJob()}
+      />
     </div>
   );
 }

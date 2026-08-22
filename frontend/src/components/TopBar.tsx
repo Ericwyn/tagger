@@ -2,9 +2,7 @@ import {
   History,
   LibraryBig,
   ListTodo,
-  MoonStar,
   Settings2,
-  SunMedium,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {GlobalPlayer} from '@/components/GlobalPlayer';
@@ -13,8 +11,6 @@ import type {PageID, Track} from '@/types';
 interface TopBarProps {
   page: PageID;
   onNavigate: (page: PageID) => void;
-  dark: boolean;
-  onToggleTheme: () => void;
   playerTrack: Track | null;
   playerPlaying: boolean;
   onPlayerPlayingChange: (playing: boolean) => void;
@@ -28,7 +24,7 @@ const navItems: Array<{id: PageID; label: string; icon: typeof LibraryBig}> = [
   {id: 'settings', label: '设置', icon: Settings2},
 ];
 
-export function TopBar({page, onNavigate, dark, onToggleTheme, playerTrack, playerPlaying, onPlayerPlayingChange, onPlayerClose}: TopBarProps) {
+export function TopBar({page, onNavigate, playerTrack, playerPlaying, onPlayerPlayingChange, onPlayerClose}: TopBarProps) {
   return (
     <header className="top-bar">
       <button className="brand-block" onClick={() => onNavigate('library')} aria-label="返回曲库">
@@ -54,15 +50,6 @@ export function TopBar({page, onNavigate, dark, onToggleTheme, playerTrack, play
             <span>{label}</span>
           </button>
         ))}
-        <button
-          className="nav-theme-toggle"
-          title={dark ? '切换浅色主题' : '切换深色主题'}
-          aria-label={dark ? '切换浅色主题' : '切换深色主题'}
-          onClick={onToggleTheme}
-        >
-          {dark ? <SunMedium size={16} aria-hidden="true" /> : <MoonStar size={16} aria-hidden="true" />}
-          <span>主题</span>
-        </button>
       </nav>
 
       <GlobalPlayer track={playerTrack} playing={playerPlaying} onPlayingChange={onPlayerPlayingChange} onClose={onPlayerClose} />

@@ -59,11 +59,11 @@ describe('JobsPage', () => {
     } as const;
     api.listJobs.mockResolvedValue([reviewJob]);
     api.cancelJob.mockResolvedValue({...reviewJob, state: 'cancelled', detail: '任务已取消'});
-    vi.stubGlobal('confirm', vi.fn(() => true));
     render(<JobsPage onOpenReview={() => {}} />);
     expect(await screen.findByRole('heading', {name: '批量抓取元数据'})).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '丢弃审核任务'}));
+    expect(screen.getByRole('dialog', {name: '丢弃待审核结果？'})).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: '确认丢弃'}));
     await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith('job-review'));
-    vi.unstubAllGlobals();
   });
 });
