@@ -2,6 +2,7 @@ package kuwo
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -17,8 +18,8 @@ func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f
 func TestSearchMapsKuwoResponse(t *testing.T) {
 	searchBody := `{"abslist":[{"MUSICRID":"MUSIC_123","SONGNAME":"Song","ARTIST":"Artist&Guest","ALBUM":"Album","ALBUMARTIST":"Artist","SONG_DURATION":"03:21","TRACKNUM":4,"web_albumpic_short":"120/54/7/152082279.jpg"}]}`
 	lyricsBody := `{"data":{"lrclist":[{"time":"1.25","lineLyric":"第一行"},{"time": "65.5", "lineLyric":"第二行"}]}}`
-	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", Auth: "Bearer test", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path == "/search" && (r.Header.Get("Authorization") != "Bearer test" || r.Header.Get("Referer") == "" || r.Header.Get("Origin") == "") {
+	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", Auth: "Bearer test", Cookie: "kw_token=test-cookie", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/search" && (r.Header.Get("Authorization") != "Bearer test" || r.Header.Get("Cookie") != "kw_token=test-cookie" || r.Header.Get("Referer") == "" || r.Header.Get("Origin") == "") {
 			t.Fatalf("search headers = %#v", r.Header)
 		}
 		body := searchBody
@@ -36,6 +37,17 @@ func TestSearchMapsKuwoResponse(t *testing.T) {
 	}
 	if items[0].Lyrics != "[00:01.25]第一行\n[01:05.50]第二行" || items[0].SyncedLyrics != items[0].Lyrics {
 		t.Fatalf("lyrics = %q synced=%q", items[0].Lyrics, items[0].SyncedLyrics)
+	}
+}
+
+func TestSearchSurfacesKuwoBusinessAuthError(t *testing.T) {
+	client := New(Config{Endpoint: "https://example.test/search", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":401,"msg":"登录已过期"}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+	})}})
+	_, err := client.Search(context.Background(), providers.Query{Title: "Song"}, 1)
+	var businessErr *providers.BusinessError
+	if !errors.As(err, &businessErr) || !strings.Contains(err.Error(), "登录已过期") {
+		t.Fatalf("error=%T %v", err, err)
 	}
 }
 

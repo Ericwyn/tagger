@@ -24,6 +24,7 @@ type Config struct {
 	ArtworkEndpoint   string
 	UserAgent         string
 	Auth              string
+	Cookie            string
 	RateInterval      time.Duration
 }
 
@@ -79,6 +80,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "artworkEndpoint", Label: "封面 API URL", Type: "url", Value: c.config.ArtworkEndpoint, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "kg_mid=…"},
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -119,6 +121,8 @@ func (c *Client) Configure(values map[string]string) error {
 			c.config.UserAgent = strings.TrimSpace(value)
 		case "auth":
 			c.config.Auth = strings.TrimSpace(value)
+		case "cookie":
+			c.config.Cookie = strings.TrimSpace(value)
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -164,7 +168,14 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			"showtype": {"1"},
 		}
 		var response searchResponse
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.SearchEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &response); err != nil {
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.SearchEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+			searchErr = err
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		if err := response.businessError(); err != nil {
 			searchErr = err
 			if index == 0 {
 				return nil, err
@@ -226,7 +237,10 @@ func (c *Client) fetchLyrics(ctx context.Context, hash string) (string, error) {
 		"album_audio_id": {""},
 	}
 	var search lyricSearchResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsSearchURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &search); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsSearchURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &search); err != nil {
+		return "", err
+	}
+	if err := search.businessError(); err != nil {
 		return "", err
 	}
 	if len(search.Candidates) == 0 {
@@ -249,7 +263,10 @@ func (c *Client) fetchLyrics(ctx context.Context, hash string) (string, error) {
 		"charset":   {"utf8"},
 	}
 	var download lyricDownloadResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsDownloadURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &download); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricsDownloadURL+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &download); err != nil {
+		return "", err
+	}
+	if err := download.businessError(); err != nil {
 		return "", err
 	}
 	return decodeLyrics(download.Content)
@@ -269,7 +286,10 @@ func (c *Client) fetchArtwork(ctx context.Context, hash, albumID string) (string
 		"_":        {strconv.FormatInt(time.Now().UnixMilli(), 10)},
 	}
 	var response artworkResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.ArtworkEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.ArtworkEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+		return "", err
+	}
+	if err := response.businessError(); err != nil {
 		return "", err
 	}
 	imageURL := strings.TrimSpace(response.Data.Image)
@@ -455,10 +475,13 @@ func parseDuration(value stringOrNumber) int64 {
 	return number
 }
 
-func kugouHeaders(auth string) map[string]string {
+func kugouHeaders(auth, cookie string) map[string]string {
 	result := map[string]string{"Referer": "https://www.kugou.com/", "Origin": "https://www.kugou.com"}
 	if strings.TrimSpace(auth) != "" {
 		result["Authorization"] = strings.TrimSpace(auth)
+	}
+	if strings.TrimSpace(cookie) != "" {
+		result["Cookie"] = strings.TrimSpace(cookie)
 	}
 	return result
 }
@@ -539,7 +562,10 @@ type songItem struct {
 }
 
 type searchResponse struct {
-	Data struct {
+	Status    stringOrNumber `json:"status"`
+	ErrorCode stringOrNumber `json:"error_code"`
+	Message   string         `json:"error"`
+	Data      struct {
 		Info []songItem `json:"info"`
 	} `json:"data"`
 }
@@ -550,15 +576,59 @@ type lyricCandidate struct {
 }
 
 type lyricSearchResponse struct {
+	Status     stringOrNumber   `json:"status"`
+	ErrorCode  stringOrNumber   `json:"error_code"`
+	Message    string           `json:"error"`
 	Candidates []lyricCandidate `json:"candidates"`
 }
 
 type lyricDownloadResponse struct {
-	Content string `json:"content"`
+	Status    stringOrNumber `json:"status"`
+	ErrorCode stringOrNumber `json:"error_code"`
+	Message   string         `json:"error"`
+	Content   string         `json:"content"`
 }
 
 type artworkResponse struct {
-	Data struct {
+	Status    stringOrNumber `json:"status"`
+	ErrorCode stringOrNumber `json:"error_code"`
+	Message   string         `json:"error"`
+	Data      struct {
 		Image string `json:"img"`
 	} `json:"data"`
+}
+
+func (r searchResponse) businessError() error {
+	return kugouBusinessError(r.Status, r.ErrorCode, r.Message)
+}
+
+func (r lyricSearchResponse) businessError() error {
+	return kugouBusinessError(r.Status, r.ErrorCode, r.Message)
+}
+
+func (r lyricDownloadResponse) businessError() error {
+	return kugouBusinessError(r.Status, r.ErrorCode, r.Message)
+}
+
+func (r artworkResponse) businessError() error {
+	return kugouBusinessError(r.Status, r.ErrorCode, r.Message)
+}
+
+func kugouBusinessError(status, errorCode stringOrNumber, message string) error {
+	code := strings.TrimSpace(errorCode.String())
+	if code != "" && code != "0" {
+		return &providers.BusinessError{Provider: "kugou", Code: "error_code=" + code, Message: message, Retryable: code == "429" || strings.HasPrefix(code, "5")}
+	}
+	value := strings.ToLower(strings.TrimSpace(status.String()))
+	if value == "" || value == "0" || value == "1" || value == "200" || value == "ok" || value == "success" {
+		return nil
+	}
+	if value == "error" || value == "fail" || value == "failed" || value == "unauthorized" || value == "forbidden" || value == "ratelimit" || value == "rate_limited" {
+		return &providers.BusinessError{Provider: "kugou", Code: "status=" + value, Message: message}
+	}
+	parsed, err := strconv.Atoi(value)
+	if err == nil && (parsed < 0 || parsed == 401 || parsed == 403 || parsed == 429 || parsed >= 500) {
+		return &providers.BusinessError{Provider: "kugou", Code: "status=" + value, Message: message, Retryable: parsed == 429 || parsed >= 500}
+	}
+	return nil
 }

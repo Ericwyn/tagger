@@ -728,7 +728,7 @@ func TestProviderTestKeepsStructuredFailureDiagnostics(t *testing.T) {
 	s := newTestServer(t)
 	s.providers = providers.NewRegistry(failingServerProvider{})
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/failing-provider/test", nil)
-	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"status":"error"`) || !containsJSON(response.Body.Bytes(), `"retryable":true`) || !containsJSON(response.Body.Bytes(), `"retryAfterMs":1500`) || !containsJSON(response.Body.Bytes(), `"stage":"search"`) {
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"status":"error"`) || !containsJSON(response.Body.Bytes(), `"retryable":true`) || !containsJSON(response.Body.Bytes(), `"retryAfterMs":1500`) || !containsJSON(response.Body.Bytes(), `"hint":"数据源服务暂时不可用`) || !containsJSON(response.Body.Bytes(), `"stage":"search"`) {
 		t.Fatalf("failure diagnostics = %d %s", response.Code, response.Body.String())
 	}
 }

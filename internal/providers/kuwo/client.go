@@ -23,6 +23,7 @@ type Config struct {
 	LyricsFileEndpoint string
 	UserAgent          string
 	Auth               string
+	Cookie             string
 	RateInterval       time.Duration
 }
 type Client struct {
@@ -71,6 +72,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "lyricsFileEndpoint", Label: "歌词文件 URL", Type: "url", Value: c.config.LyricsFileEndpoint, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "kw_token=…"},
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -111,6 +113,8 @@ func (c *Client) Configure(values map[string]string) error {
 			c.config.UserAgent = strings.TrimSpace(value)
 		case "auth":
 			c.config.Auth = strings.TrimSpace(value)
+		case "cookie":
+			c.config.Cookie = strings.TrimSpace(value)
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -158,9 +162,21 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		}
 		values := url.Values{"client": {"kt"}, "ft": {"music"}, "cluster": {"0"}, "strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"}, "pn": {"0"}, "rn": {strconv.Itoa(fetchLimit)}, "all": {keyword}}
 		var response struct {
-			Items []kuwoItem `json:"abslist"`
+			Items   []kuwoItem      `json:"abslist"`
+			Code    json.RawMessage `json:"code"`
+			Status  json.RawMessage `json:"status"`
+			Message string          `json:"msg"`
 		}
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, kuwoHeaders(c.config.Auth), &response); err != nil {
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, kuwoHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		if err := kuwoBusinessError(response.Code, response.Status, response.Message); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -228,7 +244,10 @@ type kuwoItem struct {
 }
 
 type lyricPayload struct {
-	Data struct {
+	Code    json.RawMessage `json:"code"`
+	Status  json.RawMessage `json:"status"`
+	Message string          `json:"msg"`
+	Data    struct {
 		LRCList []lyricLine `json:"lrclist"`
 		Lyrics  string      `json:"lyrics"`
 		LRC     struct {
@@ -253,15 +272,19 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 	if primaryErr == nil {
 		var payload lyricPayload
 		if err := json.Unmarshal(body, &payload); err == nil {
-			lyrics := firstLyrics(
-				payload.Data.Lyrics,
-				payload.Data.LRC.Lyric,
-				payload.Data.LRC.Content,
-				renderLyricLines(payload.Data.LRCList),
-				renderLyricLines(payload.LRCList),
-			)
-			if providers.HasLyrics(lyrics) {
-				return lyrics, nil
+			if businessErr := kuwoBusinessError(payload.Code, payload.Status, payload.Message); businessErr != nil {
+				primaryErr = businessErr
+			} else {
+				lyrics := firstLyrics(
+					payload.Data.Lyrics,
+					payload.Data.LRC.Lyric,
+					payload.Data.LRC.Content,
+					renderLyricLines(payload.Data.LRCList),
+					renderLyricLines(payload.LRCList),
+				)
+				if providers.HasLyrics(lyrics) {
+					return lyrics, nil
+				}
 			}
 		}
 	}
@@ -292,7 +315,7 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 }
 
 func (c *Client) getBody(ctx context.Context, endpoint string, headers map[string]string) ([]byte, error) {
-	requestHeaders := kuwoHeaders(c.config.Auth)
+	requestHeaders := kuwoHeaders(c.config.Auth, c.config.Cookie)
 	for name, value := range headers {
 		requestHeaders[name] = value
 	}
@@ -457,12 +480,34 @@ func searchKeywords(query providers.Query) []string {
 	return keywords
 }
 
-func kuwoHeaders(auth string) map[string]string {
+func kuwoHeaders(auth, cookie string) map[string]string {
 	result := map[string]string{"Referer": "https://www.kuwo.cn/", "Origin": "https://www.kuwo.cn"}
 	if strings.TrimSpace(auth) != "" {
 		result["Authorization"] = strings.TrimSpace(auth)
 	}
+	if strings.TrimSpace(cookie) != "" {
+		result["Cookie"] = strings.TrimSpace(cookie)
+	}
 	return result
+}
+
+func kuwoBusinessError(code, status json.RawMessage, message string) error {
+	for label, raw := range map[string]json.RawMessage{"code": code, "status": status} {
+		value := strings.TrimSpace(string(raw))
+		if value == "" || value == "null" {
+			continue
+		}
+		value = strings.Trim(value, `"`)
+		lower := strings.ToLower(strings.TrimSpace(value))
+		if lower == "error" || lower == "fail" || lower == "failed" || lower == "unauthorized" || lower == "forbidden" || lower == "ratelimit" || lower == "rate_limited" {
+			return &providers.BusinessError{Provider: "kuwo", Code: label + "=" + value, Message: message}
+		}
+		number, err := strconv.Atoi(lower)
+		if err == nil && (number < 0 || number == 401 || number == 403 || number == 429 || number >= 500) {
+			return &providers.BusinessError{Provider: "kuwo", Code: label + "=" + value, Message: message, Retryable: number == 429 || number >= 500}
+		}
+	}
+	return nil
 }
 
 func parseDuration(value string) int64 {

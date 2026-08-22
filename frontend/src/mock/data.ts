@@ -285,6 +285,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'endpoint', label: '搜索 API URL', type: 'url', value: 'https://music.163.com/api/cloudsearch/pc'},
       {key: 'lyricEndpoint', label: '歌词 API URL', type: 'url', value: 'https://music.163.com/api/song/lyric'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+      {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
     ],
   },
   {
@@ -302,6 +303,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'endpoint', label: '搜索 API URL', type: 'url', value: 'https://search.kuwo.cn/r.s'},
       {key: 'lyricsEndpoint', label: '歌词 JSON URL', type: 'url', value: 'https://www.kuwo.cn/newh5/singles/songinfoandlrc'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+      {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
     ],
   },
   {
@@ -318,6 +320,7 @@ export const providerConfigs: ProviderConfig[] = [
     config: [
       {key: 'searchEndpoint', label: '搜索 API URL', type: 'url', value: 'https://mobilecdn.kugou.com/api/v3/search/song'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
+      {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
     ],
   },
   {

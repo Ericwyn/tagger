@@ -21,6 +21,7 @@ type Config struct {
 	AlbumEndpoint string
 	UserAgent     string
 	Auth          string
+	Cookie        string
 	RateInterval  time.Duration
 }
 
@@ -72,6 +73,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "albumEndpoint", Label: "专辑 API URL", Type: "url", Value: c.config.AlbumEndpoint, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
+		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "MUSIC_U=…"},
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -106,6 +108,8 @@ func (c *Client) Configure(values map[string]string) error {
 			c.config.UserAgent = strings.TrimSpace(value)
 		case "auth":
 			c.config.Auth = strings.TrimSpace(value)
+		case "cookie":
+			c.config.Cookie = strings.TrimSpace(value)
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -162,7 +166,13 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			"total":  {"true"},
 		}
 		var response searchResponse
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		if err := response.businessError(); err != nil {
 			if index == 0 {
 				return nil, err
 			}
@@ -235,7 +245,10 @@ func (c *Client) fetchLyrics(ctx context.Context, id int64) (string, error) {
 	}
 	values := url.Values{"id": {strconv.FormatInt(id, 10)}, "lv": {"-1"}, "tv": {"-1"}}
 	var response lyricResponse
-	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricEndpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricEndpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+		return "", err
+	}
+	if err := response.businessError(); err != nil {
 		return "", err
 	}
 	// Prefer original lyrics. YRC/KLyric are still useful when an ordinary LRC
@@ -253,13 +266,18 @@ func (c *Client) fetchArtwork(ctx context.Context, albumID int64) (string, error
 		return "", err
 	}
 	var response struct {
-		Album struct {
+		Code    int    `json:"code"`
+		Message string `json:"msg"`
+		Album   struct {
 			PictureURL string `json:"picUrl"`
 		} `json:"album"`
 	}
 	endpoint := strings.TrimRight(c.config.AlbumEndpoint, "/") + "/" + strconv.FormatInt(albumID, 10) + "?ext=true"
-	if err := providers.GetJSONWithHeaders(ctx, c.http, endpoint, c.config.UserAgent, neteaseHeaders(c.config.Auth), &response); err != nil {
+	if err := providers.GetJSONWithHeaders(ctx, c.http, endpoint, c.config.UserAgent, neteaseHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
 		return "", err
+	}
+	if response.Code != 0 && response.Code != 200 {
+		return "", &providers.BusinessError{Provider: "netease", Code: strconv.Itoa(response.Code), Message: response.Message, Retryable: response.Code == 429}
 	}
 	artwork := strings.TrimPrefix(strings.TrimSpace(response.Album.PictureURL), "http://")
 	if artwork != "" && !strings.HasPrefix(artwork, "https://") {
@@ -399,10 +417,13 @@ func levenshtein(left, right []rune) int {
 	return previous[len(right)]
 }
 
-func neteaseHeaders(auth string) map[string]string {
+func neteaseHeaders(auth, cookie string) map[string]string {
 	result := map[string]string{"Origin": "https://music.163.com", "Referer": "https://music.163.com/"}
 	if strings.TrimSpace(auth) != "" {
 		result["Authorization"] = strings.TrimSpace(auth)
+	}
+	if strings.TrimSpace(cookie) != "" {
+		result["Cookie"] = strings.TrimSpace(cookie)
 	}
 	return result
 }
@@ -458,7 +479,9 @@ type song struct {
 }
 
 type searchResponse struct {
-	Result struct {
+	Code    int    `json:"code"`
+	Message string `json:"msg"`
+	Result  struct {
 		Songs []song `json:"songs"`
 	} `json:"result"`
 }
@@ -468,8 +491,24 @@ type lyricField struct {
 }
 
 type lyricResponse struct {
+	Code    int        `json:"code"`
+	Message string     `json:"msg"`
 	LRC     lyricField `json:"lrc"`
 	RomaLRC lyricField `json:"romalrc"`
 	YRC     lyricField `json:"yrc"`
 	KLyric  lyricField `json:"klyric"`
+}
+
+func (r searchResponse) businessError() error {
+	if r.Code == 0 || r.Code == 200 {
+		return nil
+	}
+	return &providers.BusinessError{Provider: "netease", Code: strconv.Itoa(r.Code), Message: r.Message, Retryable: r.Code == 429}
+}
+
+func (r lyricResponse) businessError() error {
+	if r.Code == 0 || r.Code == 200 {
+		return nil
+	}
+	return &providers.BusinessError{Provider: "netease", Code: strconv.Itoa(r.Code), Message: r.Message, Retryable: r.Code == 429}
 }

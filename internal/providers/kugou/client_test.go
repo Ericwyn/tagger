@@ -3,6 +3,7 @@ package kugou
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -22,11 +23,12 @@ func TestSearchMapsLyricsAndArtwork(t *testing.T) {
 		LyricsSearchURL:   "https://example.test/lyrics/search",
 		LyricsDownloadURL: "https://example.test/lyrics/download",
 		ArtworkEndpoint:   "https://example.test/artwork",
+		Cookie:            "kg_mid=test-cookie",
 		RateInterval:      0,
 		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
 			switch r.URL.Path {
 			case "/search":
-				if r.URL.Query().Get("keyword") != "Song Artist" || r.Header.Get("Referer") == "" {
+				if r.URL.Query().Get("keyword") != "Song Artist" || r.Header.Get("Cookie") != "kg_mid=test-cookie" || r.Header.Get("Referer") == "" {
 					t.Fatalf("search request = %v headers=%v", r.URL, r.Header)
 				}
 				return response(r, `{"data":{"info":[{"hash":"ABC","songname":"Song","singername":"Artist&Guest","album_id":55,"album_name":"Album","duration":"03:21","tracknum":4}]}}`), nil
@@ -58,6 +60,17 @@ func TestSearchMapsLyricsAndArtwork(t *testing.T) {
 	}
 	if item.ArtworkURL != "https://imge.kugou.com/stdmusic/cover.jpg" {
 		t.Fatalf("artwork = %q", item.ArtworkURL)
+	}
+}
+
+func TestSearchSurfacesKuGouBusinessAuthError(t *testing.T) {
+	client := New(Config{SearchEndpoint: "https://example.test/search", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		return response(r, `{"status":401,"error":"需要登录"}`), nil
+	})}})
+	_, err := client.Search(context.Background(), providers.Query{Title: "Song"}, 1)
+	var businessErr *providers.BusinessError
+	if !errors.As(err, &businessErr) || !strings.Contains(err.Error(), "需要登录") {
+		t.Fatalf("error=%T %v", err, err)
 	}
 }
 

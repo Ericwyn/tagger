@@ -105,7 +105,7 @@ describe('SettingsPage provider diagnostics', () => {
     const user = userEvent.setup();
     api.testProvider.mockResolvedValueOnce({
       provider,
-      result: {status: 'error', count: 0, latencyMs: 1200, retryable: true, retryAfterMs: 1500, error: 'provider HTTP 503: upstream busy'},
+      result: {status: 'error', count: 0, latencyMs: 1200, retryable: true, retryAfterMs: 1500, hint: '数据源服务暂时不可用，请稍后重试或切换备用接口', error: 'provider HTTP 503: upstream busy'},
       candidates: [],
       logs: [{level: 'error', stage: 'search', message: '数据源搜索失败', details: {error: 'provider HTTP 503: upstream busy', retryable: true, retryAfterMs: 1500}}],
     });
@@ -115,6 +115,7 @@ describe('SettingsPage provider diagnostics', () => {
     expect(await screen.findByText('查询异常')).toBeInTheDocument();
     expect(screen.getByText('可重试')).toBeInTheDocument();
     expect(screen.getByText('建议等待 2 秒')).toBeInTheDocument();
+    expect(screen.getByText(/数据源服务暂时不可用/)).toBeInTheDocument();
     expect(screen.getByText(/provider HTTP 503: upstream busy/)).toBeInTheDocument();
   });
 

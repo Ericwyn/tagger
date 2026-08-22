@@ -376,6 +376,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 {testResponse.result.retryable && <span>可重试</span>}
                 {(testResponse.result.retryAfterMs ?? 0) > 0 && <span>建议等待 {Math.ceil((testResponse.result.retryAfterMs ?? 0) / 1000)} 秒</span>}
               </div>
+              {testResponse.result.status !== 'ok' && testResponse.result.hint && <div className="provider-test-hint"><CircleAlert size={14} /><span>{testResponse.result.hint}</span></div>}
               {candidates.length > 0 ? (
                 <div className="provider-test-candidates">
                   {candidates.map((candidate) => {

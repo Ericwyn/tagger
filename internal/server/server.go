@@ -2300,12 +2300,13 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 	}})
 	result, err := s.providers.Search(ctx, query, []string{descriptor.ID}, limit)
 	if err != nil {
+		hint := providers.ErrorHint(err)
 		logs = append(logs, providerTestLog{Level: "error", Stage: "search", Message: "数据源搜索失败", Details: map[string]any{
-			"error": err.Error(), "retryable": providers.IsRetryable(err),
+			"error": err.Error(), "retryable": providers.IsRetryable(err), "hint": hint,
 		}})
 		s.writeData(c, map[string]any{
 			"provider": descriptor,
-			"result":   providers.ProviderResult{Status: "error", Error: err.Error(), Retryable: providers.IsRetryable(err)},
+			"result":   providers.ProviderResult{Status: "error", Error: err.Error(), Retryable: providers.IsRetryable(err), Hint: hint},
 			"query": map[string]any{
 				"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds,
 			},
@@ -2316,8 +2317,12 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 	}
 	outcome := result.Providers[descriptor.ID]
 	if outcome.Status != "ok" {
+		hint := outcome.Hint
+		if hint == "" {
+			hint = providers.ErrorHint(errors.New(outcome.Error))
+		}
 		logs = append(logs, providerTestLog{Level: "error", Stage: "search", Message: "数据源搜索失败", Details: map[string]any{
-			"error": outcome.Error, "retryable": outcome.Retryable, "retryAfterMs": outcome.RetryAfterMS,
+			"error": outcome.Error, "retryable": outcome.Retryable, "retryAfterMs": outcome.RetryAfterMS, "hint": hint,
 		}})
 		s.writeData(c, map[string]any{
 			"provider": descriptor, "result": outcome,

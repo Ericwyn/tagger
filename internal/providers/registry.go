@@ -365,6 +365,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			providerResult.Error = outcome.err.Error()
 			providerResult.Retryable = isRetryable(outcome.err)
 			providerResult.RetryAfterMS = retryAfterMilliseconds(outcome.err)
+			providerResult.Hint = ErrorHint(outcome.err)
 		} else {
 			for _, candidate := range outcome.candidates {
 				view := toView(query, outcome.descriptor, candidate)
@@ -404,6 +405,10 @@ func providerCacheTTL(providerID string) time.Duration {
 }
 
 func isRetryable(err error) bool {
+	var businessError *BusinessError
+	if errors.As(err, &businessError) {
+		return businessError.Retryable
+	}
 	var httpError *HTTPError
 	if errors.As(err, &httpError) {
 		return httpError.Status == 408 || httpError.Status == 429 || httpError.Status >= 500

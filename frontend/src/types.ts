@@ -290,6 +290,7 @@ export interface ProviderTestResult {
   latencyMs: number;
   retryable?: boolean;
   retryAfterMs?: number;
+  hint?: string;
   error?: string;
   cached?: boolean;
 }

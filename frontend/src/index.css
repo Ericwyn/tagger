@@ -5292,6 +5292,20 @@ button:disabled {
   font-size: 11px;
 }
 
+.provider-test-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.provider-test-hint svg { flex: 0 0 auto; color: var(--warning); }
+
 .provider-test-output {
   border-top: 1px solid var(--line);
   padding-top: 12px;

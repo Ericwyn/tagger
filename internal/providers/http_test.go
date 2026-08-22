@@ -96,6 +96,21 @@ func TestGetBytesWithHeadersDoesNotRetryPermanentHTTPFailure(t *testing.T) {
 	}
 }
 
+func TestErrorHintClassifiesAuthRateAndTransportFailures(t *testing.T) {
+	if hint := ErrorHint(&HTTPError{Status: http.StatusUnauthorized}); !strings.Contains(hint, "鉴权") {
+		t.Fatalf("auth hint = %q", hint)
+	}
+	if hint := ErrorHint(&BusinessError{Provider: "kuwo", Code: "status=401", Message: "expired"}); !strings.Contains(hint, "Cookie") {
+		t.Fatalf("business auth hint = %q", hint)
+	}
+	if hint := ErrorHint(&HTTPError{Status: http.StatusTooManyRequests}); !strings.Contains(hint, "限流") {
+		t.Fatalf("rate hint = %q", hint)
+	}
+	if hint := ErrorHint(&TransportError{Err: errors.New("offline")}); !strings.Contains(hint, "网络") {
+		t.Fatalf("transport hint = %q", hint)
+	}
+}
+
 func TestGetBytesWithHeadersRetriesTransportFailure(t *testing.T) {
 	sequence := &providerHTTPSequence{steps: []func(*http.Request) (*http.Response, error){
 		func(*http.Request) (*http.Response, error) { return nil, errors.New("connection reset") },

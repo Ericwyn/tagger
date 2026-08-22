@@ -28,6 +28,81 @@ type HTTPError struct {
 	Message    string
 }
 
+// BusinessError represents a provider returning HTTP 200 but rejecting the
+// request in its JSON envelope. Public music APIs commonly use this shape for
+// expired cookies, throttling and retired endpoints, so surfacing it as a
+// typed error keeps the diagnostics panel actionable instead of showing an
+// empty result set.
+type BusinessError struct {
+	Provider  string
+	Code      string
+	Message   string
+	Retryable bool
+}
+
+// ErrorHint turns common authorization/rate-limit/network failures into a
+// concise action for the single-user diagnostics UI.
+func ErrorHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	var httpError *HTTPError
+	if errors.As(err, &httpError) {
+		switch httpError.Status {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "请检查数据源的鉴权头或 Cookie，确认接口地址仍然有效"
+		case http.StatusTooManyRequests:
+			return "数据源触发限流，请降低请求频率或稍后重试"
+		case http.StatusRequestTimeout:
+			return "数据源响应超时，请稍后重试或检查接口地址"
+		}
+		if httpError.Status >= 500 {
+			return "数据源服务暂时不可用，请稍后重试或切换备用接口"
+		}
+	}
+	var businessError *BusinessError
+	if errors.As(err, &businessError) {
+		code := strings.ToLower(strings.TrimSpace(businessError.Code))
+		if strings.Contains(code, "401") || strings.Contains(code, "unauthorized") || strings.Contains(code, "login") {
+			return "请更新数据源 Cookie/鉴权头，网页登录凭证可能已过期"
+		}
+		if strings.Contains(code, "403") || strings.Contains(code, "forbidden") {
+			return "当前接口拒绝访问，请检查 Cookie、接口地址或来源站点限制"
+		}
+		if businessError.Retryable || strings.Contains(code, "429") || strings.Contains(code, "rate") {
+			return "数据源触发限流，请降低请求频率或稍后重试"
+		}
+		return "数据源返回了业务错误，请检查接口版本和配置"
+	}
+	var transportError *TransportError
+	if errors.As(err, &transportError) {
+		return "无法连接数据源，请检查网络、代理或 API Base URL"
+	}
+	return "请检查数据源配置并查看详细日志"
+}
+
+func (e *BusinessError) Error() string {
+	if e == nil {
+		return "provider business error"
+	}
+	label := strings.TrimSpace(e.Provider)
+	if label == "" {
+		label = "provider"
+	}
+	code := strings.TrimSpace(e.Code)
+	message := strings.TrimSpace(e.Message)
+	if code != "" && message != "" {
+		return fmt.Sprintf("%s rejected request (code %s): %s", label, code, message)
+	}
+	if message != "" {
+		return fmt.Sprintf("%s rejected request: %s", label, message)
+	}
+	if code != "" {
+		return fmt.Sprintf("%s rejected request (code %s)", label, code)
+	}
+	return label + " rejected request"
+}
+
 func (e *HTTPError) Error() string {
 	if e.Message != "" {
 		return fmt.Sprintf("provider HTTP %d: %s", e.Status, e.Message)
@@ -160,6 +235,10 @@ func getBytesOnce(ctx context.Context, client *http.Client, endpoint, userAgent 
 }
 
 func retryableProviderError(err error) bool {
+	var businessError *BusinessError
+	if errors.As(err, &businessError) {
+		return businessError.Retryable
+	}
 	var httpError *HTTPError
 	if errors.As(err, &httpError) {
 		return httpError.Status == http.StatusRequestTimeout || httpError.Status == http.StatusTooManyRequests || httpError.Status >= 500

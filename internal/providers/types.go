@@ -168,6 +168,7 @@ type ProviderResult struct {
 	LatencyMS    int64  `json:"latencyMs"`
 	Retryable    bool   `json:"retryable,omitempty"`
 	RetryAfterMS int64  `json:"retryAfterMs,omitempty"`
+	Hint         string `json:"hint,omitempty"`
 	Error        string `json:"error,omitempty"`
 	Cached       bool   `json:"cached,omitempty"`
 }

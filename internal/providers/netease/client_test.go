@@ -2,6 +2,7 @@ package netease
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -18,10 +19,11 @@ func TestSearchMapsMetadataLyricsAndArtwork(t *testing.T) {
 	client := New(Config{
 		Endpoint:      "https://example.test/search",
 		LyricEndpoint: "https://example.test/lyric",
+		Cookie:        "MUSIC_U=test-cookie",
 		RateInterval:  0,
 		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
 			if r.URL.Path == "/search" {
-				if !strings.Contains(r.URL.Query().Get("s"), "Song") || r.Header.Get("Origin") != "https://music.163.com" {
+				if !strings.Contains(r.URL.Query().Get("s"), "Song") || r.Header.Get("Origin") != "https://music.163.com" || r.Header.Get("Cookie") != "MUSIC_U=test-cookie" {
 					t.Fatalf("search request = %v headers=%v", r.URL, r.Header)
 				}
 				return response(r, `{"result":{"songs":[{"id":42,"name":"Song","alia":["Song (Live)"],"dt":210000,"ar":[{"name":"Artist"}],"al":{"name":"Album","picUrl":"https://img.music.126.net/a.jpg"},"no":3}]}}`), nil
@@ -49,6 +51,17 @@ func TestSearchMapsMetadataLyricsAndArtwork(t *testing.T) {
 	}
 	if item.ArtworkURL != "https://img.music.126.net/a.jpg?param=500y" {
 		t.Fatalf("artwork = %q", item.ArtworkURL)
+	}
+}
+
+func TestSearchSurfacesNetEaseBusinessAuthError(t *testing.T) {
+	client := New(Config{Endpoint: "https://example.test/search", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		return response(r, `{"code":401,"msg":"需要登录"}`), nil
+	})}})
+	_, err := client.Search(context.Background(), providers.Query{Title: "Song"}, 1)
+	var businessErr *providers.BusinessError
+	if !errors.As(err, &businessErr) || businessErr.Code != "401" || !strings.Contains(err.Error(), "需要登录") {
+		t.Fatalf("error=%T %v", err, err)
 	}
 }
 
