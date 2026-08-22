@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/config"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
@@ -141,15 +142,17 @@ func main() {
 				CandidateID  string   `json:"candidateId"`
 				BaseRevision string   `json:"baseRevision"`
 				Fields       []string `json:"fields"`
+				Artwork      bool     `json:"artwork"`
 			} `json:"items"`
 		}
 		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 			return err
 		}
 		type completedWrite struct {
-			trackID   string
-			candidate providers.MatchCandidate
-			result    filewrite.Result
+			trackID       string
+			candidate     providers.MatchCandidate
+			tagResult     filewrite.Result
+			artworkResult *filewrite.ArtworkResult
 		}
 		completed := make([]completedWrite, 0, len(payload.Items))
 		failed := 0
@@ -173,6 +176,12 @@ func main() {
 			if err == nil && trackErr != nil {
 				err = trackErr
 			}
+			var artworkTarget *artwork.Asset
+			if err == nil && item.Artwork {
+				artworkTarget, err = prepareCandidateArtwork(ctx, providerRegistry, candidate, defaultArtworkDownloader)
+			}
+			var artworkResult *filewrite.ArtworkResult
+			artworkFailedAfterTags := false
 			if err == nil {
 				ref, refErr := libraryService.FileRef(item.TrackID)
 				if refErr != nil {
@@ -182,19 +191,36 @@ func main() {
 					if baseRevision == "" {
 						baseRevision = track.Revision
 					}
-					result, writeErr := tagWriter.Write(ctx, ref, baseRevision, patchFromCandidate(candidate, item.Fields), false)
+					tagResult, writeErr := tagWriter.Write(ctx, ref, baseRevision, patchFromCandidate(candidate, item.Fields), false)
 					if writeErr != nil {
 						err = writeErr
 					} else {
-						completed = append(completed, completedWrite{trackID: item.TrackID, candidate: candidate, result: result})
+						if artworkTarget != nil {
+							result, artworkErr := tagWriter.WriteArtwork(ctx, ref, tagResult.CurrentRevision, 0, artworkTarget, false)
+							if artworkErr != nil {
+								err = fmt.Errorf("写入候选封面：%w", artworkErr)
+								artworkFailedAfterTags = true
+							} else {
+								artworkResult = &result
+							}
+						}
+						completed = append(completed, completedWrite{trackID: item.TrackID, candidate: candidate, tagResult: tagResult, artworkResult: artworkResult})
 					}
 				}
 			}
 			if err != nil {
 				failed++
-				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "write_failed", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, Error: err.Error()})
+				state := "write_failed"
+				if artworkFailedAfterTags {
+					state = "artwork_failed"
+				}
+				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: state, Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, Error: err.Error()}); persistErr != nil {
+					return fmt.Errorf("persist failed match item %s: %w", item.TrackID, persistErr)
+				}
 			} else {
-				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "written", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID})
+				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "written", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID}); persistErr != nil {
+					return fmt.Errorf("persist written match item %s: %w", item.TrackID, persistErr)
+				}
 			}
 			if err := progress(index+1, len(payload.Items), len(completed), failed, fmt.Sprintf("已写入 %d/%d 首曲目", index+1, len(payload.Items))); err != nil {
 				return err
@@ -210,7 +236,22 @@ func main() {
 					continue
 				}
 				descriptor, _ := providerRegistry.Descriptor(item.candidate.ProviderID)
-				_, _ = dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: "批量采用候选标签", Source: descriptor.Name, BaseRevision: item.result.BaseRevision, ResultRevision: track.Revision, Diff: item.result.Diff, CoverTone: track.CoverTone, BeforeTags: item.result.BeforeTags, AfterTags: item.result.AfterTags})
+				diff := append([]domain.RevisionDiff(nil), item.tagResult.Diff...)
+				beforeTags, afterTags := item.tagResult.BeforeTags, item.tagResult.AfterTags
+				baseRevision, resultRevision := item.tagResult.BaseRevision, item.tagResult.CurrentRevision
+				action := "批量采用候选标签"
+				if item.artworkResult != nil {
+					diff = append(diff, item.artworkResult.Diff...)
+					afterTags = item.artworkResult.AfterTags
+					resultRevision = item.artworkResult.CurrentRevision
+					action = "批量采用候选标签与封面"
+				}
+				if len(diff) == 0 {
+					continue
+				}
+				if _, historyErr := dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: action, Source: descriptor.Name, BaseRevision: baseRevision, ResultRevision: resultRevision, Diff: diff, CoverTone: track.CoverTone, BeforeTags: beforeTags, AfterTags: afterTags}); historyErr != nil {
+					return fmt.Errorf("persist batch revision for %s: %w", item.trackID, historyErr)
+				}
 			}
 		}
 		return nil
@@ -231,6 +272,27 @@ func main() {
 		"version", version.Version,
 	)
 	srv.Spin()
+}
+
+type artworkDownloader func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
+
+func defaultArtworkDownloader(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+	return providers.DownloadArtwork(ctx, reference, nil)
+}
+
+func prepareCandidateArtwork(ctx context.Context, registry *providers.Registry, candidate providers.MatchCandidate, download artworkDownloader) (*artwork.Asset, error) {
+	if registry == nil || download == nil {
+		return nil, fmt.Errorf("候选封面服务未初始化")
+	}
+	reference, err := registry.ArtworkReference(candidate.ID)
+	if err != nil {
+		return nil, fmt.Errorf("候选封面不可用：%w", err)
+	}
+	asset, err := download(ctx, reference)
+	if err != nil {
+		return nil, fmt.Errorf("下载候选封面：%w", err)
+	}
+	return &asset, nil
 }
 
 func patchFromCandidate(candidate providers.MatchCandidate, fields []string) domain.TagPatch {

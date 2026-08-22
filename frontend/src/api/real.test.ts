@@ -103,9 +103,9 @@ describe('real API client', () => {
 	const job = {id: 'job-write', kind: 'write', state: 'waiting', title: 'Write', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
 	const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));
 	const api = createRealAPI(fetcher);
-	await expect(api.createWriteJob('job/match', [{trackId: 'trk-1', candidateId: 'cand-1', baseRevision: 'rev-1', fields: ['title']}])).resolves.toEqual(job);
+	await expect(api.createWriteJob('job/match', [{trackId: 'trk-1', candidateId: 'cand-1', baseRevision: 'rev-1', fields: ['title'], artwork: true}])).resolves.toEqual(job);
 	expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/jobs/job%2Fmatch/write');
-	expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({items: [{trackId: 'trk-1', candidateId: 'cand-1', baseRevision: 'rev-1', fields: ['title']}]});
+	expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({items: [{trackId: 'trk-1', candidateId: 'cand-1', baseRevision: 'rev-1', fields: ['title'], artwork: true}]});
   });
 
   it('writes an explicit patch guarded by the indexed revision', async () => {

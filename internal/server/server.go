@@ -305,14 +305,25 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 			return "", err
 		}
 		failed := make(map[string]struct{}, len(failedItems))
+		failedStates := make(map[string]string, len(failedItems))
 		for _, item := range failedItems {
-			if item.State == "write_failed" {
+			if item.State == "write_failed" || item.State == "artwork_failed" {
+				failedStates[item.TrackID] = item.State
 				failed[item.TrackID] = struct{}{}
 			}
 		}
 		items := make([]writeSelection, 0, len(payload.Items))
 		for _, item := range payload.Items {
 			if _, ok := failed[item.TrackID]; ok {
+				if failedStates[item.TrackID] == "artwork_failed" {
+					track, trackErr := s.library.Track(item.TrackID)
+					if trackErr != nil {
+						return "", trackErr
+					}
+					item.BaseRevision = track.Revision
+					item.Fields = []string{}
+					item.Artwork = true
+				}
 				items = append(items, item)
 			}
 		}
@@ -427,6 +438,7 @@ type writeSelection struct {
 	CandidateID  string   `json:"candidateId"`
 	BaseRevision string   `json:"baseRevision"`
 	Fields       []string `json:"fields"`
+	Artwork      bool     `json:"artwork,omitempty"`
 }
 
 type matchWriteRequest struct {

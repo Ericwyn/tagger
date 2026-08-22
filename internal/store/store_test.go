@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -193,6 +194,21 @@ func TestProviderCacheExpiryAndSettings(t *testing.T) {
 	}
 	if err := dataStore.DeleteExpiredProviderCache(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if err := dataStore.SaveArtworkReference(context.Background(), "candidate-1", "apple", "https://is1-ssl.mzstatic.com/cover.jpg", now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	artworkPayload, err := dataStore.LoadArtworkReferences(context.Background())
+	if err != nil || !strings.Contains(string(artworkPayload), "candidate-1") {
+		t.Fatalf("artwork references = %s err=%v", artworkPayload, err)
+	}
+	now = now.Add(2 * time.Hour)
+	if err := dataStore.DeleteExpiredArtworkReferences(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	artworkPayload, err = dataStore.LoadArtworkReferences(context.Background())
+	if err != nil || string(artworkPayload) != "[]" {
+		t.Fatalf("expired artwork references = %s err=%v", artworkPayload, err)
 	}
 }
 

@@ -112,7 +112,7 @@ export interface MatchItem {
   id: string;
   jobId: string;
   trackId: string;
-  state: 'review' | 'no_match' | 'failed';
+  state: 'review' | 'no_match' | 'failed' | 'written' | 'write_failed' | 'artwork_failed';
   candidates: MatchCandidate[];
   selectedCandidateId?: string;
   error?: string;
@@ -124,6 +124,7 @@ export interface WriteSelection {
   candidateId: string;
   baseRevision: string;
   fields: string[];
+  artwork?: boolean;
 }
 
 export interface Revision {

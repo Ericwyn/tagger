@@ -19,15 +19,18 @@ type Persistence interface {
 	LoadProviderCache(context.Context, string) ([]byte, bool, error)
 	SaveProviderCache(context.Context, string, string, []byte, time.Duration) error
 	DeleteExpiredProviderCache(context.Context) error
+	LoadArtworkReferences(context.Context) ([]byte, error)
+	SaveArtworkReference(context.Context, string, string, string, time.Time) error
+	DeleteExpiredArtworkReferences(context.Context) error
 	LoadProviderSettings(context.Context) (map[string]bool, error)
 	SaveProviderEnabled(context.Context, string, bool) error
 }
 
 type ArtworkReference struct {
-	CandidateID string
-	ProviderID  string
-	URL         string
-	ExpiresAt   time.Time
+	CandidateID string    `json:"candidateId"`
+	ProviderID  string    `json:"providerId"`
+	URL         string    `json:"url"`
+	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
 type Registry struct {
@@ -69,6 +72,24 @@ func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) 
 	if err != nil {
 		return err
 	}
+	if err := persistence.DeleteExpiredArtworkReferences(ctx); err != nil {
+		return err
+	}
+	payload, err := persistence.LoadArtworkReferences(ctx)
+	if err != nil {
+		return err
+	}
+	var references []ArtworkReference
+	if len(payload) > 0 {
+		if err := json.Unmarshal(payload, &references); err != nil {
+			return err
+		}
+	}
+	r.artworkMu.Lock()
+	for _, reference := range references {
+		r.artworks[reference.CandidateID] = reference
+	}
+	r.artworkMu.Unlock()
 	r.settingsMu.Lock()
 	r.enabled = settings
 	r.settingsMu.Unlock()
@@ -125,15 +146,19 @@ func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error
 	return reference, nil
 }
 
-func (r *Registry) rememberArtwork(candidateID, providerID, artworkURL string) {
+func (r *Registry) rememberArtwork(ctx context.Context, candidateID, providerID, artworkURL string) {
 	if artworkURL == "" {
 		return
 	}
-	r.artworkMu.Lock()
-	r.artworks[candidateID] = ArtworkReference{
+	reference := ArtworkReference{
 		CandidateID: candidateID, ProviderID: providerID, URL: artworkURL, ExpiresAt: time.Now().Add(30 * time.Minute),
 	}
+	r.artworkMu.Lock()
+	r.artworks[candidateID] = reference
 	r.artworkMu.Unlock()
+	if r.persistence != nil {
+		_ = r.persistence.SaveArtworkReference(ctx, reference.CandidateID, reference.ProviderID, reference.URL, reference.ExpiresAt)
+	}
 }
 
 func (r *Registry) Descriptors() []Descriptor {
@@ -225,7 +250,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			for _, candidate := range outcome.candidates {
 				view := toView(query, outcome.descriptor, candidate)
 				result.Candidates = append(result.Candidates, view)
-				r.rememberArtwork(view.ID, outcome.descriptor.ID, candidate.ArtworkURL)
+				r.rememberArtwork(ctx, view.ID, outcome.descriptor.ID, candidate.ArtworkURL)
 			}
 		}
 		result.Providers[outcome.descriptor.ID] = providerResult

@@ -118,6 +118,9 @@ func TestRegistryCacheAndSettingsSurviveReopen(t *testing.T) {
 	if err := secondRegistry.SetPersistence(context.Background(), reopened); err != nil {
 		t.Fatal(err)
 	}
+	if reference, err := secondRegistry.ArtworkReference(first.Candidates[0].ID); err != nil || reference.ProviderID != "apple" {
+		t.Fatalf("reopened artwork reference = %#v err=%v", reference, err)
+	}
 	if descriptor, _ := secondRegistry.Descriptor("apple"); descriptor.Enabled || descriptor.Health != HealthDisabled {
 		t.Fatalf("persisted descriptor = %#v", descriptor)
 	}

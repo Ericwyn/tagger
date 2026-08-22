@@ -12,6 +12,8 @@
 
 后端不接受用户提交任意 URL。候选过期后返回 `candidate_artwork_expired`，要求重新搜索。
 
+候选引用现在写入 SQLite `provider_artwork_refs` 并带 30 分钟 TTL；服务重启后可以恢复未过期的 candidate ID 到 Provider URL 映射，但最终下载仍会重新执行完整安全校验。
+
 `POST /api/v1/matches/tracks/:id/artwork` 完成下载、图片校验和安全嵌入写入；成功后生成“采用数据源封面”修订，来源由后端 Registry 反查，客户端不能伪造。
 
 候选标签和封面是两个各自原子的文件写入：先写标签并推进 revision，再用新 revision 写封面。若标签已成功但远程封面失败，前端明确提示“标签已写入，但候选封面应用失败”，不会误报整次操作未发生。

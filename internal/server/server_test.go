@@ -213,6 +213,47 @@ func TestJobRetryAPIOnlyResubmitsFailedMatchItems(t *testing.T) {
 	}
 }
 
+func TestJobRetryAPIResubmitsArtworkFailureWithCurrentRevision(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{ID: "job-match-artwork", Kind: domain.JobMatch, LibraryID: s.library.Library().ID, Title: "Match", Detail: "review", State: domain.JobReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	candidates, _ := json.Marshal([]providers.MatchCandidate{{ID: "cand-artwork", ProviderID: "test-provider", Title: providers.Field[string]{Value: track.Title}}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: track.ID, State: "artwork_failed", Candidates: candidates, SelectedCandidateID: "cand-artwork"}); err != nil {
+		t.Fatal(err)
+	}
+	writePayload := `{"matchJobId":"` + matchJob.ID + `","items":[{"trackId":"` + track.ID + `","candidateId":"cand-artwork","baseRevision":"stale-revision","fields":["title"],"artwork":true}]}`
+	writeJob, err := manager.Enqueue(context.Background(), domain.Job{ID: "job-write-artwork", Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "Write", Detail: "partial", State: domain.JobPartial, Payload: writePayload, Total: 1, Processed: 1, Failed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+writeJob.ID+"/retry", nil)
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"state":"waiting"`) {
+		t.Fatalf("retry = %d %s", response.Code, response.Body.String())
+	}
+	retried, err := s.store.Job(context.Background(), writeJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var filtered struct {
+		Items []struct {
+			BaseRevision string   `json:"baseRevision"`
+			Fields       []string `json:"fields"`
+			Artwork      bool     `json:"artwork"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.Items) != 1 {
+		t.Fatalf("retry payload = %q err=%v", retried.Payload, err)
+	}
+	if filtered.Items[0].BaseRevision != track.Revision || len(filtered.Items[0].Fields) != 0 || !filtered.Items[0].Artwork {
+		t.Fatalf("artwork retry item = %#v want revision %s", filtered.Items[0], track.Revision)
+	}
+}
+
 func TestTagWriteDryRunAndRevisionConflict(t *testing.T) {
 	s := newTestServer(t)
 	allTracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)

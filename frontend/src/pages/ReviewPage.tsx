@@ -30,6 +30,7 @@ interface ReviewItem {
   candidate?: MatchCandidate;
   state: ReviewState;
   fields: string[];
+  includeArtwork: boolean;
   error?: string;
 }
 
@@ -104,6 +105,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
           track,
           candidate,
           fields: candidate ? availableFields(candidate) : [],
+          includeArtwork: false,
           error: errorByTrack.get(track.id),
           state: noMatch ? 'skipped' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 ? 'accepted' as const : 'review' as const,
         };
@@ -144,6 +146,10 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
   };
 
   const toggleField = (trackId: string, field: string) => toggleFields(trackId, [field]);
+
+  const toggleArtwork = (trackId: string) => {
+    setItems((current) => current.map((item) => item.track.id === trackId ? {...item, includeArtwork: !item.includeArtwork} : item));
+  };
 
   if (loading) {
     return <div className="app-loading"><LoaderCircle className="spin" size={22} /> 正在整理候选结果…</div>;
@@ -272,6 +278,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
               <ReviewDiff field="year" label="年份" current={String(active.track.year || '空')} next={String(active.candidate.year.value)} source={active.candidate.providerName} checked={active.fields.includes('year')} onToggle={() => toggleField(active.track.id, 'year')} />
               <ReviewDiff field="genres" label="风格" current={active.track.genres.join(', ') || '空'} next={active.candidate.genres.value.join(', ')} source={active.candidate.providerName} checked={active.fields.includes('genres')} onToggle={() => toggleField(active.track.id, 'genres')} />
               {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} />}
+              {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} />}
             </div>
 
             <div className="review-detail-actions">
@@ -307,6 +314,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
 				await createWriteJob(job.id, items.filter((item) => item.state === 'accepted').map((item) => ({
 				  trackId: item.track.id, candidateId: item.candidate!.id, baseRevision: item.track.revision,
 				  fields: item.fields,
+				  artwork: item.includeArtwork,
 				})));
 			  } else {
 				await new Promise((resolve) => window.setTimeout(resolve, 700));

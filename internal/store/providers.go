@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -34,6 +35,59 @@ func (s *Store) SaveProviderCache(ctx context.Context, key, providerID string, p
 
 func (s *Store) DeleteExpiredProviderCache(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM provider_cache WHERE expires_at<=?`, formatTime(s.now().UTC()))
+	return err
+}
+
+func (s *Store) LoadArtworkReferences(ctx context.Context) ([]byte, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT candidate_id, provider_id, artwork_url, expires_at FROM provider_artwork_refs WHERE expires_at>?`, formatTime(s.now().UTC()))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []struct {
+		CandidateID string    `json:"candidateId"`
+		ProviderID  string    `json:"providerId"`
+		URL         string    `json:"url"`
+		ExpiresAt   time.Time `json:"expiresAt"`
+	}{}
+	for rows.Next() {
+		var reference struct {
+			CandidateID string
+			ProviderID  string
+			URL         string
+			ExpiresAt   time.Time
+		}
+		var expiresAt string
+		if err := rows.Scan(&reference.CandidateID, &reference.ProviderID, &reference.URL, &expiresAt); err != nil {
+			return nil, err
+		}
+		reference.ExpiresAt, err = time.Parse(time.RFC3339Nano, expiresAt)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, struct {
+			CandidateID string    `json:"candidateId"`
+			ProviderID  string    `json:"providerId"`
+			URL         string    `json:"url"`
+			ExpiresAt   time.Time `json:"expiresAt"`
+		}{CandidateID: reference.CandidateID, ProviderID: reference.ProviderID, URL: reference.URL, ExpiresAt: reference.ExpiresAt})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(result)
+}
+
+func (s *Store) SaveArtworkReference(ctx context.Context, candidateID, providerID, artworkURL string, expiresAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO provider_artwork_refs(candidate_id, provider_id, artwork_url, expires_at, updated_at) VALUES(?, ?, ?, ?, ?)
+		ON CONFLICT(candidate_id) DO UPDATE SET provider_id=excluded.provider_id, artwork_url=excluded.artwork_url, expires_at=excluded.expires_at, updated_at=excluded.updated_at`,
+		candidateID, providerID, artworkURL, formatTime(expiresAt), formatTime(s.now().UTC()))
+	return err
+}
+
+func (s *Store) DeleteExpiredArtworkReferences(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM provider_artwork_refs WHERE expires_at<=?`, formatTime(s.now().UTC()))
 	return err
 }
 
