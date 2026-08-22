@@ -20,11 +20,15 @@ interface HistoryPageProps {
   showGeneratedCovers?: boolean;
 }
 
+type HistoryDateFilter = 'all' | '30d';
+
 export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPageProps) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [query, setQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState<HistoryDateFilter>('all');
   const [restorePreview, setRestorePreview] = useState<RestorePreview>();
   const [restoreState, setRestoreState] = useState<'idle' | 'previewing' | 'restoring'>('idle');
   const [restoreError, setRestoreError] = useState('');
@@ -47,11 +51,15 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
   }, [activeId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleRevisions = normalizedQuery
-    ? revisions.filter((revision) => [revision.trackTitle, revision.fileName, revision.source, revision.action]
-      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)))
-    : revisions;
-  const active = revisions.find((revision) => revision.id === activeId);
+  const sourceOptions = [...new Set(revisions.map((revision) => revision.source).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'));
+  const visibleRevisions = revisions.filter((revision) => {
+    if (sourceFilter !== 'all' && revision.source !== sourceFilter) return false;
+    if (dateFilter === '30d' && !isRecentRevision(revision.time, 30)) return false;
+    if (!normalizedQuery) return true;
+    return [revision.trackTitle, revision.fileName, revision.source, revision.action]
+      .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+  });
+  const active = visibleRevisions.find((revision) => revision.id === activeId) ?? visibleRevisions[0];
 	const recordedDiff = active?.diff?.length
     ? active.diff
     : active?.fields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined})) ?? [];
@@ -108,8 +116,20 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
           <Search size={16} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索曲目、文件或来源…" />
         </label>
-        <button className="toolbar-button">全部来源</button>
-        <button className="toolbar-button">最近 30 天</button>
+        <label className="toolbar-filter">
+          <span>来源</span>
+          <select aria-label="历史来源筛选" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+            <option value="all">全部来源</option>
+            {sourceOptions.map((source) => <option key={source} value={source}>{source}</option>)}
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>时间</span>
+          <select aria-label="历史时间筛选" value={dateFilter} onChange={(event) => setDateFilter(event.target.value as HistoryDateFilter)}>
+            <option value="all">全部时间</option>
+            <option value="30d">最近 30 天</option>
+          </select>
+        </label>
       </div>
 
       <div className="history-layout">
@@ -219,6 +239,14 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
 
 function HistoryEmpty({symbol, title, detail}: {symbol: string; title: string; detail: string}) {
   return <div className="empty-state history-empty"><span>{symbol}</span><strong>{title}</strong><p>{detail}</p></div>;
+}
+
+function isRecentRevision(value: string, days: number): boolean {
+  const normalized = value.trim();
+  if (/^(今天|昨天|前天)/.test(normalized)) return true;
+  const parsed = Date.parse(normalized.replace(' ', 'T'));
+  if (!Number.isFinite(parsed)) return true;
+  return parsed >= Date.now() - days * 24 * 60 * 60 * 1000;
 }
 
 const fieldLabels: Record<string, string> = {

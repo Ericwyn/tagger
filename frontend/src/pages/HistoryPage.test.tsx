@@ -18,6 +18,16 @@ const revision: Revision = {
   diff: [{field: 'title', operation: 'set', before: 'Old title', after: 'New title'}],
 };
 
+const oldRevision: Revision = {
+  ...revision,
+  id: 'revlog-old',
+  trackTitle: 'Old song',
+  fileName: 'old-song.mp3',
+  action: '批量编辑标签',
+  source: '批量编辑',
+  time: '2025-01-01 12:00',
+};
+
 const preview: RestorePreview = {
   revisionId: revision.id, trackId: revision.trackId, target: 'before',
   preview: {
@@ -30,7 +40,7 @@ const preview: RestorePreview = {
 describe('HistoryPage restore flow', () => {
   beforeEach(() => {
 	vi.clearAllMocks();
-    vi.mocked(listRevisions).mockResolvedValue([revision]);
+    vi.mocked(listRevisions).mockResolvedValue([revision, oldRevision]);
     vi.mocked(previewRevisionRestore).mockResolvedValue(preview);
     vi.mocked(restoreRevision).mockResolvedValue({
       track: {id: revision.trackId, title: 'Old title'} as Track,
@@ -78,5 +88,19 @@ describe('HistoryPage restore flow', () => {
 	await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(artworkRevision));
 	expect(screen.getByRole('deletion')).toHaveTextContent('JPEG · 600×600');
 	expect(screen.getByRole('insertion')).toHaveTextContent('JPEG · 1200×1200');
+  });
+
+  it('filters revisions by source and recent date', async () => {
+    const user = userEvent.setup();
+    render(<HistoryPage onNotice={vi.fn()} />);
+
+    expect(await screen.findByRole('button', {name: /Old song/})).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', {name: '历史来源筛选'}), '批量编辑');
+    expect(screen.getByRole('button', {name: /Old song/})).toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: /New title/})).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox', {name: '历史时间筛选'}), '30d');
+    expect(screen.queryByRole('button', {name: /Old song/})).not.toBeInTheDocument();
+    expect(screen.getByText('没有匹配的修订')).toBeInTheDocument();
   });
 });
