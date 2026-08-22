@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {
   ArrowDownUp,
+  Archive,
   ChevronDown,
   FolderTree,
   LoaderCircle,
@@ -10,6 +11,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Tags,
+  Undo2,
   X,
 } from 'lucide-react';
 import {CandidateDrawer} from '@/components/library/CandidateDrawer';
@@ -17,6 +19,7 @@ import {BatchEditPanel, buildBatchPatch, type BatchOperation} from '@/components
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
+import {TagSnapshotPanel, trackToPatch, type SnapshotUpdate} from '@/components/library/TagSnapshotPanel';
 import {
   apiReadMode,
   applyCandidateArtwork,
@@ -76,6 +79,8 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [mobileInspector, setMobileInspector] = useState(false);
+  const [snapshotOpen, setSnapshotOpen] = useState(false);
+  const [snapshotUndo, setSnapshotUndo] = useState<{before: Track[]; afterRevisions: Map<string, string>}>();
 
   const loadData = async (preserveSelection = false) => {
     setLoading(true);
@@ -147,6 +152,10 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
       ].some((value) => value.toLocaleLowerCase().includes(query));
     });
   }, [activeFilter, activeFolder, search, tracks]);
+
+  const snapshotTracks = selectedIds.size > 0
+    ? tracks.filter((track) => selectedIds.has(track.id))
+    : visibleTracks;
 
   const saveTrack = async (
     patch: TrackPatch,
@@ -256,7 +265,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     });
   };
 
-  const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean) => {
+	const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean) => {
     const selectedTracks = tracks.filter((track) => selectedIds.has(track.id));
     const failed = new Set<string>();
     let succeeded = 0;
@@ -296,6 +305,64 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
     onNotice(failed.size === 0
       ? `已安全写入 ${succeeded} 首曲目的批量标签修改`
       : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
+	};
+
+  const applySnapshot = async (updates: SnapshotUpdate[]) => {
+    if (saving || updates.length === 0) return;
+    setSaving(true);
+    let nextTracks = tracks;
+    const afterRevisions = new Map<string, string>();
+    let applied = 0;
+    try {
+      for (const update of updates) {
+        const current = nextTracks.find((track) => track.id === update.track.id);
+        if (!current) continue;
+        const updated = await updateTrack(current.id, update.patch);
+        nextTracks = nextTracks.map((track) => track.id === updated.id ? updated : track);
+        afterRevisions.set(updated.id, updated.revision);
+        applied += 1;
+      }
+      setTracks(nextTracks);
+      setSnapshotUndo({before: updates.map((update) => update.track), afterRevisions});
+      setSnapshotOpen(false);
+      onNotice(`已导入 ${applied} 首曲目的内嵌标签；可在曲库中撤销本次导入`);
+    } catch (error) {
+      setTracks(nextTracks);
+      onNotice(applied > 0
+        ? `已写入 ${applied} 首，后续导入中断：${error instanceof Error ? error.message : '未知错误'}`
+        : error instanceof Error ? error.message : '标签快照导入失败');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const undoSnapshot = async () => {
+    if (!snapshotUndo || saving) return;
+    const conflicted = [...snapshotUndo.afterRevisions.entries()].some(([id, revision]) => tracks.find((track) => track.id === id)?.revision !== revision);
+    if (conflicted) {
+      onNotice('撤销已停止：部分曲目在导入后又发生了其他修改，请通过修改历史逐曲恢复');
+      return;
+    }
+    setSaving(true);
+    let nextTracks = tracks;
+    let restored = 0;
+    try {
+      for (const before of snapshotUndo.before) {
+        const current = nextTracks.find((track) => track.id === before.id);
+        if (!current) continue;
+        const updated = await updateTrack(current.id, trackToPatch(before));
+        nextTracks = nextTracks.map((track) => track.id === updated.id ? updated : track);
+        restored += 1;
+      }
+      setTracks(nextTracks);
+      setSnapshotUndo(undefined);
+      onNotice(`已撤销 ${restored} 首曲目的快照导入`);
+    } catch (error) {
+      setTracks(nextTracks);
+      onNotice(`撤销已写入 ${restored} 首后中断：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -363,6 +430,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
             <button className="secondary-button" disabled={scanning} onClick={() => void runRescan()}>
               <RefreshCw size={15} className={scanning ? 'spin' : undefined} /> {scanning ? '扫描中…' : '快速扫描'}
             </button>
+            {snapshotUndo && <button className="secondary-button" disabled={saving} onClick={() => void undoSnapshot()}><Undo2 size={15} /> 撤销导入</button>}
             <button className="primary-button" onClick={() => onOpenReview(visibleTracks.map((track) => track.id))}>
               <Sparkles size={15} /> 批量补全
             </button>
@@ -381,6 +449,7 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
             <kbd>⌘ K</kbd>
           </label>
           <div className="toolbar-spacer" />
+          <button className="toolbar-button" disabled={snapshotTracks.length === 0} onClick={() => setSnapshotOpen(true)}><Archive size={15} /> 标签快照</button>
           <button className="toolbar-button"><SlidersHorizontal size={15} /> 筛选 <ChevronDown size={13} /></button>
           <button className="toolbar-button"><ArrowDownUp size={15} /> 专辑顺序 <ChevronDown size={13} /></button>
           <button className="mobile-panel-button" title="打开曲目详情" onClick={() => setMobileInspector(true)}>
@@ -456,6 +525,14 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
         saving={saving}
         onClose={() => setBatchEditOpen(false)}
         onApply={applyBatchEdit}
+      />
+
+      <TagSnapshotPanel
+        open={snapshotOpen}
+        tracks={snapshotTracks}
+        saving={saving}
+        onClose={() => setSnapshotOpen(false)}
+        onApply={applySnapshot}
       />
     </div>
   );

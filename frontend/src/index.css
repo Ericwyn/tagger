@@ -2452,6 +2452,202 @@ button:disabled {
   background: var(--paper-2);
 }
 
+.snapshot-layer {
+  z-index: 115;
+}
+
+.snapshot-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 94vw);
+  height: min(760px, 92vh);
+  margin-left: auto;
+  border-left: 1px solid var(--line-strong);
+  background: var(--paper);
+  box-shadow: -18px 0 42px rgba(22, 18, 15, 0.14);
+  animation: drawer-in 220ms ease both;
+}
+
+.snapshot-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshot-head h2 {
+  margin: 6px 0 2px;
+  font-family: var(--display);
+  font-size: 25px;
+  font-weight: 600;
+}
+
+.snapshot-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.snapshot-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 24px;
+}
+
+.snapshot-actions,
+.snapshot-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.snapshot-actions > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.snapshot-actions small,
+.snapshot-summary span,
+.snapshot-more {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.snapshot-export-buttons {
+  display: flex;
+  gap: 7px;
+}
+
+.snapshot-import-drop {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 26px 18px;
+  border: 1px dashed var(--line-strong);
+  background: var(--paper-2);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+.snapshot-import-drop:hover {
+  border-color: var(--accent);
+  background: var(--paper-3);
+}
+
+.snapshot-import-drop strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.snapshot-import-drop input {
+  display: none;
+}
+
+.snapshot-error {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, var(--paper-2));
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.snapshot-preview {
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.snapshot-summary {
+  justify-content: flex-start;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshot-summary span {
+  padding-right: 12px;
+  border-right: 1px solid var(--line);
+}
+
+.snapshot-summary span:last-child {
+  border-right: 0;
+}
+
+.snapshot-summary strong {
+  margin-right: 3px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 18px;
+}
+
+.snapshot-summary .is-warning strong {
+  color: var(--danger);
+}
+
+.snapshot-preview-list {
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.snapshot-preview-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.snapshot-preview-row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.snapshot-preview-row strong,
+.snapshot-preview-row small,
+.snapshot-preview-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapshot-preview-row strong {
+  font-size: 11px;
+}
+
+.snapshot-preview-row small,
+.snapshot-preview-row span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.snapshot-preview-row svg {
+  color: var(--danger);
+}
+
+.snapshot-more {
+  display: block;
+  padding: 9px 12px;
+}
+
+.snapshot-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 11px 24px;
+  border-top: 1px solid var(--line-strong);
+  background: var(--paper-2);
+}
+
 @keyframes drawer-in {
   from { opacity: 0; transform: translateX(40px); }
   to { opacity: 1; transform: translateX(0); }
@@ -4580,6 +4776,35 @@ button:disabled {
 
   .brand-block strong {
     font-size: 17px;
+  }
+
+  .snapshot-drawer {
+    width: 100%;
+    height: 100%;
+  }
+
+  .snapshot-head,
+  .snapshot-body,
+  .snapshot-footer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .snapshot-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .snapshot-export-buttons {
+    width: 100%;
+  }
+
+  .snapshot-export-buttons .secondary-button {
+    flex: 1;
+  }
+
+  .snapshot-preview-row {
+    grid-template-columns: minmax(120px, 0.8fr) minmax(100px, 1fr) 18px;
   }
 
   .brand-block small,
