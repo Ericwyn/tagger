@@ -8,6 +8,7 @@ import type {Track} from '@/types';
 
 interface TrackListProps {
   tracks: Track[];
+  showGeneratedCovers?: boolean;
   activeTrackId?: string;
   selectedIds: Set<string>;
   onSelectTrack: (track: Track) => void;
@@ -25,12 +26,14 @@ const healthLabel: Record<Track['health'], string> = {
 
 const TrackRow = memo(function TrackRow({
   track,
+  showGeneratedCovers = false,
   active,
   selected,
   onSelect,
   onToggle,
 }: {
   track: Track;
+  showGeneratedCovers?: boolean;
   active: boolean;
   selected: boolean;
   onSelect: () => void;
@@ -63,7 +66,7 @@ const TrackRow = memo(function TrackRow({
         title={track.title || track.fileName}
         artist={track.artists[0]}
         tone={track.coverTone}
-        missing={track.artworkCount === 0}
+        missing={!showGeneratedCovers && track.artworkCount === 0}
 		imageUrl={artworkURL(track)}
         size="xs"
       />
@@ -90,6 +93,7 @@ const TrackRow = memo(function TrackRow({
 
 export function TrackList({
   tracks,
+  showGeneratedCovers = false,
   activeTrackId,
   selectedIds,
   onSelectTrack,
@@ -126,6 +130,7 @@ export function TrackList({
           itemContent={(_, track) => (
             <TrackRow
               track={track}
+              showGeneratedCovers={showGeneratedCovers}
               active={track.id === activeTrackId}
               selected={selectedIds.has(track.id)}
               onSelect={() => onSelectTrack(track)}

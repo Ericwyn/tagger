@@ -229,6 +229,21 @@ describe('real API client', () => {
     expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers');
   });
 
+  it('sends an edited candidate query while retaining the file identity', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {candidates: [], providers: {}}}), {status: 200}));
+    const api = createRealAPI(fetcher);
+    const editedQuery = {title: '重新命名', artists: ['甲', '乙'], album: '新专辑', durationSeconds: 201};
+
+    await expect(api.searchCandidates(track as Track, editedQuery)).resolves.toEqual([]);
+
+    const init = fetcher.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      fileId: 'trk-1',
+      query: editedQuery,
+      limitPerProvider: 5,
+    });
+  });
+
   it('persists provider enablement and runs connection tests', async () => {
 	const provider = {id: 'apple', name: 'Apple', health: 'disabled', enabled: false};
 	const testResult = {provider: {...provider, health: 'ready', enabled: true}, result: {status: 'ok', count: 1, latencyMs: 20, cached: true}};

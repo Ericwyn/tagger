@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
-import type {MatchCandidate, Track, TrackPatch} from '@/types';
+import type {CandidateSearchQuery, MatchCandidate, Track, TrackPatch} from '@/types';
 
 interface CandidateDrawerProps {
   open: boolean;
@@ -21,6 +21,8 @@ interface CandidateDrawerProps {
   candidates: MatchCandidate[];
   loading: boolean;
   focus?: 'metadata' | 'lyrics';
+  showGeneratedCovers?: boolean;
+  onSearchQuery?: (query: CandidateSearchQuery) => Promise<void>;
   onClose: () => void;
   onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean}) => Promise<void>;
 }
@@ -43,6 +45,8 @@ export function CandidateDrawer({
   candidates,
   loading,
   focus = 'metadata',
+  showGeneratedCovers = false,
+  onSearchQuery,
   onClose,
   onApply,
 }: CandidateDrawerProps) {
@@ -50,7 +54,10 @@ export function CandidateDrawer({
   const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
   const [applying, setApplying] = useState(false);
   const [includeLyrics, setIncludeLyrics] = useState(false);
-	const [includeArtwork, setIncludeArtwork] = useState(false);
+  const [includeArtwork, setIncludeArtwork] = useState(false);
+  const [queryEditing, setQueryEditing] = useState(false);
+  const [queryDraft, setQueryDraft] = useState<CandidateSearchQuery>({title: '', artists: [], album: '', durationSeconds: 0});
+  const [queryArtistsDraft, setQueryArtistsDraft] = useState('');
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
@@ -60,8 +67,24 @@ export function CandidateDrawer({
   }, [candidates, focus]);
 
   useEffect(() => {
+    if (!track) return;
+    setQueryDraft({title: track.title, artists: [...track.artists], album: track.album, durationSeconds: track.durationSeconds});
+    setQueryArtistsDraft(track.artists.join(' / '));
+    setQueryEditing(false);
+  }, [track?.id]);
+
+  useEffect(() => {
     if (!open) setSelectedId(null);
   }, [open]);
+
+  const submitQuery = async () => {
+    if (!onSearchQuery) return;
+    const artists = queryArtistsDraft.split(/[,，/]/).map((item) => item.trim()).filter(Boolean);
+    const nextQuery = {...queryDraft, artists};
+    setQueryDraft(nextQuery);
+    await onSearchQuery(nextQuery);
+    setQueryEditing(false);
+  };
 
   const selected = useMemo(
     () => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0],
@@ -132,8 +155,19 @@ export function CandidateDrawer({
 
         <div className="query-strip">
           <Search size={15} />
-          <span>{track.title}　{track.artists.join(' ')}</span>
-          <button>修改查询</button>
+          {!queryEditing ? (
+            <>
+              <span>{queryDraft.title}　{queryDraft.artists.join(' ')}</span>
+              <button onClick={() => setQueryEditing(true)}>修改查询</button>
+            </>
+          ) : (
+            <div className="query-editor">
+              <input aria-label="查询标题" value={queryDraft.title} onChange={(event) => setQueryDraft((current) => ({...current, title: event.target.value}))} />
+              <input aria-label="查询艺术家" value={queryArtistsDraft} onChange={(event) => setQueryArtistsDraft(event.target.value)} />
+              <input aria-label="查询专辑" value={queryDraft.album} onChange={(event) => setQueryDraft((current) => ({...current, album: event.target.value}))} />
+              <button disabled={loading} onClick={() => void submitQuery()}>重新查询</button>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -164,6 +198,10 @@ export function CandidateDrawer({
                       title={candidate.title.value}
                       artist={candidate.artists.value[0]}
                       tone={candidate.coverTone}
+                      // Candidate artwork is still remote until the user applies it.
+                      // Do not render a generated cover merely because a provider
+                      // advertised an artwork URL that has not been downloaded.
+                      missing={!showGeneratedCovers}
                       size="sm"
                     />
                     <span className="candidate-copy">
@@ -189,6 +227,7 @@ export function CandidateDrawer({
                     title={selected.title.value}
                     artist={selected.artists.value[0]}
                     tone={selected.coverTone}
+                    missing={!showGeneratedCovers}
                     size="md"
                   />
                   <div>

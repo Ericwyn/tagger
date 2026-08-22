@@ -5,6 +5,7 @@ import {
   CircleAlert,
   Database,
   FolderCog,
+  ImagePlus,
   KeyRound,
   LoaderCircle,
   Network,
@@ -22,6 +23,8 @@ import type {ProviderConfig} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
+  showGeneratedCovers: boolean;
+  onShowGeneratedCoversChange: (value: boolean) => void;
 }
 
 type SettingsTab = 'libraries' | 'providers' | 'system';
@@ -33,7 +36,7 @@ const healthText = {
   disabled: '未启用',
 };
 
-export function SettingsPage({onNotice}: SettingsPageProps) {
+export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCoversChange}: SettingsPageProps) {
   const [tab, setTab] = useState<SettingsTab>('providers');
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testingId, setTestingId] = useState<string>();
@@ -184,6 +187,11 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
                   <div className="system-icon"><Database size={19} /></div>
                   <div><strong>历史保留</strong><p>标签和封面修订按内容 hash 去重保存。</p></div>
                   <label><span>每文件</span><select defaultValue="20"><option value="20">最近 20 次</option><option>最近 50 次</option></select></label>
+                </section>
+                <section>
+                  <div className="system-icon"><ImagePlus size={19} /></div>
+                  <div><strong>封面占位</strong><p>没有真实封面时，列表和候选结果默认显示空白占位。</p></div>
+                  <label className="inline-switch"><input type="checkbox" checked={showGeneratedCovers} onChange={(event) => { onShowGeneratedCoversChange(event.target.checked); onNotice(event.target.checked ? '已启用生成式封面占位' : '已关闭生成式封面占位'); }} /> 使用生成式占位</label>
                 </section>
               </div>
             </>

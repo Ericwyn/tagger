@@ -18,6 +18,7 @@ import type {
 	BatchEditItem,
 	BatchEditOperation,
 	BatchEditSelection,
+	CandidateSearchQuery,
 } from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
@@ -117,8 +118,8 @@ export async function deleteLyricsSidecar(trackId: string): Promise<Track> {
   return result.track;
 }
 
-export function searchCandidates(track: Track): Promise<MatchCandidate[]> {
-  return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track);
+export function searchCandidates(track: Track, query?: CandidateSearchQuery): Promise<MatchCandidate[]> {
+  return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track, query);
 }
 
 export function listProviders(): Promise<ProviderConfig[]> {

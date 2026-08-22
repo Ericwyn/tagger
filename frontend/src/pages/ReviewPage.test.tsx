@@ -18,5 +18,19 @@ describe('ReviewPage field selection', () => {
 	const artworkToggle = screen.getByRole('button', {name: '采用封面'});
 	await user.click(artworkToggle);
 	expect(screen.getByRole('button', {name: '取消采用封面'})).toHaveClass('is-checked');
+	});
+
+  it('moves to the next track after accepting and cycles alternative candidates', async () => {
+    const user = userEvent.setup();
+    render(<ReviewPage trackIds={['trk-001', 'trk-002']} onBack={vi.fn()} onComplete={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', {name: '审核抓取结果'})).toBeInTheDocument();
+    expect(screen.getByRole('heading', {name: '再回首'})).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: /更换候选/}));
+    expect(screen.getByText(/网易云音乐 \/ song-186001/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: /接受候选/}));
+    expect(screen.getByRole('heading', {name: '愛上一個不回家的人'})).toBeInTheDocument();
   });
 });

@@ -38,4 +38,16 @@ describe('JobsPage', () => {
     expect(screen.getByText('Live')).toBeInTheDocument();
     expect(api.listBatchEditItems).toHaveBeenCalledWith('job-edit');
   });
+
+  it('filters the task list when a status tab is selected', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    render(<JobsPage onOpenReview={() => {}} />);
+    expect(await screen.findByRole('heading', {name: '批量编辑标签'})).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: /进行中/}));
+    expect(screen.queryByRole('heading', {name: '批量编辑标签'})).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: /失败/}));
+    expect(screen.getByRole('heading', {name: '批量编辑标签'})).toBeInTheDocument();
+  });
 });

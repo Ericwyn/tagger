@@ -19,6 +19,7 @@ import type {Job, MatchCandidate, Track} from '@/types';
 
 interface ReviewPageProps {
   trackIds: string[];
+  showGeneratedCovers?: boolean;
   onBack: () => void;
   onComplete: () => void;
 }
@@ -28,6 +29,7 @@ type ReviewState = 'accepted' | 'review' | 'skipped';
 interface ReviewItem {
   track: Track;
   candidate?: MatchCandidate;
+  candidates: MatchCandidate[];
   state: ReviewState;
   fields: string[];
   includeArtwork: boolean;
@@ -66,7 +68,7 @@ function availableFields(candidate: MatchCandidate): string[] {
   });
 }
 
-export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
+export function ReviewPage({trackIds, showGeneratedCovers = false, onBack, onComplete}: ReviewPageProps) {
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [loading, setLoading] = useState(true);
@@ -79,7 +81,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
     void listTracks().then(async (allTracks) => {
       const ids = trackIds.length ? new Set(trackIds) : new Set(allTracks.filter((track) => track.album === '安泊猜想').map((track) => track.id));
       const next = allTracks.filter((track) => ids.has(track.id));
-      let candidateByTrack = new Map<string, MatchCandidate>();
+      let candidateOptionsByTrack = new Map<string, MatchCandidate[]>();
       let errorByTrack = new Map<string, string>();
       let matchStateByTrack = new Map<string, 'no_match' | 'failed'>();
       if (apiReadMode === 'real') {
@@ -89,9 +91,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
           const completed = await waitForJob(created.id);
           if (active) setJob(completed);
           const matchItems = await listMatchItems(created.id);
-          candidateByTrack = new Map(matchItems
-            .map((item) => [item.trackId, item.candidates[0]] as const)
-            .filter((entry): entry is [string, MatchCandidate] => Boolean(entry[1])));
+          candidateOptionsByTrack = new Map(matchItems.map((item) => [item.trackId, item.candidates] as const));
           errorByTrack = new Map(matchItems.filter((item) => item.error).map((item) => [item.trackId, item.error!]));
           matchStateByTrack = new Map(matchItems
             .filter((item) => item.state === 'no_match' || item.state === 'failed')
@@ -99,11 +99,13 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
         }
       }
       const reviewed = next.map((track) => {
-        const candidate = apiReadMode === 'mock' ? candidatesFor(track)[0] : candidateByTrack.get(track.id);
+        const candidates = apiReadMode === 'mock' ? candidatesFor(track) : (candidateOptionsByTrack.get(track.id) ?? []);
+        const candidate = candidates[0];
         const noMatch = !candidate || matchStateByTrack.has(track.id);
         return {
           track,
           candidate,
+          candidates,
           fields: candidate ? availableFields(candidate) : [],
           includeArtwork: false,
           error: errorByTrack.get(track.id),
@@ -146,6 +148,22 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
   };
 
   const toggleField = (trackId: string, field: string) => toggleFields(trackId, [field]);
+
+  const moveToNext = (trackId: string) => {
+    const index = visibleItems.findIndex((item) => item.track.id === trackId);
+    if (index < 0) return;
+    const next = visibleItems.slice(index + 1).find((item) => item.state !== 'skipped') ?? visibleItems[index + 1] ?? visibleItems[0];
+    if (next && next.track.id !== trackId) setActiveId(next.track.id);
+  };
+
+  const changeCandidate = (trackId: string) => {
+    setItems((current) => current.map((item) => {
+      if (item.track.id !== trackId || item.candidates.length < 2) return item;
+      const currentIndex = item.candidates.findIndex((candidate) => candidate.id === item.candidate?.id);
+      const nextCandidate = item.candidates[(currentIndex + 1) % item.candidates.length];
+      return {...item, candidate: nextCandidate, fields: availableFields(nextCandidate), state: 'review'};
+    }));
+  };
 
   const toggleArtwork = (trackId: string) => {
     setItems((current) => current.map((item) => item.track.id === trackId ? {...item, includeArtwork: !item.includeArtwork} : item));
@@ -201,7 +219,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
               className={cn('review-row', active?.track.id === item.track.id && 'is-active')}
               onClick={() => setActiveId(item.track.id)}
             >
-              <CoverArt title={item.track.title} artist={item.track.artists[0]} tone={item.track.coverTone} size="xs" />
+              <CoverArt title={item.track.title} artist={item.track.artists[0]} tone={item.track.coverTone} missing={!showGeneratedCovers && item.track.artworkCount === 0} size="xs" />
               <span className="review-track-copy">
                 <strong>{item.track.title}</strong>
                 <small>{item.track.fileName}</small>
@@ -209,7 +227,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
               <span className="review-arrow"><ChevronRight size={15} /></span>
               {item.candidate ? (
                 <>
-                  <CoverArt title={item.candidate.title.value} artist={item.candidate.artists.value[0]} tone={item.candidate.coverTone} size="xs" />
+                  <CoverArt title={item.candidate.title.value} artist={item.candidate.artists.value[0]} tone={item.candidate.coverTone} missing={!showGeneratedCovers} size="xs" />
                   <span className="review-candidate-copy">
                     <strong>{item.candidate.title.value}</strong>
                     <small>{item.candidate.providerName} · {Math.round(item.candidate.score * 100)}%</small>
@@ -217,7 +235,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
                 </>
               ) : (
                 <>
-                  <CoverArt title="" tone="charcoal" size="xs" missing />
+                  <CoverArt title="" tone="charcoal" size="xs" missing={!showGeneratedCovers} />
                   <span className="review-candidate-copy">
                     <strong>未找到匹配</strong>
                     <small>{item.error || '没有可用的数据源候选'}</small>
@@ -238,9 +256,9 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
           <section className="review-detail">
             <div className="review-detail-head">
               <div className="record-comparison">
-                <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} size="md" />
+                <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} size="md" />
                 <div className="comparison-line"><span /><Sparkles size={16} /><span /></div>
-                <CoverArt title={active.candidate.title.value} artist={active.candidate.artists.value[0]} tone={active.candidate.coverTone} size="md" />
+                <CoverArt title={active.candidate.title.value} artist={active.candidate.artists.value[0]} tone={active.candidate.coverTone} missing={!showGeneratedCovers} size="md" />
               </div>
               <div>
                 <span className="confidence-badge"><Check size={13} /> {active.candidate.scoreLabel} · {Math.round(active.candidate.score * 100)}%</span>
@@ -282,9 +300,9 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
             </div>
 
             <div className="review-detail-actions">
-              <button className="danger-quiet" onClick={() => setItemState(active.track.id, 'skipped')}><X size={15} /> 跳过此曲</button>
-              <button className="secondary-button">更换候选</button>
-              <button className="primary-button" onClick={() => setItemState(active.track.id, 'accepted')}><Check size={15} /> 接受候选</button>
+              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
+              <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => changeCandidate(active.track.id)}><ChevronRight size={15} /> 更换候选</button>
+              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
             </div>
           </section>
         )}

@@ -2,23 +2,31 @@ import {useEffect, useState} from 'react';
 import {AnimatePresence, motion} from 'motion/react';
 import {CheckCircle2, X} from 'lucide-react';
 import {TopBar} from '@/components/TopBar';
+import {GlobalPlayer} from '@/components/GlobalPlayer';
 import {HistoryPage} from '@/pages/HistoryPage';
 import {JobsPage} from '@/pages/JobsPage';
 import {LibraryPage} from '@/pages/LibraryPage';
 import {ReviewPage} from '@/pages/ReviewPage';
 import {SettingsPage} from '@/pages/SettingsPage';
-import type {PageID} from '@/types';
+import type {PageID, Track} from '@/types';
 
 export function App() {
   const [page, setPage] = useState<PageID>('library');
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const [dark, setDark] = useState(() => localStorage.getItem('tagger-theme') === 'dark');
   const [notice, setNotice] = useState<string | null>(null);
+  const [playerTrack, setPlayerTrack] = useState<Track | null>(null);
+  const [playerPlaying, setPlayerPlaying] = useState(false);
+  const [showGeneratedCovers, setShowGeneratedCovers] = useState(() => localStorage.getItem('tagger-generated-covers') === 'true');
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     localStorage.setItem('tagger-theme', dark ? 'dark' : 'light');
   }, [dark]);
+
+  useEffect(() => {
+    localStorage.setItem('tagger-generated-covers', String(showGeneratedCovers));
+  }, [showGeneratedCovers]);
 
   useEffect(() => {
     if (!notice) return;
@@ -31,9 +39,15 @@ export function App() {
     setPage('review');
   };
 
+  const playTrack = (track: Track) => {
+    setPlayerTrack(track);
+    setPlayerPlaying(true);
+  };
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${playerTrack ? ' has-player' : ''}`}>
       <TopBar page={page} onNavigate={setPage} dark={dark} onToggleTheme={() => setDark((value) => !value)} />
+      <GlobalPlayer track={playerTrack} playing={playerPlaying} onPlayingChange={setPlayerPlaying} onClose={() => { setPlayerPlaying(false); setPlayerTrack(null); }} />
       <main className="app-main">
         <AnimatePresence mode="wait">
           <motion.div
@@ -44,10 +58,11 @@ export function App() {
             exit={{opacity: 0, y: -5}}
             transition={{duration: 0.22, ease: [0.22, 1, 0.36, 1]}}
           >
-            {page === 'library' && <LibraryPage onOpenReview={openReview} onNotice={setNotice} />}
+            {page === 'library' && <LibraryPage onOpenReview={openReview} onNotice={setNotice} playerTrackId={playerTrack?.id} playerPlaying={playerPlaying} onPlayTrack={playTrack} onTogglePlayer={() => setPlayerPlaying((value) => !value)} showGeneratedCovers={showGeneratedCovers} />}
             {page === 'review' && (
               <ReviewPage
                 trackIds={batchIds}
+                showGeneratedCovers={showGeneratedCovers}
                 onBack={() => setPage('library')}
                 onComplete={() => {
                   setNotice('批量写入任务已创建，正在等待安全写入');
@@ -56,8 +71,8 @@ export function App() {
               />
             )}
             {page === 'jobs' && <JobsPage onOpenReview={() => setPage('review')} />}
-            {page === 'history' && <HistoryPage onNotice={setNotice} />}
-            {page === 'settings' && <SettingsPage onNotice={setNotice} />}
+            {page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
+            {page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} />}
           </motion.div>
         </AnimatePresence>
       </main>

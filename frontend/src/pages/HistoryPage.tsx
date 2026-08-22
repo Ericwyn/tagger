@@ -17,9 +17,10 @@ import type {RestorePreview, Revision} from '@/types';
 
 interface HistoryPageProps {
   onNotice: (message: string) => void;
+  showGeneratedCovers?: boolean;
 }
 
-export function HistoryPage({onNotice}: HistoryPageProps) {
+export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPageProps) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -129,7 +130,7 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
               className={cn('revision-row', activeId === revision.id && 'is-active')}
               onClick={() => setActiveId(revision.id)}
             >
-              <CoverArt title={revision.trackTitle} tone={revision.coverTone} size="xs" />
+              <CoverArt title={revision.trackTitle} tone={revision.coverTone} missing={!showGeneratedCovers} size="xs" />
               <span>
                 <strong>{revision.trackTitle}</strong>
                 <small>{revision.action}</small>
@@ -145,7 +146,7 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
         {active && (
           <aside className="revision-detail">
             <div className="revision-detail-head">
-              <CoverArt title={active.trackTitle} tone={active.coverTone} size="sm" />
+              <CoverArt title={active.trackTitle} tone={active.coverTone} missing={!showGeneratedCovers} size="sm" />
               <div>
                 <div className="eyebrow">{active.id.toUpperCase()}</div>
                 <h2>{active.action}</h2>

@@ -20,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
-import {artworkURL, audioURL, getRawTags} from '@/api';
+import {artworkURL, getRawTags} from '@/api';
 import {cn, formatBytes, formatDuration} from '@/lib/utils';
 import type {InspectorTab, Track, TrackPatch} from '@/types';
 
@@ -32,6 +32,11 @@ interface TrackInspectorProps {
   onSearch: (focus?: 'metadata' | 'lyrics') => void;
   onSave: (patch: TrackPatch, options?: TrackSaveOptions) => Promise<void>;
   onArtworkChange: (file: File | null) => Promise<void>;
+  playerTrackId?: string;
+  playerPlaying?: boolean;
+  onPlayTrack?: (track: Track) => void;
+  onTogglePlayer?: () => void;
+  showGeneratedCovers?: boolean;
 }
 
 export interface TrackSaveOptions {
@@ -94,11 +99,16 @@ export function TrackInspector({
   onSearch,
   onSave,
   onArtworkChange,
+  playerTrackId,
+  playerPlaying,
+  onPlayTrack,
+  onTogglePlayer,
+  showGeneratedCovers = false,
 }: TrackInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>('tags');
   const [draft, setDraft] = useState<TrackPatch | null>(track ? toPatch(track) : null);
   const [showPreview, setShowPreview] = useState(false);
-  const [playing, setPlaying] = useState(false);
+  const [fallbackPlaying, setFallbackPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
   const [writeTag, setWriteTag] = useState(true);
   const [writeSidecar, setWriteSidecar] = useState(true);
@@ -106,24 +116,18 @@ export function TrackInspector({
   const [rawTagsOpen, setRawTagsOpen] = useState(false);
   const [rawTagsLoading, setRawTagsLoading] = useState(false);
   const [rawTagsError, setRawTagsError] = useState('');
-  const audioRef = useRef<HTMLAudioElement>(null);
   const artworkInput = useRef<HTMLInputElement>(null);
-  const playbackURL = track ? audioURL(track) : undefined;
 
   useEffect(() => {
     setDraft(track ? toPatch(track) : null);
     setShowPreview(false);
-    setPlaying(false);
+	setFallbackPlaying(false);
 	setDeleteArtworkArmed(false);
 	setWriteTag(true);
 	setWriteSidecar(true);
 	setRawTags(null);
 	setRawTagsOpen(false);
 	setRawTagsError('');
-	if (audioRef.current) {
-	  audioRef.current.pause();
-	  audioRef.current.currentTime = 0;
-	}
   }, [track]);
 
   const original = useMemo(() => track ? toPatch(track) : null, [track]);
@@ -160,6 +164,8 @@ export function TrackInspector({
     );
   }
 
+  const activePlaying = playerTrackId === track.id ? Boolean(playerPlaying) : fallbackPlaying;
+
   const set = <K extends keyof TrackPatch>(key: K, value: TrackPatch[K]) => {
     setDraft((current) => current ? {...current, [key]: value} : current);
   };
@@ -171,15 +177,12 @@ export function TrackInspector({
   };
 
   const togglePlayback = () => {
-    if (!playbackURL || !audioRef.current) {
-      setPlaying((value) => !value);
+    if (onPlayTrack && onTogglePlayer) {
+      if (playerTrackId !== track.id) onPlayTrack(track);
+      else onTogglePlayer();
       return;
     }
-    if (audioRef.current.paused) {
-      void audioRef.current.play().catch(() => setPlaying(false));
-    } else {
-      audioRef.current.pause();
-    }
+    setFallbackPlaying((value) => !value);
   };
 
   const showRawTags = async () => {
@@ -210,7 +213,7 @@ export function TrackInspector({
           title={track.title}
           artist={track.artists[0]}
           tone={track.coverTone}
-          missing={track.artworkCount === 0}
+          missing={!showGeneratedCovers && track.artworkCount === 0}
           size="lg"
 		  imageUrl={artworkURL(track)}
         />
@@ -219,28 +222,16 @@ export function TrackInspector({
           <h2>{track.title || '未命名曲目'}</h2>
           <p>{track.artists.join(' / ')} <span>·</span> {track.album || '未知专辑'}</p>
           <div className="mini-player">
-            <button title={playing ? '暂停试听' : '试听'} onClick={togglePlayback}>
-              {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
+            <button title={activePlaying ? '暂停试听' : '试听'} onClick={togglePlayback}>
+              {activePlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
             </button>
-            <div className={cn('waveform', playing && 'is-playing')} aria-label="音频波形">
+            <div className={cn('waveform', activePlaying && 'is-playing')} aria-label="音频波形">
               {Array.from({length: 24}, (_, index) => (
                 <i key={index} style={{height: `${8 + ((index * 13) % 18)}px`}} />
               ))}
             </div>
-            <span>{playing ? '0:24' : formatDuration(track.durationSeconds)}</span>
+            <span>{formatDuration(track.durationSeconds)}</span>
           </div>
-          {playbackURL && (
-            <audio
-              ref={audioRef}
-              src={playbackURL}
-              preload="metadata"
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              onEnded={() => setPlaying(false)}
-              onError={() => setPlaying(false)}
-              aria-label="试听音频"
-            />
-          )}
         </div>
         <button className="hero-more" title="更多曲目操作"><CircleEllipsis size={19} /></button>
       </div>
@@ -384,7 +375,7 @@ export function TrackInspector({
                 title={track.title}
                 artist={track.artists[0]}
                 tone={track.coverTone}
-                missing={track.artworkCount === 0}
+                missing={!showGeneratedCovers && track.artworkCount === 0}
                 size="hero"
 				imageUrl={artworkURL(track)}
               />

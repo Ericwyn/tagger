@@ -106,3 +106,33 @@ it('focuses the lyrics asset when opened from the lyrics inspector tab', () => {
 
   expect(screen.getByRole('checkbox', {name: /歌词/})).toBeChecked();
 });
+
+it('allows the source query to be edited before searching again', async () => {
+  const user = userEvent.setup();
+  const onSearchQuery = vi.fn().mockResolvedValue(undefined);
+  render(
+    <CandidateDrawer
+      open
+      track={track}
+      candidates={[candidate]}
+      loading={false}
+      onSearchQuery={onSearchQuery}
+      onClose={() => undefined}
+      onApply={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  await user.click(screen.getByRole('button', {name: '修改查询'}));
+  await user.clear(screen.getByRole('textbox', {name: '查询标题'}));
+  await user.type(screen.getByRole('textbox', {name: '查询标题'}), '重新命名');
+  await user.clear(screen.getByRole('textbox', {name: '查询艺术家'}));
+  await user.type(screen.getByRole('textbox', {name: '查询艺术家'}), '甲 / 乙');
+  await user.click(screen.getByRole('button', {name: '重新查询'}));
+
+  await waitFor(() => expect(onSearchQuery).toHaveBeenCalledWith({
+    title: '重新命名',
+    artists: ['甲', '乙'],
+    album: track.album,
+    durationSeconds: track.durationSeconds,
+  }));
+});

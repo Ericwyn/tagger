@@ -152,6 +152,79 @@ button:disabled {
   backdrop-filter: blur(18px);
 }
 
+.global-player {
+  display: grid;
+  grid-template-columns: 34px minmax(170px, 260px) minmax(120px, 1fr) auto 30px;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 0 18px 0 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.global-player audio {
+  display: none;
+}
+
+.global-player-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.global-player-copy {
+  min-width: 0;
+}
+
+.global-player-copy strong,
+.global-player-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-player-copy strong {
+  font-size: 11px;
+}
+
+.global-player-copy span,
+.global-player-time {
+  margin-top: 2px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.global-player-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--paper-3);
+}
+
+.global-player-progress i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.global-player-close {
+  width: 30px;
+  height: 30px;
+}
+
+.app-shell.has-player .app-main,
+.app-shell.has-player .page-motion {
+  height: calc(100vh - 120px);
+}
+
 .brand-block {
   display: flex;
   align-items: center;
@@ -2336,6 +2409,35 @@ button:disabled {
   background: var(--paper-2);
 }
 
+.query-editor {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(100px, 1fr) minmax(100px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.query-editor input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-2);
+  font-size: 10px;
+}
+
+.query-editor button {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .query-strip > span {
   flex: 1;
   padding: 8px 10px;
@@ -4426,6 +4528,21 @@ button:disabled {
   .app-main,
   .page-motion {
     height: calc(100dvh - 119px);
+  }
+
+  .app-shell.has-player .app-main,
+  .app-shell.has-player .page-motion {
+    height: calc(100dvh - 171px);
+  }
+
+  .global-player {
+    grid-template-columns: 32px minmax(0, 1fr) auto 30px;
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .global-player-progress {
+    display: none;
   }
 
   .library-sidebar,

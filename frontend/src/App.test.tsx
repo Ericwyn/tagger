@@ -30,6 +30,21 @@ describe('Tagger app prototype', () => {
     await waitFor(() => expect(screen.getByText('MusicBrainz')).toBeInTheDocument());
   });
 
+  it('keeps the global player mounted while changing pages', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole('heading', {name: '再回首'});
+
+    await user.click(screen.getByTitle('试听'));
+    expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
+    expect(screen.getByTitle('暂停播放')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: /任务/}));
+    expect(await screen.findByRole('heading', {name: '任务中心'})).toBeInTheDocument();
+    expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
+    expect(screen.getByTitle('暂停播放')).toBeInTheDocument();
+  });
+
   it('searches metadata candidates for the active track', async () => {
     const user = userEvent.setup();
     render(<App />);

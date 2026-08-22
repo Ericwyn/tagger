@@ -61,6 +61,7 @@ function formatBatchValue(value: unknown): string {
 export function JobsPage({onOpenReview}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
+	const [jobFilter, setJobFilter] = useState<'all' | 'running' | 'review' | 'failed'>('all');
 	const [actionError, setActionError] = useState('');
 	const [batchItems, setBatchItems] = useState<BatchEditItem[]>([]);
 	const [trackNames, setTrackNames] = useState<Map<string, string>>(new Map());
@@ -86,7 +87,13 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 	  return subscribeJobEvents(selectedId, updateJob);
 	}, [selectedId]);
 
-  const active = jobs.find((job) => job.id === selectedId);
+	const visibleJobs = jobs.filter((job) => {
+	  if (jobFilter === 'running') return job.state === 'running' || job.state === 'waiting';
+	  if (jobFilter === 'review') return job.state === 'review';
+	  if (jobFilter === 'failed') return job.state === 'failed' || job.state === 'partial';
+	  return true;
+	});
+	const active = visibleJobs.find((job) => job.id === selectedId) ?? (jobFilter === 'all' ? jobs.find((job) => job.id === selectedId) : undefined);
 	const activeJobId = active?.id;
 	const activeJobKind = active?.kind;
 
@@ -123,16 +130,16 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
       </header>
 
       <div className="section-tabs">
-        <button className="is-active">全部 <em>{jobs.length}</em></button>
-		<button>进行中 <em>{jobs.filter((job) => job.state === 'running' || job.state === 'waiting').length}</em></button>
-		<button>待审核 <em>{jobs.filter((job) => job.state === 'review').length}</em></button>
-		<button>失败 <em>{jobs.filter((job) => job.state === 'failed' || job.state === 'partial').length}</em></button>
+        <button className={jobFilter === 'all' ? 'is-active' : undefined} onClick={() => setJobFilter('all')}>全部 <em>{jobs.length}</em></button>
+		<button className={jobFilter === 'running' ? 'is-active' : undefined} onClick={() => setJobFilter('running')}>进行中 <em>{jobs.filter((job) => job.state === 'running' || job.state === 'waiting').length}</em></button>
+		<button className={jobFilter === 'review' ? 'is-active' : undefined} onClick={() => setJobFilter('review')}>待审核 <em>{jobs.filter((job) => job.state === 'review').length}</em></button>
+		<button className={jobFilter === 'failed' ? 'is-active' : undefined} onClick={() => setJobFilter('failed')}>失败 <em>{jobs.filter((job) => job.state === 'failed' || job.state === 'partial').length}</em></button>
       </div>
 
       <div className="jobs-layout">
 		<section className="jobs-list">
-		  {jobs.length === 0 && <div className="empty-state"><span>∅</span><strong>还没有任务</strong><p>重新扫描或批量操作后会出现在这里。</p></div>}
-          {jobs.map((job) => {
+		  {visibleJobs.length === 0 && <div className="empty-state"><span>∅</span><strong>{jobs.length === 0 ? '还没有任务' : '没有符合条件的任务'}</strong><p>{jobs.length === 0 ? '重新扫描或批量操作后会出现在这里。' : '切换其他状态查看任务。'}</p></div>}
+          {visibleJobs.map((job) => {
             const KindIcon = kindIcon[job.kind];
             const meta = stateMeta[job.state];
             const StateIcon = meta.icon;

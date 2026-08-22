@@ -533,6 +533,19 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
 		return
 	}
+	for _, selection := range request.Items {
+		item, itemErr := s.store.MatchItem(ctx, matchJob.ID, selection.TrackID)
+		if itemErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
+			return
+		}
+		item.State = "write_pending"
+		item.SelectedCandidateID = selection.CandidateID
+		if itemErr := s.store.UpsertMatchItem(ctx, item); itemErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
+			return
+		}
+	}
 	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
 }
 

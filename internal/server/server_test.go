@@ -545,6 +545,42 @@ func TestMatchItemsAPIReadsPersistedCandidates(t *testing.T) {
 	}
 }
 
+func TestMatchWriteAPIMarksAcceptedItemsWritePending(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-review", Kind: domain.JobMatch, LibraryID: s.library.Library().ID,
+		Title: "Match", Detail: "review", State: domain.JobReview, Total: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, _ := json.Marshal([]providers.MatchCandidate{{
+		ID: "candidate-accepted", ProviderID: "test-provider",
+		Title: providers.Field[string]{Value: track.Title, Source: "Test"},
+	}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{
+		JobID: matchJob.ID, TrackID: track.ID, State: "review", Candidates: candidates,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"items":[{"trackId":"` + track.ID + `","candidateId":"candidate-accepted","baseRevision":"` + track.Revision + `","fields":["title"]}]}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/jobs/"+matchJob.ID+"/write",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"kind":"write"`) {
+		t.Fatalf("match write = %d %s", response.Code, response.Body.String())
+	}
+	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != "write_pending" || item.SelectedCandidateID != "candidate-accepted" {
+		t.Fatalf("match item after write enqueue = %#v", item)
+	}
+}
+
 func TestRevisionHistoryAPI(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]

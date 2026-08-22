@@ -31,7 +31,7 @@ import {
 	writeLyricsSidecar,
 	waitForJob,
 } from '@/api';
-import type {LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
+import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
@@ -41,6 +41,11 @@ interface LyricsSaveOptions {
 interface LibraryPageProps {
   onOpenReview: (ids: string[]) => void;
   onNotice: (message: string) => void;
+  playerTrackId?: string;
+  playerPlaying: boolean;
+  onPlayTrack: (track: Track) => void;
+  onTogglePlayer: () => void;
+  showGeneratedCovers?: boolean;
 }
 
 const filterLabels: Record<SidebarFilter, string> = {
@@ -52,7 +57,7 @@ const filterLabels: Record<SidebarFilter, string> = {
   'parse-error': '解析失败',
 };
 
-export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
+export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
@@ -203,14 +208,14 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
 	  }
 	};
 
-  const openCandidateSearch = async (focus: 'metadata' | 'lyrics' = 'metadata') => {
+  const openCandidateSearch = async (focus: 'metadata' | 'lyrics' = 'metadata', query?: CandidateSearchQuery) => {
     if (!activeTrack) return;
     setCandidateFocus(focus);
     setCandidateOpen(true);
     setCandidateLoading(true);
     setCandidates([]);
     try {
-      setCandidates(await searchCandidates(activeTrack));
+      setCandidates(await searchCandidates(activeTrack, query));
     } finally {
       setCandidateLoading(false);
     }
@@ -385,6 +390,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
 
         <TrackList
           tracks={visibleTracks}
+          showGeneratedCovers={showGeneratedCovers}
           activeTrackId={activeTrackId}
           selectedIds={selectedIds}
           onSelectTrack={(track) => {
@@ -410,6 +416,11 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
 		onSearch={openCandidateSearch}
 		onSave={async (patch, options) => { await saveTrack(patch, options); }}
 		onArtworkChange={changeArtwork}
+		playerTrackId={playerTrackId}
+		playerPlaying={playerPlaying}
+		onPlayTrack={onPlayTrack}
+		onTogglePlayer={onTogglePlayer}
+		showGeneratedCovers={showGeneratedCovers}
       />
 
       {selectedIds.size > 0 && (
@@ -433,6 +444,8 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         candidates={candidates}
         loading={candidateLoading}
         focus={candidateFocus}
+		showGeneratedCovers={showGeneratedCovers}
+		onSearchQuery={(query) => openCandidateSearch(candidateFocus, query)}
         onClose={() => setCandidateOpen(false)}
 		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options.artwork)}
       />

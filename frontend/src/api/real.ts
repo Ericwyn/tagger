@@ -16,6 +16,7 @@ import type {
 	BatchEditOperation,
 	BatchEditSelection,
 	UpdateProvenance,
+	CandidateSearchQuery,
 	LyricsSidecarResponse,
 	LyricsSidecarWriteResult,
 } from '@/types';
@@ -226,7 +227,13 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       });
     },
 
-    async searchCandidates(track: Track): Promise<MatchCandidate[]> {
+	async searchCandidates(track: Track, override?: CandidateSearchQuery): Promise<MatchCandidate[]> {
+		const query = override ?? {
+			title: track.title,
+			artists: track.artists,
+			album: track.album,
+			durationSeconds: track.durationSeconds,
+		};
       const result = await request<{candidates: MatchCandidate[]; providers: Record<string, unknown>}>(
         '/api/v1/matches/tracks/search',
         {
@@ -234,12 +241,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
             fileId: track.id,
-            query: {
-              title: track.title,
-              artists: track.artists,
-              album: track.album,
-              durationSeconds: track.durationSeconds,
-            },
+            query,
             limitPerProvider: 5,
           }),
         },

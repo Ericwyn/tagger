@@ -100,6 +100,13 @@ export interface MatchCandidate {
   matchReasons: string[];
 }
 
+export interface CandidateSearchQuery {
+  title: string;
+  artists: string[];
+  album: string;
+  durationSeconds: number;
+}
+
 export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 
 export interface Job {
@@ -120,7 +127,7 @@ export interface MatchItem {
   id: string;
   jobId: string;
   trackId: string;
-  state: 'review' | 'no_match' | 'failed' | 'written' | 'write_failed' | 'artwork_failed';
+  state: 'review' | 'no_match' | 'failed' | 'written' | 'write_pending' | 'write_failed' | 'artwork_failed';
   candidates: MatchCandidate[];
   selectedCandidateId?: string;
   error?: string;
