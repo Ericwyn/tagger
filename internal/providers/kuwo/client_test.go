@@ -17,7 +17,10 @@ func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f
 func TestSearchMapsKuwoResponse(t *testing.T) {
 	searchBody := `{"abslist":[{"MUSICRID":"MUSIC_123","SONGNAME":"Song","ARTIST":"Artist&Guest","ALBUM":"Album","ALBUMARTIST":"Artist","SONG_DURATION":"03:21","TRACKNUM":4,"web_albumpic_short":"120/54/7/152082279.jpg"}]}`
 	lyricsBody := `{"data":{"lrclist":[{"time":"1.25","lineLyric":"第一行"},{"time": "65.5", "lineLyric":"第二行"}]}}`
-	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", Auth: "Bearer test", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/search" && (r.Header.Get("Authorization") != "Bearer test" || r.Header.Get("Referer") == "" || r.Header.Get("Origin") == "") {
+			t.Fatalf("search headers = %#v", r.Header)
+		}
 		body := searchBody
 		if r.URL.Path == "/lyrics" {
 			body = lyricsBody
@@ -33,6 +36,24 @@ func TestSearchMapsKuwoResponse(t *testing.T) {
 	}
 	if items[0].Lyrics != "[00:01.25]第一行\n[01:05.50]第二行" || items[0].SyncedLyrics != items[0].Lyrics {
 		t.Fatalf("lyrics = %q synced=%q", items[0].Lyrics, items[0].SyncedLyrics)
+	}
+}
+
+func TestSearchFallsBackToTitleWhenArtistKeywordHasNoResults(t *testing.T) {
+	searches := 0
+	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/search" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":{}}`)), Header: http.Header{}, Request: r}, nil
+		}
+		searches++
+		if r.URL.Query().Get("all") != "Song" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"abslist":[]}`)), Header: http.Header{}, Request: r}, nil
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"abslist":[{"MUSICRID":"MUSIC_9","SONGNAME":"Song","ARTIST":"Artist"}]}`)), Header: http.Header{}, Request: r}, nil
+	})}})
+	items, err := client.Search(context.Background(), providers.Query{Title: "Song", Artists: []string{"Wrong"}}, 1)
+	if err != nil || len(items) != 1 || items[0].ExternalID != "9" || searches != 2 {
+		t.Fatalf("items=%#v err=%v searches=%d", items, err, searches)
 	}
 }
 

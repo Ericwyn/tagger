@@ -133,35 +133,62 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	if limit > 20 {
 		limit = 20
 	}
-	keyword := strings.TrimSpace(strings.Join(append([]string{query.Title}, query.Artists...), " "))
-	if keyword == "" {
+	if strings.TrimSpace(query.Title) == "" {
 		return []providers.Candidate{}, nil
 	}
 	if err := c.gate.Wait(ctx); err != nil {
 		return nil, err
 	}
-	values := url.Values{"client": {"kt"}, "ft": {"music"}, "cluster": {"0"}, "strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"}, "pn": {"0"}, "rn": {strconv.Itoa(limit)}, "all": {keyword}}
-	var response struct {
-		Items []struct {
-			MusicRID             string `json:"MUSICRID"`
-			SongName             string `json:"SONGNAME"`
-			Artist               string `json:"ARTIST"`
-			Album                string `json:"ALBUM"`
-			AlbumArtist          string `json:"ALBUMARTIST"`
-			Duration             string `json:"SONG_DURATION"`
-			TrackNumber          int    `json:"TRACKNUM"`
-			AlbumPicture         string `json:"ALBUMPIC"`
-			AlbumPictureShort    string `json:"ALBUMPIC_SHORT"`
-			WebAlbumPicture      string `json:"web_albumpic"`
-			WebAlbumPictureShort string `json:"web_albumpic_short"`
-			Picture              string `json:"PIC"`
-		} `json:"abslist"`
+	keywords := searchKeywords(query)
+	fetchLimit := limit * 4
+	if fetchLimit < 20 {
+		fetchLimit = 20
 	}
-	if err := providers.GetJSON(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, &response); err != nil {
-		return nil, err
+	if fetchLimit > 100 {
+		fetchLimit = 100
 	}
-	result := make([]providers.Candidate, 0, len(response.Items))
-	for _, item := range response.Items {
+	items := make([]kuwoItem, 0, fetchLimit)
+	seen := make(map[string]struct{}, fetchLimit)
+	var firstErr error
+	for index, keyword := range keywords {
+		if index > 0 {
+			if err := c.gate.Wait(ctx); err != nil {
+				return nil, err
+			}
+		}
+		values := url.Values{"client": {"kt"}, "ft": {"music"}, "cluster": {"0"}, "strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"}, "pn": {"0"}, "rn": {strconv.Itoa(fetchLimit)}, "all": {keyword}}
+		var response struct {
+			Items []kuwoItem `json:"abslist"`
+		}
+		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.Endpoint+"?"+values.Encode(), c.config.UserAgent, kuwoHeaders(c.config.Auth), &response); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			if index == 0 {
+				return nil, err
+			}
+			continue
+		}
+		for _, item := range response.Items {
+			id := strings.TrimPrefix(item.MusicRID, "MUSIC_")
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			items = append(items, item)
+		}
+		if len(items) >= fetchLimit {
+			break
+		}
+	}
+	if len(items) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	result := make([]providers.Candidate, 0, min(limit, len(items)))
+	for _, item := range items {
 		id := strings.TrimPrefix(item.MusicRID, "MUSIC_")
 		if id == "" {
 			continue
@@ -172,6 +199,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			candidate.SyncedLyrics = lyrics
 		}
 		result = append(result, candidate)
+		if len(result) >= limit {
+			break
+		}
 	}
 	return result, nil
 }
@@ -180,6 +210,21 @@ type lyricLine struct {
 	LineLyric string          `json:"lineLyric"`
 	Lyric     string          `json:"lyric"`
 	Time      json.RawMessage `json:"time"`
+}
+
+type kuwoItem struct {
+	MusicRID             string `json:"MUSICRID"`
+	SongName             string `json:"SONGNAME"`
+	Artist               string `json:"ARTIST"`
+	Album                string `json:"ALBUM"`
+	AlbumArtist          string `json:"ALBUMARTIST"`
+	Duration             string `json:"SONG_DURATION"`
+	TrackNumber          int    `json:"TRACKNUM"`
+	AlbumPicture         string `json:"ALBUMPIC"`
+	AlbumPictureShort    string `json:"ALBUMPIC_SHORT"`
+	WebAlbumPicture      string `json:"web_albumpic"`
+	WebAlbumPictureShort string `json:"web_albumpic_short"`
+	Picture              string `json:"PIC"`
 }
 
 type lyricPayload struct {
@@ -247,13 +292,7 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 }
 
 func (c *Client) getBody(ctx context.Context, endpoint string, headers map[string]string) ([]byte, error) {
-	requestHeaders := map[string]string{
-		"Referer": "https://www.kuwo.cn/",
-		"Origin":  "https://www.kuwo.cn",
-	}
-	if strings.TrimSpace(c.config.Auth) != "" {
-		requestHeaders["Authorization"] = strings.TrimSpace(c.config.Auth)
-	}
+	requestHeaders := kuwoHeaders(c.config.Auth)
 	for name, value := range headers {
 		requestHeaders[name] = value
 	}
@@ -388,6 +427,44 @@ func splitArtists(value string) []string {
 	}
 	return result
 }
+
+func searchKeywords(query providers.Query) []string {
+	title := strings.TrimSpace(query.Title)
+	if title == "" {
+		return nil
+	}
+	artists := strings.TrimSpace(strings.Join(query.Artists, " "))
+	keywords := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, exists := seen[value]; exists {
+			return
+		}
+		seen[value] = struct{}{}
+		keywords = append(keywords, value)
+	}
+	if artists != "" {
+		add(title + " " + artists)
+	}
+	if album := strings.TrimSpace(query.Album); album != "" {
+		add(title + " " + album)
+	}
+	add(title)
+	return keywords
+}
+
+func kuwoHeaders(auth string) map[string]string {
+	result := map[string]string{"Referer": "https://www.kuwo.cn/", "Origin": "https://www.kuwo.cn"}
+	if strings.TrimSpace(auth) != "" {
+		result["Authorization"] = strings.TrimSpace(auth)
+	}
+	return result
+}
+
 func parseDuration(value string) int64 {
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 {
