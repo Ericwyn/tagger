@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import {CandidateDrawer} from '@/components/library/CandidateDrawer';
+import {BatchEditPanel, buildBatchPatch, type BatchOperation} from '@/components/library/BatchEditPanel';
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
@@ -58,6 +59,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
   const [candidateOpen, setCandidateOpen] = useState(false);
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [mobileInspector, setMobileInspector] = useState(false);
 
@@ -220,6 +222,35 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     });
   };
 
+  const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean) => {
+    const selectedTracks = tracks.filter((track) => selectedIds.has(track.id));
+    const failed = new Set<string>();
+    let succeeded = 0;
+    setSaving(true);
+    try {
+      for (const [index, track] of selectedTracks.entries()) {
+        if (!track.writable) {
+          failed.add(track.id);
+          continue;
+        }
+        try {
+          const updated = await updateTrack(track.id, buildBatchPatch(track, operations, sequenceTracks ? {index, total: selectedTracks.length} : undefined));
+          setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+          succeeded += 1;
+        } catch {
+          failed.add(track.id);
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+    setBatchEditOpen(false);
+    setSelectedIds(failed);
+    onNotice(failed.size === 0
+      ? `已安全写入 ${succeeded} 首曲目的批量标签修改`
+      : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
+  };
+
   if (loading) {
     return (
       <div className="app-loading">
@@ -346,7 +377,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
             <span>首已选择</span>
           </div>
           <span className="selection-divider" />
-          <button onClick={() => onNotice('批量编辑器将在下一步打开字段操作面板')}><Tags size={16} /> 批量编辑</button>
+          <button onClick={() => setBatchEditOpen(true)}><Tags size={16} /> 批量编辑</button>
           <button className="is-accent" onClick={() => onOpenReview(Array.from(selectedIds))}>
             <Sparkles size={16} /> 抓取元数据
           </button>
@@ -361,6 +392,14 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         loading={candidateLoading}
         onClose={() => setCandidateOpen(false)}
 		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options.artwork)}
+      />
+
+      <BatchEditPanel
+        open={batchEditOpen}
+        tracks={tracks.filter((track) => selectedIds.has(track.id))}
+        saving={saving}
+        onClose={() => setBatchEditOpen(false)}
+        onApply={applyBatchEdit}
       />
     </div>
   );
