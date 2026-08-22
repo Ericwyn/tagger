@@ -131,6 +131,15 @@ export interface CandidateSearchQuery {
   durationSeconds: number;
 }
 
+export interface MatchQueryHistory {
+  id: string;
+  trackId: string;
+  query: CandidateSearchQuery;
+  providerIds: string[];
+  resultCount: number;
+  createdAt: string;
+}
+
 export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial' | 'failed' | 'cancelled';
 
 export interface Job {

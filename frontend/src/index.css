@@ -997,6 +997,29 @@ button:disabled {
   font-size: 11px;
 }
 
+.toolbar-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.toolbar-filter select {
+  max-width: 132px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 650;
+}
+
 .track-list {
   display: grid;
   grid-template-rows: 37px minmax(0, 1fr);
@@ -2509,6 +2532,16 @@ button:disabled {
   font-size: 9px;
 }
 
+.query-strip select {
+  max-width: 150px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-2);
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .candidate-loading {
   display: flex;
   flex-direction: column;
@@ -3041,6 +3074,24 @@ button:disabled {
 
 .review-toolbar > span {
   flex: 1;
+}
+
+.review-empty-filter {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.review-rematch-error {
+  margin: 0 16px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, var(--paper-2));
+  color: var(--danger);
+  font-size: 11px;
 }
 
 .review-layout {
@@ -4835,6 +4886,7 @@ button:disabled {
   }
 
   .review-toolbar > .toolbar-button,
+  .review-toolbar > .toolbar-filter,
   .review-toolbar > .secondary-button {
     display: none;
   }

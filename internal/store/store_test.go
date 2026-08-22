@@ -233,6 +233,35 @@ func TestProviderCacheExpiryAndSettings(t *testing.T) {
 	}
 }
 
+func TestMatchQueryHistoryPersistsNewestQueriesFirst(t *testing.T) {
+	dataStore := openTestStore(t)
+	base := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	dataStore.now = func() time.Time { return base }
+	first, err := dataStore.AddMatchQueryHistory(context.Background(), "trk-1", []byte(`{"title":"第一首"}`), []string{"musicbrainz"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataStore.now = func() time.Time { return base.Add(time.Minute) }
+	second, err := dataStore.AddMatchQueryHistory(context.Background(), "trk-1", []byte(`{"title":"第二首"}`), []string{"apple", "netease"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID {
+		t.Fatal("query history IDs must be unique")
+	}
+	history, err := dataStore.ListMatchQueryHistory(context.Background(), "trk-1", 10)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history = %#v err=%v", history, err)
+	}
+	if history[0].ID != second.ID || string(history[0].Query) != `{"title":"第二首"}` || len(history[0].ProviderIDs) != 2 || history[0].ResultCount != 3 {
+		t.Fatalf("newest history = %#v", history[0])
+	}
+	other, err := dataStore.ListMatchQueryHistory(context.Background(), "trk-2", 10)
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other track history = %#v err=%v", other, err)
+	}
+}
+
 func TestRevisionStoresDeduplicatedArtworkBlobAndHydratesOnRead(t *testing.T) {
 	dataStore := openTestStore(t)
 	snapshot := &domain.ArtworkSnapshot{MIME: "image/png", Format: "PNG", Width: 2, Height: 2, Size: 5, Hash: "art-hash", Data: []byte("image")}

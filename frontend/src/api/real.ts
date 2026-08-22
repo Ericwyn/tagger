@@ -17,6 +17,7 @@ import type {
 	BatchEditSelection,
 	UpdateProvenance,
 	CandidateSearchQuery,
+	MatchQueryHistory,
 	LyricsSidecarResponse,
 	LyricsSidecarWriteResult,
 } from '@/types';
@@ -204,6 +205,14 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
+	rematchMatchItem(jobId: string, trackId: string, query?: CandidateSearchQuery, providerIds: string[] = []): Promise<MatchItem> {
+	  return request<{item: MatchItem; providers: Record<string, unknown>}>(`/api/v1/matches/jobs/${encodeURIComponent(jobId)}/items/${encodeURIComponent(trackId)}/rematch`, {
+		method: 'POST',
+		headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({query, providerIds, limitPerProvider: 5}),
+	  }).then((result) => result.item);
+	},
+
 	createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job> {
 	  return request<Job>(`/api/v1/matches/jobs/${encodeURIComponent(matchJobId)}/write`, {
 		method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({items}),
@@ -298,6 +307,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       );
       return result.candidates;
     },
+
+	listQueryHistory(trackId: string): Promise<MatchQueryHistory[]> {
+	  return request<MatchQueryHistory[]>(`/api/v1/matches/tracks/${encodeURIComponent(trackId)}/query-history`);
+	},
 
 	listProviders(): Promise<ProviderConfig[]> {
       return request<ProviderConfig[]>('/api/v1/providers');

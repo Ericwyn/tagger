@@ -2,11 +2,11 @@ import {useEffect, useMemo, useState} from 'react';
 import {
   ArrowLeft,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   FileCheck2,
   LoaderCircle,
+  RefreshCw,
   Search,
   Sparkles,
   X,
@@ -14,7 +14,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, updateMatchItem, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, updateMatchItem, waitForJob} from '@/api';
 import type {Job, MatchCandidate, MatchItem, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -26,6 +26,7 @@ interface ReviewPageProps {
 }
 
 type ReviewState = 'accepted' | 'review' | 'skipped';
+type ReviewStatusFilter = 'all' | ReviewState;
 
 interface ReviewItem {
   track: Track;
@@ -99,6 +100,10 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [query, setQuery] = useState('');
+	const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('all');
+	const [sourceFilter, setSourceFilter] = useState('all');
+	const [rematching, setRematching] = useState(false);
+	const [rematchError, setRematchError] = useState('');
 	const [job, setJob] = useState<Job>();
 
   useEffect(() => {
@@ -160,13 +165,24 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     return () => { active = false; };
   }, [matchJobId, trackIds]);
 
+  const sourceOptions = useMemo(() => {
+    const providers = new Map<string, string>();
+    items.forEach((item) => item.candidates.forEach((candidate) => providers.set(candidate.providerId, candidate.providerName)));
+    return [...providers.entries()].sort((left, right) => left[1].localeCompare(right[1]));
+  }, [items]);
+
   const visibleItems = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return items;
-    return items.filter(({track}) => [track.title, track.fileName, track.artists.join(' ')].some((value) => value.toLocaleLowerCase().includes(normalized)));
-  }, [items, query]);
+    return items.filter(({track, candidates, state}) => {
+      if (statusFilter !== 'all' && state !== statusFilter) return false;
+      if (sourceFilter !== 'all' && !candidates.some((candidate) => candidate.providerId === sourceFilter)) return false;
+      if (!normalized) return true;
+      return [track.title, track.fileName, track.artists.join(' ')].some((value) => value.toLocaleLowerCase().includes(normalized));
+    });
+  }, [items, query, sourceFilter, statusFilter]);
 
-  const active = items.find(({track}) => track.id === activeId) ?? items[0];
+  const hasQueueFilter = Boolean(query.trim()) || statusFilter !== 'all' || sourceFilter !== 'all';
+  const active = visibleItems.find(({track}) => track.id === activeId) ?? visibleItems[0] ?? (hasQueueFilter ? undefined : items[0]);
   const accepted = items.filter((item) => item.state === 'accepted').length;
   const needsReview = items.filter((item) => item.state === 'review').length;
   const skipped = items.filter((item) => item.state === 'skipped').length;
@@ -220,6 +236,35 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     persistReviewState(trackId, item.state, item.candidate?.id, item.fields, includeArtwork);
   };
 
+  const rematchCurrent = async () => {
+    if (!active || rematching) return;
+    setRematching(true);
+    setRematchError('');
+    try {
+      const result = await rematchMatchItem(job?.id ?? '', active.track.id, active.track);
+      if (!result) return;
+      const candidates = result.candidates ?? [];
+      const candidate = candidates[0];
+      setItems((current) => current.map((entry) => entry.track.id === active.track.id
+        ? {
+          ...entry,
+          candidate,
+          candidates,
+          fields: candidate ? availableFields(candidate) : [],
+          includeArtwork: false,
+          state: candidate ? 'review' : 'skipped',
+          error: result.error,
+        }
+        : entry));
+      setStatusFilter('all');
+      setSourceFilter('all');
+    } catch (error) {
+      setRematchError(error instanceof Error ? error.message : '重新匹配失败');
+    } finally {
+      setRematching(false);
+    }
+  };
+
   if (loading) {
     return <div className="app-loading"><LoaderCircle className="spin" size={22} /> 正在整理候选结果…</div>;
   }
@@ -246,8 +291,22 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="在本批次中搜索…" />
           {query && <button title="清除搜索" onClick={() => setQuery('')}><X size={14} /></button>}
         </label>
-        <button className="toolbar-button">状态：全部 <ChevronDown size={13} /></button>
-        <button className="toolbar-button">来源：全部 <ChevronDown size={13} /></button>
+        <label className="toolbar-filter">
+          <span>状态</span>
+          <select aria-label="审核状态筛选" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ReviewStatusFilter)}>
+            <option value="all">全部</option>
+            <option value="review">待确认</option>
+            <option value="accepted">已接受</option>
+            <option value="skipped">已跳过</option>
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          <span>来源</span>
+          <select aria-label="候选来源筛选" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+            <option value="all">全部</option>
+            {sourceOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+        </label>
         <span />
         <button
           className="secondary-button"
@@ -305,6 +364,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               </span>
             </button>
           ))}
+          {visibleItems.length === 0 && <div className="review-empty-filter">没有符合当前筛选条件的曲目</div>}
         </section>
 
         {active && active.candidate && (
@@ -330,7 +390,12 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
                 <span>不会删除候选中缺失的标签；评论和未知标签保持不变。</span>
               </div>
               <button>修改策略</button>
+              <button onClick={() => void rematchCurrent()} disabled={rematching}>
+                {rematching ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+                重新匹配此曲
+              </button>
             </div>
+			{rematchError && <div className="review-rematch-error">{rematchError}</div>}
 
             <div className="review-diff-table">
               <div className="review-diff-head"><span>采用</span><span>字段</span><span>当前值</span><span>候选值</span><span>来源</span></div>
@@ -379,6 +444,11 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               <span>∅</span>
               <strong>没有可审核的候选</strong>
               <p>{active.error || '当前启用的数据源没有返回匹配结果。该曲目已安全跳过，不会创建写入任务。'}</p>
+              <button className="secondary-button" onClick={() => void rematchCurrent()} disabled={rematching}>
+                {rematching ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}
+                重新匹配此曲
+              </button>
+              {rematchError && <small className="review-rematch-error">{rematchError}</small>}
             </div>
           </section>
         )}

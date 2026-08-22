@@ -33,4 +33,19 @@ describe('ReviewPage field selection', () => {
     await user.click(screen.getByRole('button', {name: /接受候选/}));
     expect(screen.getByRole('heading', {name: '愛上一個不回家的人'})).toBeInTheDocument();
   });
+
+  it('filters the review queue by persisted decision state and provider', async () => {
+    const user = userEvent.setup();
+    render(<ReviewPage trackIds={['trk-001', 'trk-002']} onBack={vi.fn()} onComplete={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', {name: '审核抓取结果'})).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: /跳过此曲/}));
+
+    await user.selectOptions(screen.getByRole('combobox', {name: '审核状态筛选'}), 'skipped');
+    expect(screen.getByRole('button', {name: /再回首/})).toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: /愛上一個不回家的人/})).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox', {name: '候选来源筛选'}), 'netease');
+    expect(screen.getByRole('combobox', {name: '候选来源筛选'})).toHaveValue('netease');
+  });
 });

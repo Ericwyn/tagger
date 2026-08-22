@@ -189,8 +189,30 @@ func TestScannerReadsTestMusicCorpus(t *testing.T) {
 		}
 		t.Fatalf("failed to parse %d/%d TestMusic files", result.Report.Failed, result.Report.Discovered)
 	}
-	if len(result.Tracks) != 24 {
-		t.Fatalf("tracks = %d, want 24", len(result.Tracks))
+	expectedFormats := map[domain.TrackFormat]int{}
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		switch filepath.Ext(path) {
+		case ".flac":
+			expectedFormats[domain.FormatFLAC]++
+		case ".mp3":
+			expectedFormats[domain.FormatMP3]++
+		case ".wav":
+			expectedFormats[domain.FormatWAV]++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedTotal := expectedFormats[domain.FormatFLAC] + expectedFormats[domain.FormatMP3] + expectedFormats[domain.FormatWAV]
+	if len(result.Tracks) != expectedTotal {
+		t.Fatalf("tracks = %d, want %d supported files", len(result.Tracks), expectedTotal)
 	}
 	formats := map[domain.TrackFormat]int{}
 	for _, track := range result.Tracks {
@@ -199,8 +221,8 @@ func TestScannerReadsTestMusicCorpus(t *testing.T) {
 			t.Errorf("incomplete parsed track: %#v", track)
 		}
 	}
-	if formats[domain.FormatFLAC] != 15 || formats[domain.FormatMP3] != 9 {
-		t.Fatalf("format counts = %#v", formats)
+	if formats[domain.FormatFLAC] != expectedFormats[domain.FormatFLAC] || formats[domain.FormatMP3] != expectedFormats[domain.FormatMP3] || formats[domain.FormatWAV] != expectedFormats[domain.FormatWAV] {
+		t.Fatalf("format counts = %#v, want %#v", formats, expectedFormats)
 	}
 }
 

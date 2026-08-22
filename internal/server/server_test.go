@@ -516,6 +516,10 @@ func TestProviderListAndTrackMatchSearch(t *testing.T) {
 	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"providerId":"test-provider"`) || !containsJSON(response.Body.Bytes(), `"value":"Alpha"`) {
 		t.Fatalf("match = %d %s", response.Code, response.Body.String())
 	}
+	history := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/matches/tracks/"+listEnvelope.Data.Tracks[0].ID+"/query-history", nil)
+	if history.Code != 200 || !containsJSON(history.Body.Bytes(), `"trackId":"`+listEnvelope.Data.Tracks[0].ID+`"`) || !containsJSON(history.Body.Bytes(), `"title":"Alpha"`) {
+		t.Fatalf("match query history = %d %s", history.Code, history.Body.String())
+	}
 }
 
 func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
@@ -631,6 +635,41 @@ func TestMatchReviewStateAPIUpdatesPersistedDecision(t *testing.T) {
 		&ut.Body{Body: bytes.NewReader(invalidBody), Len: len(invalidBody)}, ut.Header{Key: "content-type", Value: "application/json"})
 	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `candidateId`) {
 		t.Fatalf("invalid candidate review state = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestMatchRematchAPIReplacesPersistedCandidates(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-rematch", Kind: domain.JobMatch, LibraryID: s.library.Library().ID,
+		Title: "Match", Detail: "review", State: domain.JobReview, Total: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCandidates, _ := json.Marshal([]providers.MatchCandidate{{ID: "old-candidate", ProviderID: "test-provider"}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{
+		JobID: matchJob.ID, TrackID: track.ID, State: "accepted", Candidates: oldCandidates,
+		SelectedCandidateID: "old-candidate", ReviewFields: []string{"title"}, ReviewArtwork: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"query":{"title":"重新查询","artists":["新歌手"],"album":"新专辑","durationSeconds":201},"providerIds":["test-provider"],"limitPerProvider":3}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/jobs/"+matchJob.ID+"/items/"+track.ID+"/rematch",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"state":"review"`) || !containsJSON(response.Body.Bytes(), `"value":"重新查询"`) {
+		t.Fatalf("rematch = %d %s", response.Code, response.Body.String())
+	}
+	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidates []providers.MatchCandidate
+	if err := json.Unmarshal(item.Candidates, &candidates); err != nil || len(candidates) != 1 || candidates[0].Title.Value != "重新查询" || item.SelectedCandidateID != "" || item.ReviewFields != nil || item.ReviewArtwork {
+		t.Fatalf("rematched item = %#v candidates=%#v err=%v", item, candidates, err)
 	}
 }
 

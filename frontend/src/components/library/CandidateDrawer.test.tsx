@@ -1,6 +1,6 @@
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {expect, it, vi} from 'vitest';
+import {beforeEach, expect, it, vi} from 'vitest';
 import {CandidateDrawer} from '@/components/library/CandidateDrawer';
 import {seedTracks} from '@/mock/data';
 import type {MatchCandidate, Track} from '@/types';
@@ -40,6 +40,10 @@ const candidate: MatchCandidate = {
   scoreLabel: '高度匹配',
   matchReasons: ['标题一致'],
 };
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 it('keeps missing candidate fields and applies explicitly selected lyrics', async () => {
   const user = userEvent.setup();
@@ -135,4 +139,33 @@ it('allows the source query to be edited before searching again', async () => {
     album: track.album,
     durationSeconds: track.durationSeconds,
   }));
+});
+
+it('keeps per-track query history and can run a previous query again', async () => {
+  const user = userEvent.setup();
+  const onSearchQuery = vi.fn().mockResolvedValue(undefined);
+  render(
+    <CandidateDrawer
+      open
+      track={track}
+      candidates={[candidate]}
+      loading={false}
+      onSearchQuery={onSearchQuery}
+      onClose={() => undefined}
+      onApply={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  await user.click(screen.getByRole('button', {name: '修改查询'}));
+  await user.clear(screen.getByRole('textbox', {name: '查询标题'}));
+  await user.type(screen.getByRole('textbox', {name: '查询标题'}), '历史查询');
+  await user.click(screen.getByRole('button', {name: '重新查询'}));
+  const history = await screen.findByRole('combobox', {name: '查询历史'});
+  expect(history).toHaveDisplayValue('查询历史');
+
+  await user.selectOptions(history, '0');
+  await waitFor(() => expect(onSearchQuery).toHaveBeenCalledTimes(2));
+  expect(onSearchQuery).toHaveBeenLastCalledWith({
+    title: '历史查询', artists: track.artists, album: track.album, durationSeconds: track.durationSeconds,
+  });
 });

@@ -94,7 +94,9 @@ func (s *Server) routes() {
 	api.PATCH("/providers/:id", s.handleProviderUpdate)
 	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
+	api.GET("/matches/tracks/:id/query-history", s.handleMatchQueryHistory)
 	api.POST("/matches/tracks/batch", s.handleMatchBatch)
+	api.POST("/matches/jobs/:id/items/:trackId/rematch", s.handleMatchRematch)
 	api.PATCH("/matches/jobs/:id/items/:trackId", s.handleMatchReviewUpdate)
 	api.POST("/matches/jobs/:id/write", s.handleMatchWrite)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
@@ -483,6 +485,108 @@ type matchReviewUpdateRequest struct {
 	SelectedCandidateID string   `json:"selectedCandidateId,omitempty"`
 	Fields              []string `json:"fields,omitempty"`
 	Artwork             *bool    `json:"artwork,omitempty"`
+}
+
+type matchQueryFields struct {
+	Title           string   `json:"title"`
+	Artists         []string `json:"artists"`
+	Album           string   `json:"album"`
+	DurationSeconds int64    `json:"durationSeconds"`
+}
+
+type matchRematchRequest struct {
+	Query            matchQueryFields `json:"query"`
+	ProviderIDs      []string         `json:"providerIds"`
+	LimitPerProvider int              `json:"limitPerProvider"`
+}
+
+func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil || s.store == nil || s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "审核重新匹配服务尚未启用")
+		return
+	}
+	job, err := s.jobs.Get(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "job_not_found", "匹配任务不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	if job.Kind != domain.JobMatch || (job.State != domain.JobReview && job.State != domain.JobPartial) {
+		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务当前不允许重新匹配")
+		return
+	}
+	var request matchRematchRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	track, err := s.library.Track(c.Param("trackId"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "track_failed", err.Error())
+		return
+	}
+	query := providers.Query{
+		Title: request.Query.Title, Artists: request.Query.Artists, Album: request.Query.Album,
+		DurationSeconds: request.Query.DurationSeconds,
+	}
+	if query.Title == "" {
+		query.Title = track.Title
+	}
+	if len(query.Artists) == 0 {
+		query.Artists = track.Artists
+	}
+	if query.Album == "" {
+		query.Album = track.Album
+	}
+	if query.DurationSeconds == 0 {
+		query.DurationSeconds = track.DurationSeconds
+	}
+	result, err := s.providers.Search(ctx, query, request.ProviderIDs, request.LimitPerProvider)
+	if errors.Is(err, providers.ErrProviderNotFound) {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "rematch_failed", err.Error())
+		return
+	}
+	item, err := s.store.MatchItem(ctx, job.ID, track.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "match_item_not_found", "审核曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
+		return
+	}
+	item.Candidates, err = json.Marshal(result.Candidates)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
+		return
+	}
+	item.SelectedCandidateID = ""
+	item.ReviewFields = nil
+	item.ReviewArtwork = false
+	item.Error = ""
+	item.State = "review"
+	if len(result.Candidates) == 0 {
+		item.State = "no_match"
+		item.Error = "重新匹配没有返回候选"
+	}
+	if err := s.store.UpsertMatchItem(ctx, item); err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusOK, map[string]any{"data": map[string]any{
+		"item": item, "providers": result.Providers,
+	}})
 }
 
 func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestContext) {
@@ -1867,7 +1971,41 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	if request.FileID != "" && s.store != nil {
+		artists := append([]string(nil), query.Artists...)
+		if artists == nil {
+			artists = []string{}
+		}
+		queryPayload, _ := json.Marshal(map[string]any{
+			"title": query.Title, "artists": artists, "album": query.Album,
+			"durationSeconds": query.DurationSeconds,
+		})
+		// Search remains successful even if the optional audit trail cannot be persisted.
+		_, _ = s.store.AddMatchQueryHistory(ctx, request.FileID, queryPayload, request.ProviderIDs, len(result.Candidates))
+	}
 	s.writeData(c, result)
+}
+
+func (s *Server) handleMatchQueryHistory(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeData(c, []store.MatchQueryHistory{})
+		return
+	}
+	trackID := c.Param("id")
+	if _, err := s.library.Track(trackID); errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	} else if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "track_failed", err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	history, err := s.store.ListMatchQueryHistory(ctx, trackID, limit)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "match_history_failed", err.Error())
+		return
+	}
+	s.writeData(c, history)
 }
 
 func (s *Server) handleIndex(_ context.Context, c *app.RequestContext) {

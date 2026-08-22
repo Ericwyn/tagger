@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
-import {candidateArtworkURL} from '@/api';
+import {candidateArtworkURL, listQueryHistory} from '@/api';
 import {cn, formatDuration} from '@/lib/utils';
 import type {CandidateSearchQuery, MatchCandidate, Track, TrackPatch} from '@/types';
 
@@ -52,6 +52,50 @@ const fieldOptions = [
 
 type FieldID = typeof fieldOptions[number]['id'];
 
+const queryHistoryLimit = 8;
+
+function queryHistoryKey(trackID: string): string {
+  return `tagger-query-history:${trackID}`;
+}
+
+function sameQuery(left: CandidateSearchQuery, right: CandidateSearchQuery): boolean {
+  return left.title === right.title && left.album === right.album && left.durationSeconds === right.durationSeconds
+    && left.artists.length === right.artists.length && left.artists.every((artist, index) => artist === right.artists[index]);
+}
+
+function readQueryHistory(trackID: string): CandidateSearchQuery[] {
+  try {
+    const payload = JSON.parse(localStorage.getItem(queryHistoryKey(trackID)) || '[]') as unknown;
+    if (!Array.isArray(payload)) return [];
+    return payload.filter((entry): entry is CandidateSearchQuery => {
+      if (!entry || typeof entry !== 'object') return false;
+      const query = entry as Partial<CandidateSearchQuery>;
+      return typeof query.title === 'string' && typeof query.album === 'string'
+        && typeof query.durationSeconds === 'number' && Array.isArray(query.artists)
+        && query.artists.every((artist) => typeof artist === 'string');
+    }).slice(0, queryHistoryLimit);
+  } catch {
+    return [];
+  }
+}
+
+function writeQueryHistory(trackID: string, queries: CandidateSearchQuery[]): void {
+  try {
+    localStorage.setItem(queryHistoryKey(trackID), JSON.stringify(queries.slice(0, queryHistoryLimit)));
+  } catch {
+    // Private browsing or a disabled storage quota should not block searching.
+  }
+}
+
+function mergeQueryHistory(...lists: CandidateSearchQuery[][]): CandidateSearchQuery[] {
+  const result: CandidateSearchQuery[] = [];
+  lists.flat().forEach((query) => {
+    if (!query || !Array.isArray(query.artists)) return;
+    if (!result.some((entry) => sameQuery(entry, query))) result.push(query);
+  });
+  return result.slice(0, queryHistoryLimit);
+}
+
 export function CandidateDrawer({
   open,
   track,
@@ -71,6 +115,8 @@ export function CandidateDrawer({
   const [queryEditing, setQueryEditing] = useState(false);
   const [queryDraft, setQueryDraft] = useState<CandidateSearchQuery>({title: '', artists: [], album: '', durationSeconds: 0});
   const [queryArtistsDraft, setQueryArtistsDraft] = useState('');
+  const [queryHistory, setQueryHistory] = useState<CandidateSearchQuery[]>([]);
+  const [historySelection, setHistorySelection] = useState('');
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
@@ -83,20 +129,44 @@ export function CandidateDrawer({
     if (!track) return;
     setQueryDraft({title: track.title, artists: [...track.artists], album: track.album, durationSeconds: track.durationSeconds});
     setQueryArtistsDraft(track.artists.join(' / '));
+    const localHistory = readQueryHistory(track.id);
+    setQueryHistory(localHistory);
+    setHistorySelection('');
     setQueryEditing(false);
+	let active = true;
+	void listQueryHistory(track.id).then((remoteHistory) => {
+	  if (!active || remoteHistory.length === 0) return;
+	  const merged = mergeQueryHistory(remoteHistory.map((entry) => entry.query), localHistory);
+	  setQueryHistory(merged);
+	  writeQueryHistory(track.id, merged);
+	}).catch(() => undefined);
+	return () => { active = false; };
   }, [track?.id]);
 
   useEffect(() => {
     if (!open) setSelectedId(null);
   }, [open]);
 
-  const submitQuery = async () => {
+  const runQuery = async (nextQuery: CandidateSearchQuery) => {
     if (!onSearchQuery) return;
-    const artists = queryArtistsDraft.split(/[,，/]/).map((item) => item.trim()).filter(Boolean);
-    const nextQuery = {...queryDraft, artists};
     setQueryDraft(nextQuery);
+    setQueryArtistsDraft(nextQuery.artists.join(' / '));
     await onSearchQuery(nextQuery);
+    const nextHistory = [nextQuery, ...queryHistory.filter((entry) => !sameQuery(entry, nextQuery))];
+    setQueryHistory(nextHistory);
+    if (track) writeQueryHistory(track.id, nextHistory);
     setQueryEditing(false);
+  };
+
+  const submitQuery = async () => {
+    const artists = queryArtistsDraft.split(/[,，/]/).map((item) => item.trim()).filter(Boolean);
+    await runQuery({...queryDraft, artists});
+  };
+
+  const selectHistoryQuery = async (value: string) => {
+    setHistorySelection('');
+    const selectedHistory = queryHistory[Number(value)];
+    if (selectedHistory) await runQuery(selectedHistory);
   };
 
   const selected = useMemo(
@@ -196,6 +266,16 @@ export function CandidateDrawer({
             <>
               <span>{queryDraft.title}　{queryDraft.artists.join(' ')}</span>
               <button onClick={() => setQueryEditing(true)}>修改查询</button>
+              {queryHistory.length > 0 && (
+                <select aria-label="查询历史" value={historySelection} onChange={(event) => void selectHistoryQuery(event.target.value)}>
+                  <option value="">查询历史</option>
+                  {queryHistory.map((history, index) => (
+                    <option key={`${history.title}-${index}`} value={index}>
+                      {history.title} · {history.artists.join(' / ') || '未填写艺术家'}
+                    </option>
+                  ))}
+                </select>
+              )}
             </>
           ) : (
             <div className="query-editor">

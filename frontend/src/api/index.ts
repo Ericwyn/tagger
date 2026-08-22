@@ -19,6 +19,7 @@ import type {
 	BatchEditOperation,
 	BatchEditSelection,
 	CandidateSearchQuery,
+	MatchQueryHistory,
 } from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
@@ -79,6 +80,21 @@ export async function updateMatchItem(jobId: string, trackId: string, state: 're
   return real.updateMatchItem(jobId, trackId, state, selectedCandidateId, fields, artwork);
 }
 
+export async function rematchMatchItem(jobId: string, trackId: string, track: Track, query?: CandidateSearchQuery, providerIds: string[] = []): Promise<MatchItem | null> {
+  if (apiReadMode === 'mock') {
+    const candidates = await mock.searchCandidates(track);
+    return {
+      id: `mock-${trackId}`,
+      jobId,
+      trackId,
+      state: candidates.length > 0 ? 'review' : 'no_match',
+      candidates,
+      error: candidates.length > 0 ? undefined : '重新匹配没有返回候选',
+    };
+  }
+  return real.rematchMatchItem(jobId, trackId, query, providerIds);
+}
+
 export async function createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job | null> {
   if (apiReadMode === 'mock') return null;
   return real.createWriteJob(matchJobId, items);
@@ -130,6 +146,10 @@ export async function deleteLyricsSidecar(trackId: string): Promise<Track> {
 
 export function searchCandidates(track: Track, query?: CandidateSearchQuery): Promise<MatchCandidate[]> {
   return apiReadMode === 'mock' ? mock.searchCandidates(track) : real.searchCandidates(track, query);
+}
+
+export function listQueryHistory(trackId: string): Promise<MatchQueryHistory[]> {
+  return apiReadMode === 'mock' ? Promise.resolve([]) : real.listQueryHistory(trackId);
 }
 
 export function listProviders(): Promise<ProviderConfig[]> {

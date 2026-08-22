@@ -283,6 +283,19 @@ describe('real API client', () => {
     });
   });
 
+  it('lists persisted query history for a track', async () => {
+    const history = [{
+      id: 'match-query-1', trackId: 'trk-1',
+      query: {title: 'Song', artists: ['Artist'], album: 'Album', durationSeconds: 180},
+      providerIds: ['apple'], resultCount: 2, createdAt: '2026-08-20T12:00:00Z',
+    }];
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: history}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.listQueryHistory('trk/1')).resolves.toEqual(history);
+    expect(fetcher).toHaveBeenCalledWith('/api/v1/matches/tracks/trk%2F1/query-history', expect.any(Object));
+  });
+
   it('persists an individual review decision with the selected candidate', async () => {
     const item = {id: 'item-1', jobId: 'job-1', trackId: 'trk-1', state: 'accepted', candidates: [], selectedCandidateId: 'cand-1'};
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: item}), {status: 200}));
@@ -291,6 +304,17 @@ describe('real API client', () => {
     await expect(api.updateMatchItem('job/1', 'trk/1', 'accepted', 'cand-1')).resolves.toEqual(item);
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/jobs/job%2F1/items/trk%2F1');
     expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({state: 'accepted', selectedCandidateId: 'cand-1'});
+  });
+
+  it('rematches a persisted review item with an edited query', async () => {
+    const item = {id: 'item-1', jobId: 'job-1', trackId: 'trk-1', state: 'review', candidates: []};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {item, providers: {apple: {status: 'ok', count: 1}}}}), {status: 200}));
+    const api = createRealAPI(fetcher);
+    const query = {title: 'New title', artists: ['New artist'], album: 'New album', durationSeconds: 200};
+
+    await expect(api.rematchMatchItem('job/1', 'trk/1', query, ['apple'])).resolves.toEqual(item);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/jobs/job%2F1/items/trk%2F1/rematch');
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({query, providerIds: ['apple'], limitPerProvider: 5});
   });
 
   it('persists provider enablement and runs connection tests', async () => {
