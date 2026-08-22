@@ -30,6 +30,8 @@ var (
 	ErrArtworkUnavailable = errors.New("artwork operations unavailable")
 	ErrArtworkNotFound    = errors.New("artwork not found")
 	ErrArtworkIndex       = errors.New("invalid artwork index")
+	ErrSidecarTooLarge    = errors.New("lyrics sidecar is too large")
+	ErrSidecarConflict    = errors.New("lyrics sidecar revision conflict")
 )
 
 type RevisionConflictError struct {
@@ -42,6 +44,17 @@ func (e *RevisionConflictError) Error() string {
 }
 
 func (e *RevisionConflictError) Unwrap() error { return ErrRevisionConflict }
+
+type SidecarConflictError struct {
+	Expected string
+	Current  string
+}
+
+func (e *SidecarConflictError) Error() string {
+	return fmt.Sprintf("lyrics sidecar changed: expected %s, current %s", e.Expected, e.Current)
+}
+
+func (e *SidecarConflictError) Unwrap() error { return ErrSidecarConflict }
 
 type FieldDiff = domain.RevisionDiff
 
@@ -67,6 +80,22 @@ type ArtworkResult struct {
 	After           *artwork.Asset      `json:"after,omitempty"`
 	BeforeTags      map[string][]string `json:"-"`
 	AfterTags       map[string][]string `json:"-"`
+}
+
+type SidecarSnapshot struct {
+	Info    *domain.SidecarInfo
+	Content string
+}
+
+type SidecarResult struct {
+	BaseRevision           string              `json:"baseRevision"`
+	CurrentRevision        string              `json:"currentRevision"`
+	BaseSidecarRevision    string              `json:"baseSidecarRevision"`
+	CurrentSidecarRevision string              `json:"currentSidecarRevision,omitempty"`
+	DryRun                 bool                `json:"dryRun"`
+	Changed                bool                `json:"changed"`
+	Before                 *domain.SidecarInfo `json:"before,omitempty"`
+	After                  *domain.SidecarInfo `json:"after,omitempty"`
 }
 
 type Writer struct {
@@ -117,6 +146,123 @@ func (w *Writer) ReadRawTags(ctx context.Context, ref library.FileRef) (map[stri
 		return nil, err
 	}
 	return cloneRawTags(snapshot.Raw), nil
+}
+
+// ReadSidecar reads the optional same-basename LRC file after applying the
+// audio file's library-root and symlink checks.
+func (w *Writer) ReadSidecar(ctx context.Context, ref library.FileRef) (SidecarSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return SidecarSnapshot{}, err
+	}
+	path, err := w.containedSidecarPath(ref)
+	if err != nil {
+		return SidecarSnapshot{}, err
+	}
+	return readSidecarFile(path)
+}
+
+// WriteSidecar atomically creates, replaces, or removes the LRC sidecar. A
+// nil content pointer means delete; an empty non-nil string creates an empty
+// sidecar. Both the audio revision and sidecar content revision are guarded.
+func (w *Writer) WriteSidecar(ctx context.Context, ref library.FileRef, baseRevision, baseSidecarRevision string, content *string, dryRun bool) (SidecarResult, error) {
+	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+		return SidecarResult{}, ErrUnsupportedFormat
+	}
+	path, err := w.containedPath(ref)
+	if err != nil {
+		return SidecarResult{}, err
+	}
+	sidecarPath, err := w.containedSidecarPath(ref)
+	if err != nil {
+		return SidecarResult{}, err
+	}
+	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := ctx.Err(); err != nil {
+		return SidecarResult{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return SidecarResult{}, fmt.Errorf("stat source file: %w", err)
+	}
+	snapshot, err := w.engine.Read(ctx, path)
+	if err != nil {
+		return SidecarResult{}, fmt.Errorf("read source before sidecar write: %w", err)
+	}
+	currentRevision := scanner.FileRevision(ref.RelativePath, info, snapshot.Raw)
+	if baseRevision == "" || baseRevision != currentRevision {
+		return SidecarResult{}, &RevisionConflictError{Expected: baseRevision, Current: currentRevision}
+	}
+	before, err := readSidecarFile(sidecarPath)
+	if err != nil {
+		return SidecarResult{}, err
+	}
+	currentSidecarRevision := ""
+	if before.Info != nil {
+		currentSidecarRevision = before.Info.Revision
+	}
+	if baseSidecarRevision != currentSidecarRevision {
+		return SidecarResult{}, &SidecarConflictError{Expected: baseSidecarRevision, Current: currentSidecarRevision}
+	}
+	if content != nil && len([]byte(*content)) > domain.MaxSidecarLyricsBytes {
+		return SidecarResult{}, ErrSidecarTooLarge
+	}
+	changed := content != nil
+	if content != nil {
+		changed = !before.Exists() || before.Content != *content
+	} else {
+		changed = before.Exists()
+	}
+	result := SidecarResult{
+		BaseRevision: baseRevision, CurrentRevision: currentRevision,
+		BaseSidecarRevision: baseSidecarRevision, CurrentSidecarRevision: currentSidecarRevision,
+		DryRun: dryRun, Changed: changed, Before: cloneSidecarInfo(before.Info),
+	}
+	if !changed || dryRun {
+		if content != nil {
+			result.CurrentSidecarRevision = domain.SidecarRevision([]byte(*content))
+			result.After = &domain.SidecarInfo{Exists: true, Revision: result.CurrentSidecarRevision, SizeBytes: int64(len([]byte(*content)))}
+		}
+		return result, nil
+	}
+	if content == nil {
+		if err := os.Remove(sidecarPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return SidecarResult{}, fmt.Errorf("remove lyrics sidecar: %w", err)
+		}
+		if err := syncDirectory(filepath.Dir(sidecarPath)); err != nil {
+			return SidecarResult{}, fmt.Errorf("sync sidecar directory: %w", err)
+		}
+	} else {
+		var sidecarInfo fs.FileInfo
+		if before.Info != nil {
+			sidecarInfo, _ = os.Stat(sidecarPath)
+		}
+		if err := writeSidecarAtomic(sidecarPath, []byte(*content), sidecarInfo); err != nil {
+			return SidecarResult{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return SidecarResult{}, err
+	}
+	after, err := readSidecarFile(sidecarPath)
+	if err != nil {
+		return SidecarResult{}, err
+	}
+	if content == nil {
+		if after.Exists() {
+			return SidecarResult{}, fmt.Errorf("%w: sidecar still exists after delete", ErrVerification)
+		}
+	} else if after.Content != *content {
+		return SidecarResult{}, fmt.Errorf("%w: sidecar content differs after write", ErrVerification)
+	}
+	if after.Info != nil {
+		result.CurrentSidecarRevision = after.Info.Revision
+	}
+	result.After = cloneSidecarInfo(after.Info)
+	return result, nil
 }
 
 func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision string, patch domain.TagPatch, dryRun bool) (Result, error) {
@@ -465,6 +611,105 @@ func cloneRawTags(raw map[string][]string) map[string][]string {
 		result[key] = append([]string(nil), values...)
 	}
 	return result
+}
+
+func (s SidecarSnapshot) Exists() bool {
+	return s.Info != nil && s.Info.Exists
+}
+
+func cloneSidecarInfo(info *domain.SidecarInfo) *domain.SidecarInfo {
+	if info == nil {
+		return nil
+	}
+	clone := *info
+	return &clone
+}
+
+func readSidecarFile(path string) (SidecarSnapshot, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return SidecarSnapshot{}, nil
+	}
+	if err != nil {
+		return SidecarSnapshot{}, fmt.Errorf("stat lyrics sidecar: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return SidecarSnapshot{}, fmt.Errorf("%w: lyrics sidecar is a symbolic link", ErrPathOutsideRoot)
+	}
+	if !info.Mode().IsRegular() {
+		return SidecarSnapshot{}, fmt.Errorf("%w: lyrics sidecar is not a regular file", ErrPathOutsideRoot)
+	}
+	result := SidecarSnapshot{Info: &domain.SidecarInfo{Exists: true, SizeBytes: info.Size(), ModifiedAt: info.ModTime().Format("2006-01-02 15:04")}}
+	if info.Size() > domain.MaxSidecarLyricsBytes {
+		return result, ErrSidecarTooLarge
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return SidecarSnapshot{}, fmt.Errorf("read lyrics sidecar: %w", err)
+	}
+	result.Content = string(data)
+	result.Info.Revision = domain.SidecarRevision(data)
+	return result, nil
+}
+
+func (w *Writer) containedSidecarPath(ref library.FileRef) (string, error) {
+	audioPath, err := w.containedPath(ref)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSuffix(audioPath, filepath.Ext(audioPath)) + ".lrc"
+	info, statErr := os.Lstat(path)
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return "", statErr
+	}
+	if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "", ErrPathOutsideRoot
+	}
+	return path, nil
+}
+
+func writeSidecarAtomic(path string, data []byte, sourceInfo fs.FileInfo) error {
+	directory := filepath.Dir(path)
+	base := filepath.Base(path)
+	temporary, err := os.CreateTemp(directory, "."+base+".tagger-*")
+	if err != nil {
+		return fmt.Errorf("create temporary sidecar: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	committed := false
+	defer func() {
+		_ = temporary.Close()
+		if !committed {
+			_ = os.Remove(temporaryPath)
+		}
+	}()
+	mode := fs.FileMode(0o644)
+	if sourceInfo != nil {
+		mode = sourceInfo.Mode().Perm()
+	}
+	if err := temporary.Chmod(mode); err != nil {
+		return fmt.Errorf("set sidecar mode: %w", err)
+	}
+	if sourceInfo != nil {
+		_ = preserveOwnership(temporaryPath, sourceInfo)
+	}
+	if _, err := temporary.Write(data); err != nil {
+		return fmt.Errorf("write temporary sidecar: %w", err)
+	}
+	if err := temporary.Sync(); err != nil {
+		return fmt.Errorf("sync temporary sidecar: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		return fmt.Errorf("close temporary sidecar: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return fmt.Errorf("atomically replace sidecar: %w", err)
+	}
+	committed = true
+	if err := syncDirectory(directory); err != nil {
+		return fmt.Errorf("sync sidecar directory: %w", err)
+	}
+	return nil
 }
 
 func (w *Writer) containedPath(ref library.FileRef) (string, error) {

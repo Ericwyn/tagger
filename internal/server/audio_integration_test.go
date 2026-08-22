@@ -93,6 +93,40 @@ func TestAudioAPIWithCopiedTestMusic(t *testing.T) {
 			if rawResponse.Code != 200 || json.Unmarshal(rawResponse.Body.Bytes(), &rawEnvelope) != nil || len(rawEnvelope.Data.Tags) == 0 {
 				t.Fatalf("raw tag response = %d body=%s", rawResponse.Code, rawResponse.Body.String())
 			}
+			lyrics := "[00:01.00]TestMusic sidecar\n"
+			putBody, err := json.Marshal(map[string]any{"baseRevision": track.Revision, "baseSidecarRevision": "", "content": lyrics})
+			if err != nil {
+				t.Fatal(err)
+			}
+			put := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+				&ut.Body{Body: bytes.NewReader(putBody), Len: len(putBody)},
+				ut.Header{Key: "content-type", Value: "application/json"},
+				ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+			if put.Code != 200 {
+				t.Fatalf("sidecar put = %d body=%s", put.Code, put.Body.String())
+			}
+			updated, err := service.Track(track.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.LyricsSidecar == nil || updated.LyricsSidecar.Revision == "" {
+				t.Fatalf("sidecar track = %#v", updated)
+			}
+			readSidecar := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar", nil)
+			if readSidecar.Code != 200 || !containsJSON(readSidecar.Body.Bytes(), `"content":"[00:01.00]TestMusic sidecar\n"`) {
+				t.Fatalf("sidecar get = %d body=%s", readSidecar.Code, readSidecar.Body.String())
+			}
+			deleteBody, err := json.Marshal(map[string]any{"baseRevision": updated.Revision, "baseSidecarRevision": updated.LyricsSidecar.Revision})
+			if err != nil {
+				t.Fatal(err)
+			}
+			deleted := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+				&ut.Body{Body: bytes.NewReader(deleteBody), Len: len(deleteBody)},
+				ut.Header{Key: "content-type", Value: "application/json"},
+				ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+			if deleted.Code != 200 {
+				t.Fatalf("sidecar delete = %d body=%s", deleted.Code, deleted.Body.String())
+			}
 		})
 	}
 }

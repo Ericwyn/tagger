@@ -159,6 +159,58 @@ func TestRawTagsAPIReadsLosslessPropertyMap(t *testing.T) {
 	}
 }
 
+func TestLyricsSidecarAPIWritesReadsAndGuardsRevision(t *testing.T) {
+	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	content := "[00:01.00]歌词测试\n"
+	putBody, err := json.Marshal(map[string]any{
+		"baseRevision": track.Revision, "baseSidecarRevision": "", "content": content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+		&ut.Body{Body: bytes.NewReader(putBody), Len: len(putBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if put.Code != 200 || !containsJSON(put.Body.Bytes(), `"currentSidecarRevision":"sidecar-`) {
+		t.Fatalf("sidecar put = %d %s", put.Code, put.Body.String())
+	}
+	updated, err := s.library.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Lyrics != content || updated.LyricsSidecar == nil || updated.LyricsSidecar.Revision == "" {
+		t.Fatalf("updated sidecar track = %#v", updated)
+	}
+	read := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar", nil)
+	if read.Code != 200 || !containsJSON(read.Body.Bytes(), `"content":"[00:01.00]歌词测试\n"`) {
+		t.Fatalf("sidecar get = %d %s", read.Code, read.Body.String())
+	}
+	staleBody, err := json.Marshal(map[string]any{"baseRevision": updated.Revision, "baseSidecarRevision": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+		&ut.Body{Body: bytes.NewReader(staleBody), Len: len(staleBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+	if stale.Code != 409 || !containsJSON(stale.Body.Bytes(), `"code":"sidecar_revision_conflict"`) {
+		t.Fatalf("stale sidecar delete = %d %s", stale.Code, stale.Body.String())
+	}
+	deleteBody, err := json.Marshal(map[string]any{"baseRevision": updated.Revision, "baseSidecarRevision": updated.LyricsSidecar.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/lyrics-sidecar",
+		&ut.Body{Body: bytes.NewReader(deleteBody), Len: len(deleteBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + updated.Revision + `"`})
+	if deleted.Code != 200 || !containsJSON(deleted.Body.Bytes(), `"changed":true`) {
+		t.Fatalf("sidecar delete = %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
 func TestRescanRejectsUnknownLibrary(t *testing.T) {
 	s := newTestServer(t)
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/unknown/scans", nil)

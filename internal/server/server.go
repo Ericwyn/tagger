@@ -82,6 +82,9 @@ func (s *Server) routes() {
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.GET("/tracks/:id/raw-tags", s.handleRawTags)
+	api.GET("/tracks/:id/lyrics-sidecar", s.handleLyricsSidecarGet)
+	api.PUT("/tracks/:id/lyrics-sidecar", s.handleLyricsSidecarPut)
+	api.DELETE("/tracks/:id/lyrics-sidecar", s.handleLyricsSidecarDelete)
 	api.GET("/tracks/:id/audio", s.handleAudio)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 	api.GET("/tracks/:id/artwork/:index", s.handleReadArtwork)
@@ -684,6 +687,122 @@ func (s *Server) handleRawTags(ctx context.Context, c *app.RequestContext) {
 	s.writeData(c, map[string]any{"trackId": track.ID, "revision": track.Revision, "tags": raw})
 }
 
+func (s *Server) handleLyricsSidecarGet(ctx context.Context, c *app.RequestContext) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "sidecar_unavailable", "歌词 sidecar 服务尚未启用")
+		return
+	}
+	track, err := s.library.Track(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ref, err := s.library.FileRef(track.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	snapshot, err := s.writer.ReadSidecar(ctx, ref)
+	if err != nil {
+		s.handleSidecarError(c, err)
+		return
+	}
+	c.Header("ETag", `"`+track.Revision+`"`)
+	s.writeData(c, map[string]any{"trackId": track.ID, "revision": track.Revision, "sidecar": snapshot.Info, "content": snapshot.Content})
+}
+
+type lyricsSidecarRequest struct {
+	BaseRevision        string `json:"baseRevision"`
+	BaseSidecarRevision string `json:"baseSidecarRevision"`
+	Content             string `json:"content"`
+	DryRun              bool   `json:"dryRun"`
+}
+
+func (s *Server) handleLyricsSidecarPut(ctx context.Context, c *app.RequestContext) {
+	var request lyricsSidecarRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	s.handleLyricsSidecarMutation(ctx, c, &request, &request.Content)
+}
+
+func (s *Server) handleLyricsSidecarDelete(ctx context.Context, c *app.RequestContext) {
+	var request lyricsSidecarRequest
+	if len(c.Request.Body()) > 0 {
+		if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+			return
+		}
+	}
+	s.handleLyricsSidecarMutation(ctx, c, &request, nil)
+}
+
+func (s *Server) handleLyricsSidecarMutation(ctx context.Context, c *app.RequestContext, request *lyricsSidecarRequest, content *string) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "sidecar_unavailable", "歌词 sidecar 服务尚未启用")
+		return
+	}
+	headerRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if request.BaseRevision == "" {
+		request.BaseRevision = headerRevision
+	}
+	if request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "baseRevision 与 If-Match 必须一致且不能为空")
+		return
+	}
+	track, err := s.library.Track(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ref, err := s.library.FileRef(track.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	result, err := s.writer.WriteSidecar(ctx, ref, request.BaseRevision, request.BaseSidecarRevision, content, request.DryRun)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	if request.DryRun {
+		s.writeData(c, map[string]any{"preview": result})
+		return
+	}
+	if result.Changed {
+		if err := s.library.Rescan(ctx); err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "sidecar 已写入，但重新索引失败："+err.Error())
+			return
+		}
+	}
+	updated, err := s.library.Track(track.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "sidecar 已写入，但曲目索引不可用")
+		return
+	}
+	s.writeData(c, map[string]any{"track": updated, "sidecar": result})
+}
+
+func (s *Server) handleSidecarError(c *app.RequestContext, err error) {
+	switch {
+	case errors.Is(err, filewrite.ErrSidecarTooLarge):
+		s.writeError(c, consts.StatusRequestEntityTooLarge, "sidecar_too_large", "歌词 sidecar 超过 1 MiB 限制")
+	case errors.Is(err, filewrite.ErrPathOutsideRoot):
+		s.writeError(c, consts.StatusForbidden, "forbidden", "文件路径不在曲库安全边界内")
+	default:
+		s.writeError(c, consts.StatusInternalServerError, "sidecar_read_failed", err.Error())
+	}
+}
+
 func (s *Server) handleAudio(_ context.Context, c *app.RequestContext) {
 	if s.writer == nil {
 		s.writeError(c, consts.StatusServiceUnavailable, "audio_unavailable", "音频读取服务尚未启用")
@@ -1120,6 +1239,7 @@ func artworkResultSnapshot(result *filewrite.ArtworkResult, before bool) *domain
 
 func (s *Server) handleWriteError(c *app.RequestContext, err error) {
 	var conflict *filewrite.RevisionConflictError
+	var sidecarConflict *filewrite.SidecarConflictError
 	switch {
 	case errors.As(err, &conflict):
 		c.JSON(consts.StatusConflict, map[string]any{
@@ -1127,6 +1247,14 @@ func (s *Server) handleWriteError(c *app.RequestContext, err error) {
 				"code":    "revision_conflict",
 				"message": "文件已被其他操作修改",
 				"details": map[string]string{"current_revision": conflict.Current},
+			},
+		})
+	case errors.As(err, &sidecarConflict):
+		c.JSON(consts.StatusConflict, map[string]any{
+			"error": map[string]any{
+				"code":    "sidecar_revision_conflict",
+				"message": "歌词 sidecar 已被其他操作修改",
+				"details": map[string]string{"current_sidecar_revision": sidecarConflict.Current},
 			},
 		})
 	case errors.Is(err, filewrite.ErrInvalidPatch):
@@ -1143,6 +1271,8 @@ func (s *Server) handleWriteError(c *app.RequestContext, err error) {
 		s.writeError(c, consts.StatusNotFound, "artwork_not_found", "嵌入封面不存在")
 	case errors.Is(err, filewrite.ErrArtworkIndex):
 		s.writeError(c, consts.StatusBadRequest, "invalid_artwork_index", "封面序号无效")
+	case errors.Is(err, filewrite.ErrSidecarTooLarge):
+		s.writeError(c, consts.StatusRequestEntityTooLarge, "sidecar_too_large", "歌词 sidecar 超过 1 MiB 限制")
 	default:
 		s.writeError(c, consts.StatusInternalServerError, "write_failed", err.Error())
 	}

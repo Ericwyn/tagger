@@ -113,6 +113,9 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	if mp3.Lyrics != "[00:01.00]sidecar" || mp3.Health != domain.HealthMissingArtwork {
 		t.Fatalf("sidecar/health = %#v", mp3)
 	}
+	if mp3.LyricsSidecar == nil || !mp3.LyricsSidecar.Exists || mp3.LyricsSidecar.Revision == "" || mp3.LyricsSidecar.SizeBytes == 0 {
+		t.Fatalf("sidecar info = %#v", mp3.LyricsSidecar)
+	}
 	if wav.Health != domain.HealthParseError || wav.ParseError == "" {
 		t.Fatalf("parse error = %#v", wav)
 	}

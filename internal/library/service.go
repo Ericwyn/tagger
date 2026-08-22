@@ -186,6 +186,10 @@ func cloneTrack(track domain.Track) domain.Track {
 	track.Artists = cloneStrings(track.Artists)
 	track.AlbumArtists = cloneStrings(track.AlbumArtists)
 	track.Genres = cloneStrings(track.Genres)
+	if track.LyricsSidecar != nil {
+		sidecar := *track.LyricsSidecar
+		track.LyricsSidecar = &sidecar
+	}
 	return track
 }
 

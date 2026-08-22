@@ -60,6 +60,7 @@ type Track struct {
 	Year            *int            `json:"year,omitempty"`
 	Genres          []string        `json:"genres"`
 	Lyrics          string          `json:"lyrics"`
+	LyricsSidecar   *SidecarInfo    `json:"lyricsSidecar,omitempty"`
 	ArtworkCount    int             `json:"artworkCount"`
 	CoverTone       CoverTone       `json:"coverTone"`
 	Health          TrackHealth     `json:"health"`

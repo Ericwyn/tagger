@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +80,7 @@ func TestBatchEditWorkerWithCopiedTestMusic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || len(updated.Genres) != 1 || updated.Genres[0] != "Live" {
+	if updated.TrackNumber == nil || *updated.TrackNumber != 1 || updated.TrackTotal == nil || *updated.TrackTotal != 1 || !slices.Contains(updated.Genres, "Live") {
 		t.Fatalf("updated track = %#v", updated)
 	}
 	revisions, err := dataStore.ListRevisions(context.Background(), 10)

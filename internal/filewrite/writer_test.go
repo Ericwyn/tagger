@@ -190,6 +190,45 @@ func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	}
 }
 
+func TestWriterWritesAndDeletesLyricsSidecarWithRevisionGuard(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "song.mp3")
+	if err := os.WriteFile(path, []byte("fake audio"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	engine := newMemoryEngine(map[string][]string{"TITLE": {"Song"}})
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatMP3, engine)
+	content := "[00:01.00]Hello\n"
+	result, err := writer.WriteSidecar(context.Background(), ref, ref.Revision, "", &content, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.CurrentSidecarRevision != domain.SidecarRevision([]byte(content)) || result.After == nil || !result.After.Exists {
+		t.Fatalf("sidecar write result = %#v", result)
+	}
+	sidecarPath := filepath.Join(root, "song.lrc")
+	if got, err := os.ReadFile(sidecarPath); err != nil || string(got) != content {
+		t.Fatalf("sidecar content = %q err=%v", got, err)
+	}
+	if _, err := writer.WriteSidecar(context.Background(), ref, ref.Revision, "stale", &content, false); !errors.Is(err, ErrSidecarConflict) {
+		t.Fatalf("stale sidecar write error = %v", err)
+	}
+	deleted, err := writer.WriteSidecar(context.Background(), ref, ref.Revision, result.CurrentSidecarRevision, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted.Changed || deleted.After != nil {
+		t.Fatalf("sidecar delete result = %#v", deleted)
+	}
+	if _, err := os.Stat(sidecarPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sidecar still exists: %v", err)
+	}
+}
+
 func TestWriterRestoresManagedSnapshotAndPreservesPrivateTags(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "song.flac")

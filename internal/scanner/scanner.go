@@ -19,8 +19,6 @@ import (
 	"github.com/ericwyn/tagger/internal/tags"
 )
 
-const maxSidecarLyricsBytes = 1 << 20
-
 type Options struct {
 	Root        string
 	LibraryID   string
@@ -228,9 +226,11 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 		return track, readErr
 	}
 	applySnapshot(&track, snapshot)
+	sidecarLyrics, sidecarInfo := readSidecar(path)
 	if track.Lyrics == "" {
-		track.Lyrics = readSidecarLyrics(path)
+		track.Lyrics = sidecarLyrics
 	}
+	track.LyricsSidecar = sidecarInfo
 	track.DurationSeconds = snapshotDurationSeconds(snapshot)
 	track.Health = healthFor(track)
 	track.Revision = FileRevision(relativePath, info, snapshot.Raw)
@@ -413,17 +413,22 @@ func snapshotDurationSeconds(snapshot tags.Snapshot) int64 {
 	return snapshot.DurationSeconds
 }
 
-func readSidecarLyrics(path string) string {
+func readSidecar(path string) (string, *domain.SidecarInfo) {
 	lyricsPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"
-	info, err := os.Stat(lyricsPath)
-	if err != nil || info.Size() > maxSidecarLyricsBytes {
-		return ""
+	info, err := os.Lstat(lyricsPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", nil
+	}
+	sidecar := &domain.SidecarInfo{Exists: true, SizeBytes: info.Size(), ModifiedAt: info.ModTime().Format("2006-01-02 15:04")}
+	if info.Size() > domain.MaxSidecarLyricsBytes {
+		return "", sidecar
 	}
 	content, err := os.ReadFile(lyricsPath)
 	if err != nil {
-		return ""
+		return "", sidecar
 	}
-	return string(content)
+	sidecar.Revision = domain.SidecarRevision(content)
+	return string(content), sidecar
 }
 
 // FileRevision binds the indexed path, file identity and normalized raw tags.
