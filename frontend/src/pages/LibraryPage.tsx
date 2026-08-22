@@ -16,7 +16,16 @@ import {CandidateDrawer} from '@/components/library/CandidateDrawer';
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
-import {apiReadMode, getLibrary, listTracks, rescanLibrary, searchCandidates, updateArtwork, updateTrack} from '@/api';
+import {
+  apiReadMode,
+  applyCandidateArtwork,
+  getLibrary,
+  listTracks,
+  rescanLibrary,
+  searchCandidates,
+  updateArtwork,
+  updateTrack,
+} from '@/api';
 import type {LibrarySummary, MatchCandidate, Track, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LibraryPageProps {
@@ -125,17 +134,42 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
     patch: TrackPatch,
     notice = apiReadMode === 'real' ? '标签已通过安全写入流程保存到音乐文件' : '标签草稿已写入 Mock 数据层',
 	provenance?: UpdateProvenance,
-  ) => {
-    if (!activeTrack) return;
+  ): Promise<Track | undefined> => {
+	if (!activeTrack) return undefined;
     setSaving(true);
     try {
       const updated = await updateTrack(activeTrack.id, patch, provenance);
       setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
       onNotice(notice);
+	  return updated;
+	} catch (error) {
+	  onNotice(error instanceof Error ? error.message : '标签保存失败');
+	  return undefined;
     } finally {
       setSaving(false);
     }
   };
+
+	const applyCandidate = async (patch: TrackPatch, candidate: MatchCandidate, includeArtwork: boolean) => {
+	  if (!activeTrack) return;
+	  setSaving(true);
+	  let tagsApplied = false;
+	  try {
+		let updated = await updateTrack(activeTrack.id, patch, {providerId: candidate.providerId});
+		tagsApplied = true;
+		setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+		if (includeArtwork) {
+		  updated = await applyCandidateArtwork(updated.id, candidate.id);
+		  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+		}
+		onNotice(`已采用 ${candidate.providerName} 候选并安全写入${includeArtwork ? '标签与封面' : '音乐标签'}`);
+	  } catch (error) {
+		const message = error instanceof Error ? error.message : '候选资料应用失败';
+		onNotice(tagsApplied && includeArtwork ? `标签已写入，但候选封面应用失败：${message}` : message);
+	  } finally {
+		setSaving(false);
+	  }
+	};
 
   const openCandidateSearch = async () => {
     if (!activeTrack) return;
@@ -299,7 +333,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         mobileOpen={mobileInspector}
         onCloseMobile={() => setMobileInspector(false)}
         onSearch={openCandidateSearch}
-        onSave={saveTrack}
+		onSave={async (patch) => { await saveTrack(patch); }}
 		onArtworkChange={changeArtwork}
       />
 
@@ -324,13 +358,7 @@ export function LibraryPage({onOpenReview, onNotice}: LibraryPageProps) {
         candidates={candidates}
         loading={candidateLoading}
         onClose={() => setCandidateOpen(false)}
-        onApply={(patch, candidate) => saveTrack(
-          patch,
-          apiReadMode === 'real'
-            ? `已采用 ${candidate.providerName} 候选并安全写入音乐文件`
-            : `已采用 ${candidate.providerName} 候选，Mock 修订已更新`,
-		  {providerId: candidate.providerId},
-        )}
+		onApply={(patch, candidate, options) => applyCandidate(patch, candidate, options.artwork)}
       />
     </div>
   );

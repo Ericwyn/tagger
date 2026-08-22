@@ -168,4 +168,21 @@ describe('real API client', () => {
 	expect(deleteInit.method).toBe('DELETE');
 	expect(deleteInit.headers).toEqual(expect.objectContaining({'If-Match': '"art-rev-2"'}));
   });
+
+  it('applies a server-retained provider artwork candidate', async () => {
+	const fullTrack = {...track, revision: 'provider-art-rev'} as Track;
+	const updated = {...fullTrack, artworkCount: 1, revision: 'provider-art-next'};
+	const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+	  data: {track: updated, write: {changed: true}},
+	}), {status: 200}));
+	const api = createRealAPI(fetcher);
+
+	await expect(api.applyCandidateArtwork(fullTrack, 'cand/apple')).resolves.toEqual(expect.objectContaining({track: updated}));
+	const [path, init] = fetcher.mock.calls[0] as [string, RequestInit];
+	expect(path).toBe('/api/v1/matches/tracks/trk-1/artwork');
+	expect(init.headers).toEqual(expect.objectContaining({'If-Match': '"provider-art-rev"'}));
+	expect(JSON.parse(String(init.body))).toEqual({
+	  candidateId: 'cand/apple', baseRevision: 'provider-art-rev', dryRun: false,
+	});
+  });
 });

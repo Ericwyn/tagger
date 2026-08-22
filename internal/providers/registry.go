@@ -9,14 +9,26 @@ import (
 )
 
 var ErrProviderNotFound = errors.New("provider not found")
+var ErrArtworkReferenceNotFound = errors.New("artwork reference not found")
+
+type ArtworkReference struct {
+	CandidateID string
+	ProviderID  string
+	URL         string
+	ExpiresAt   time.Time
+}
 
 type Registry struct {
 	strategies map[string]Strategy
 	order      []string
+	artworkMu  sync.RWMutex
+	artworks   map[string]ArtworkReference
 }
 
 func NewRegistry(strategies ...Strategy) *Registry {
-	registry := &Registry{strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies))}
+	registry := &Registry{
+		strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies)), artworks: make(map[string]ArtworkReference),
+	}
 	for _, strategy := range strategies {
 		if strategy == nil {
 			continue
@@ -31,6 +43,32 @@ func NewRegistry(strategies ...Strategy) *Registry {
 		registry.strategies[id] = strategy
 	}
 	return registry
+}
+
+func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error) {
+	r.artworkMu.RLock()
+	reference, found := r.artworks[candidateID]
+	r.artworkMu.RUnlock()
+	if !found || time.Now().After(reference.ExpiresAt) {
+		if found {
+			r.artworkMu.Lock()
+			delete(r.artworks, candidateID)
+			r.artworkMu.Unlock()
+		}
+		return ArtworkReference{}, ErrArtworkReferenceNotFound
+	}
+	return reference, nil
+}
+
+func (r *Registry) rememberArtwork(candidateID, providerID, artworkURL string) {
+	if artworkURL == "" {
+		return
+	}
+	r.artworkMu.Lock()
+	r.artworks[candidateID] = ArtworkReference{
+		CandidateID: candidateID, ProviderID: providerID, URL: artworkURL, ExpiresAt: time.Now().Add(30 * time.Minute),
+	}
+	r.artworkMu.Unlock()
 }
 
 func (r *Registry) Descriptors() []Descriptor {
@@ -106,7 +144,9 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			providerResult.Retryable = isRetryable(outcome.err)
 		} else {
 			for _, candidate := range outcome.candidates {
-				result.Candidates = append(result.Candidates, toView(query, outcome.descriptor, candidate))
+				view := toView(query, outcome.descriptor, candidate)
+				result.Candidates = append(result.Candidates, view)
+				r.rememberArtwork(view.ID, outcome.descriptor.ID, candidate.ArtworkURL)
 			}
 		}
 		result.Providers[outcome.descriptor.ID] = providerResult

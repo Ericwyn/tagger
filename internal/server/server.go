@@ -24,14 +24,15 @@ import (
 )
 
 type Server struct {
-	h             *hserver.Hertz
-	library       *library.Service
-	writer        *filewrite.Writer
-	providers     *providers.Registry
-	store         *store.Store
-	frontend      fs.FS
-	version       string
-	tagEngineInfo string
+	h               *hserver.Hertz
+	library         *library.Service
+	writer          *filewrite.Writer
+	providers       *providers.Registry
+	store           *store.Store
+	frontend        fs.FS
+	version         string
+	tagEngineInfo   string
+	downloadArtwork func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
 }
 
 func New(listen string, libraryService *library.Service, writer *filewrite.Writer, providerRegistry *providers.Registry, dataStore *store.Store, frontend fs.FS, version, tagEngineInfo string) *Server {
@@ -48,6 +49,9 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 		frontend:      frontend,
 		version:       version,
 		tagEngineInfo: tagEngineInfo,
+		downloadArtwork: func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+			return providers.DownloadArtwork(ctx, reference, nil)
+		},
 	}
 	s.routes()
 	return s
@@ -73,6 +77,7 @@ func (s *Server) routes() {
 	api.DELETE("/tracks/:id/artwork/:index", s.handleDeleteArtwork)
 	api.GET("/providers", s.handleProviders)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
+	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
 	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
@@ -195,8 +200,18 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 		s.handleWriteError(c, err)
 		return
 	}
-	if request.DryRun || !result.Changed {
+	if request.DryRun {
 		s.writeData(c, map[string]any{"preview": result})
+		return
+	}
+	if !result.Changed {
+		track, trackErr := s.library.Track(ref.ID)
+		if trackErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "internal_error", trackErr.Error())
+			return
+		}
+		c.Header("ETag", `"`+track.Revision+`"`)
+		s.writeData(c, map[string]any{"track": track, "write": result})
 		return
 	}
 	if err := s.library.Rescan(ctx); err != nil {
@@ -515,6 +530,14 @@ func (s *Server) handleArtworkMutation(ctx context.Context, c *app.RequestContex
 		s.writeData(c, map[string]any{"preview": result})
 		return
 	}
+	action, source := "替换封面", "手工上传"
+	if target == nil {
+		action, source = "删除封面", "手工操作"
+	}
+	s.finishArtworkMutation(ctx, c, ref, result, action, source)
+}
+
+func (s *Server) finishArtworkMutation(ctx context.Context, c *app.RequestContext, ref library.FileRef, result filewrite.ArtworkResult, action, source string) {
 	if result.Changed {
 		if err := s.library.Rescan(ctx); err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "封面已写入，但重新索引失败："+err.Error())
@@ -527,10 +550,6 @@ func (s *Server) handleArtworkMutation(ctx context.Context, c *app.RequestContex
 		return
 	}
 	if result.Changed && s.store != nil {
-		action, source := "替换封面", "手工上传"
-		if target == nil {
-			action, source = "删除封面", "手工操作"
-		}
 		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
 			LibraryID: s.library.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
 			Action: action, Source: source, BaseRevision: result.BaseRevision, ResultRevision: track.Revision,
@@ -542,6 +561,74 @@ func (s *Server) handleArtworkMutation(ctx context.Context, c *app.RequestContex
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, map[string]any{"track": track, "write": result})
+}
+
+type matchArtworkRequest struct {
+	CandidateID  string `json:"candidateId"`
+	BaseRevision string `json:"baseRevision"`
+	DryRun       bool   `json:"dryRun"`
+}
+
+func (s *Server) handleMatchArtwork(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil || s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器或封面写入服务尚未初始化")
+		return
+	}
+	var request matchArtworkRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	headerRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if request.BaseRevision == "" {
+		request.BaseRevision = headerRevision
+	}
+	if request.CandidateID == "" || request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "candidateId、baseRevision 与一致的 If-Match 不能为空")
+		return
+	}
+	reference, err := s.providers.ArtworkReference(request.CandidateID)
+	if errors.Is(err, providers.ErrArtworkReferenceNotFound) {
+		s.writeError(c, consts.StatusNotFound, "candidate_artwork_expired", "候选封面不存在或已过期，请重新搜索")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	descriptor, found := s.providers.Descriptor(reference.ProviderID)
+	if !found {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", "数据来源不存在")
+		return
+	}
+	asset, err := s.downloadArtwork(ctx, reference)
+	if errors.Is(err, providers.ErrUnsafeArtworkURL) || errors.Is(err, artwork.ErrInvalid) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "invalid_provider_artwork", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusBadGateway, "provider_artwork_failed", err.Error())
+		return
+	}
+	ref, err := s.library.FileRef(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	result, err := s.writer.WriteArtwork(ctx, ref, request.BaseRevision, 0, &asset, request.DryRun)
+	if err != nil {
+		s.handleWriteError(c, err)
+		return
+	}
+	if request.DryRun {
+		s.writeData(c, map[string]any{"preview": result, "candidateId": request.CandidateID})
+		return
+	}
+	s.finishArtworkMutation(ctx, c, ref, result, "采用数据源封面", descriptor.Name)
 }
 
 func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {

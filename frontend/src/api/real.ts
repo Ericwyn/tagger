@@ -175,6 +175,14 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		headers: {'If-Match': `"${track.revision}"`},
 	  });
 	},
+
+	applyCandidateArtwork(track: Track, candidateId: string): Promise<ArtworkWriteResult> {
+	  return request<ArtworkWriteResult>(`/api/v1/matches/tracks/${encodeURIComponent(track.id)}/artwork`, {
+		method: 'POST',
+		headers: {'Content-Type': 'application/json', 'If-Match': `"${track.revision}"`},
+		body: JSON.stringify({candidateId, baseRevision: track.revision, dryRun: false}),
+	  });
+	},
   };
 }
 

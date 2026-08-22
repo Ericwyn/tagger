@@ -94,3 +94,12 @@ export async function updateArtwork(trackId: string, file: File | null): Promise
   realTrackCache.set(trackId, result.track);
   return result.track;
 }
+
+export async function applyCandidateArtwork(trackId: string, candidateId: string): Promise<Track> {
+  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, new File([], 'provider-cover.jpg', {type: 'image/jpeg'}));
+  const current = realTrackCache.get(trackId);
+  if (!current) throw new Error('track_not_found');
+  const result = await real.applyCandidateArtwork(current, candidateId);
+  realTrackCache.set(trackId, result.track);
+  return result.track;
+}

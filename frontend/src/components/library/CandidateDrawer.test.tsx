@@ -69,3 +69,23 @@ it('keeps missing candidate fields and applies explicitly selected lyrics', asyn
     lyrics: '[00:01.00]new lyrics',
   }));
 });
+
+it('passes an explicit artwork choice without exposing the remote URL', async () => {
+  const user = userEvent.setup();
+  const onApply = vi.fn().mockResolvedValue(undefined);
+  render(
+	<CandidateDrawer
+	  open
+	  track={track}
+	  candidates={[{...candidate, hasArtwork: true}]}
+	  loading={false}
+	  onClose={() => undefined}
+	  onApply={onApply}
+	/>,
+  );
+
+  await user.click(screen.getByRole('checkbox', {name: /封面/}));
+  await user.click(screen.getByRole('button', {name: '采用所选资料'}));
+  await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+  expect(onApply.mock.calls[0][2]).toEqual({artwork: true});
+});

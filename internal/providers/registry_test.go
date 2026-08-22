@@ -21,6 +21,7 @@ func TestRegistryAggregatesScoresAndProviderFailures(t *testing.T) {
 	registry := NewRegistry(
 		fakeStrategy{descriptor: Descriptor{ID: "exact", Name: "Exact", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
 			ProviderID: "exact", ExternalID: "1", Title: "再回首", Artists: []string{"姜育恒"}, Album: "多年以后", DurationSeconds: 255,
+			ArtworkURL: "https://images.example.test/cover.jpg",
 		}}},
 		fakeStrategy{descriptor: Descriptor{ID: "weak", Name: "Weak", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
 			ProviderID: "weak", ExternalID: "2", Title: "别回首", Artists: []string{"其他人"}, DurationSeconds: 310,
@@ -39,6 +40,10 @@ func TestRegistryAggregatesScoresAndProviderFailures(t *testing.T) {
 	}
 	if result.Candidates[0].Artists.Value == nil || result.Candidates[0].Genres.Value == nil {
 		t.Fatalf("multi-value fields must not be nil: %#v", result.Candidates[0])
+	}
+	reference, err := registry.ArtworkReference(result.Candidates[0].ID)
+	if err != nil || reference.ProviderID != "exact" || reference.URL != "https://images.example.test/cover.jpg" {
+		t.Fatalf("artwork reference = %#v err=%v", reference, err)
 	}
 }
 

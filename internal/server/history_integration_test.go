@@ -15,6 +15,7 @@ import (
 	"testing/fstest"
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	artworkpkg "github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
@@ -123,6 +124,43 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var providerCover bytes.Buffer
+	if err := png.Encode(&providerCover, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	providerAsset, err := artworkpkg.Validate(providerCover.Bytes(), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.downloadArtwork = func(_ context.Context, reference providers.ArtworkReference) (artworkpkg.Asset, error) {
+		if reference.ProviderID != "test-provider" {
+			t.Fatalf("artwork provider = %q", reference.ProviderID)
+		}
+		return providerAsset, nil
+	}
+	searchResult, err := s.providers.Search(context.Background(), providers.Query{
+		Title: restoredTrack.Title, Artists: restoredTrack.Artists, Album: restoredTrack.Album,
+	}, []string{"test-provider"}, 1)
+	if err != nil || len(searchResult.Candidates) != 1 {
+		t.Fatalf("provider candidates = %#v err=%v", searchResult, err)
+	}
+	providerBody, err := json.Marshal(map[string]any{
+		"candidateId": searchResult.Candidates[0].ID, "baseRevision": restoredTrack.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerWrite := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/tracks/"+track.ID+"/artwork",
+		&ut.Body{Body: bytes.NewReader(providerBody), Len: len(providerBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + restoredTrack.Revision + `"`})
+	if providerWrite.Code != 200 || !containsJSON(providerWrite.Body.Bytes(), `"width":2`) {
+		t.Fatalf("provider artwork = %d %s", providerWrite.Code, providerWrite.Body.String())
+	}
+	providerTrack, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var cover bytes.Buffer
 	if err := png.Encode(&cover, image.NewRGBA(image.Rect(0, 0, 4, 3))); err != nil {
 		t.Fatal(err)
@@ -131,7 +169,7 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	coverWrite := ut.PerformRequest(s.h.Engine, "PUT", "/api/v1/tracks/"+track.ID+"/artwork/0",
 		&ut.Body{Body: bytes.NewReader(coverBytes), Len: len(coverBytes)},
 		ut.Header{Key: "content-type", Value: "image/png"},
-		ut.Header{Key: "If-Match", Value: `"` + restoredTrack.Revision + `"`})
+		ut.Header{Key: "If-Match", Value: `"` + providerTrack.Revision + `"`})
 	if coverWrite.Code != 200 || !containsJSON(coverWrite.Body.Bytes(), `"field":"artwork"`) ||
 		!containsJSON(coverWrite.Body.Bytes(), `"width":4`) {
 		t.Fatalf("cover write = %d %s", coverWrite.Code, coverWrite.Body.String())
@@ -165,9 +203,10 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	}
 	defer reopened.Close()
 	revisions, err = reopened.ListRevisions(context.Background(), 10)
-	if err != nil || len(revisions) != 4 || revisions[0].Action != "删除封面" || revisions[1].Action != "替换封面" ||
-		revisions[2].Action != "恢复到修订前" || revisions[2].Source != "历史修订 "+revisions[3].ID ||
-		revisions[2].Diff[0].After != track.Title {
+	if err != nil || len(revisions) != 5 || revisions[0].Action != "删除封面" || revisions[1].Action != "替换封面" ||
+		revisions[2].Action != "采用数据源封面" || revisions[2].Source != "Test Provider" ||
+		revisions[3].Action != "恢复到修订前" || revisions[3].Source != "历史修订 "+revisions[4].ID ||
+		revisions[3].Diff[0].After != track.Title {
 		t.Fatalf("reopened history = %#v err=%v", revisions, err)
 	}
 	loaded, found, err := reopened.LoadScan(context.Background(), root)

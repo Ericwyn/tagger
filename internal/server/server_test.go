@@ -32,6 +32,7 @@ func (serverProvider) Search(_ context.Context, query providers.Query, _ int) ([
 	return []providers.Candidate{{
 		ProviderID: "test-provider", ExternalID: "external-1", Title: query.Title,
 		Artists: query.Artists, Album: query.Album, DurationSeconds: query.DurationSeconds,
+		ArtworkURL: "https://images.example.test/cover.jpg",
 	}}, nil
 }
 

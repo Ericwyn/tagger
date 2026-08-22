@@ -21,7 +21,7 @@ interface CandidateDrawerProps {
   candidates: MatchCandidate[];
   loading: boolean;
   onClose: () => void;
-  onApply: (patch: TrackPatch, candidate: MatchCandidate) => Promise<void>;
+  onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean}) => Promise<void>;
 }
 
 const fieldOptions = [
@@ -48,10 +48,12 @@ export function CandidateDrawer({
   const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
   const [applying, setApplying] = useState(false);
   const [includeLyrics, setIncludeLyrics] = useState(false);
+	const [includeArtwork, setIncludeArtwork] = useState(false);
 
   useEffect(() => {
     setSelectedId(candidates[0]?.id ?? null);
     setIncludeLyrics(false);
+	setIncludeArtwork(false);
   }, [candidates]);
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export function CandidateDrawer({
 
   useEffect(() => {
     setIncludeLyrics(false);
+	setIncludeArtwork(false);
   }, [selectedId]);
 
   const selected = useMemo(
@@ -247,7 +250,12 @@ export function CandidateDrawer({
 
                 <div className="asset-options">
                   <label className={cn(selected.hasArtwork && 'is-available')}>
-                    <input type="checkbox" disabled={!selected.hasArtwork} />
+					<input
+					  type="checkbox"
+					  disabled={!selected.hasArtwork}
+					  checked={includeArtwork}
+					  onChange={(event) => setIncludeArtwork(event.target.checked)}
+					/>
                     <Image size={16} />
                     <span><strong>封面</strong><small>{selected.hasArtwork ? '有可用图片' : '当前来源不提供'}</small></span>
                   </label>
@@ -278,7 +286,7 @@ export function CandidateDrawer({
                 if (!selected) return;
                 setApplying(true);
                 try {
-                  await onApply(buildPatch(), selected);
+				  await onApply(buildPatch(), selected, {artwork: includeArtwork});
                   onClose();
                 } finally {
                   setApplying(false);
