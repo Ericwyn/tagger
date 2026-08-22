@@ -4825,6 +4825,34 @@ button:disabled {
   font-style: normal;
 }
 
+.library-setting-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(100px, 1fr)) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 2px;
+}
+
+.library-setting-summary > span {
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.library-setting-summary > span strong {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 16px;
+}
+
+.library-setting-summary .secondary-button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
 .library-setting-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -5623,6 +5651,15 @@ button:disabled {
 
   .library-setting-title code {
     overflow-wrap: anywhere;
+  }
+
+  .library-setting-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .library-setting-summary .secondary-button {
+    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .system-settings > section {

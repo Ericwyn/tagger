@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   Network,
   Plus,
+  RefreshCw,
   Save,
   ServerCog,
   ShieldCheck,
@@ -21,8 +22,8 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, listProviders, testProvider as runProviderTest, updateProvider} from '@/api';
-import type {CandidateSearchQuery, MatchCandidate, ProviderConfig, ProviderTestResponse} from '@/types';
+import {apiReadMode, candidateArtworkURL, getLibrary, listProviders, rescanLibrary, testProvider as runProviderTest, updateProvider, waitForJob} from '@/api';
+import type {CandidateSearchQuery, LibrarySummary, MatchCandidate, ProviderConfig, ProviderTestResponse} from '@/types';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
@@ -67,10 +68,57 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [testArtistInput, setTestArtistInput] = useState(defaultTestQuery.artists.join(' / '));
   const [testResponse, setTestResponse] = useState<ProviderTestResponse>();
   const [testError, setTestError] = useState('');
+  const [library, setLibrary] = useState<LibrarySummary>();
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryScanning, setLibraryScanning] = useState(false);
+  const [libraryError, setLibraryError] = useState('');
 
   useEffect(() => {
     listProviders().then(setProviders);
   }, []);
+
+  const loadLibrary = async () => {
+    setLibraryLoading(true);
+    setLibraryError('');
+    try {
+      setLibrary(await getLibrary());
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : '曲库信息读取失败');
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'libraries') void loadLibrary();
+  }, [tab]);
+
+  const runLibraryScan = async () => {
+    if (!library || libraryScanning) return;
+    setLibraryScanning(true);
+    try {
+      const queued = await rescanLibrary(library.id);
+      if (queued) {
+        const completed = await waitForJob(queued.id);
+        onNotice(completed.state === 'succeeded'
+          ? `曲库扫描完成：已索引 ${completed.succeeded || completed.total} 首曲目`
+          : `曲库扫描结束：${completed.detail || completed.state}`);
+      } else {
+        onNotice('Mock 曲库扫描完成');
+      }
+      await loadLibrary();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '曲库扫描失败');
+    } finally {
+      setLibraryScanning(false);
+    }
+  };
+
+  const explainDirectoryConfiguration = () => {
+    onNotice(apiReadMode === 'real'
+      ? '当前单二进制通过 --music-dir 或 TAGGER_MUSIC_DIR 配置曲库；修改后请重启服务'
+      : 'Mock 原型暂不切换真实目录；连接 Go 后端后由 --music-dir 配置受控根目录');
+  };
 
   const toggleProvider = async (provider: ProviderConfig) => {
     try {
@@ -268,13 +316,22 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <>
               <div className="settings-content-head">
                 <div><h2>音乐目录</h2><p>后端只允许访问这里注册的根目录。</p></div>
-                <button className="primary-button"><Plus size={15} /> 添加目录</button>
+                <button className="primary-button" onClick={explainDirectoryConfiguration}><Plus size={15} /> 添加目录</button>
               </div>
-              <article className="library-setting-card">
+              {libraryError && <div className="provider-test-error"><CircleAlert size={14} /> {libraryError}</div>}
+              <article className="library-setting-card" aria-busy={libraryLoading}>
                 <div className="library-setting-title">
                   <span><Database size={20} /></span>
-                  <div><strong>TestMusic</strong><code>/home/ericwyn/Downloads/TestMusic</code></div>
-                  <em><Check size={12} /> 可读写</em>
+                  <div><strong>{library?.name ?? (libraryLoading ? '正在读取曲库…' : '未配置曲库')}</strong><code>{library?.rootLabel ?? '请检查 --music-dir / TAGGER_MUSIC_DIR'}</code></div>
+                  <em>{library?.writable ? <><Check size={12} /> 可读写</> : <><CircleAlert size={12} /> 只读或不可用</>}</em>
+                </div>
+                <div className="library-setting-summary">
+                  <span><strong>{library?.trackCount ?? '—'}</strong> 首曲目</span>
+                  <span><strong>{library?.folderCount ?? '—'}</strong> 个文件夹</span>
+                  <span><strong>{library?.lastScanLabel ?? '—'}</strong> 最近扫描</span>
+                  <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void runLibraryScan()}>
+                    <RefreshCw size={14} className={libraryScanning ? 'spin' : undefined} /> {libraryScanning ? '扫描中…' : '重新扫描'}
+                  </button>
                 </div>
                 <div className="library-setting-grid">
                   <label><span>扫描模式</span><select defaultValue="hybrid"><option value="hybrid">监听 + 定时对账</option><option>仅手动</option></select></label>

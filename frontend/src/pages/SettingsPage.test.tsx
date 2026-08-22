@@ -1,12 +1,15 @@
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import type {MatchCandidate, ProviderConfig} from '@/types';
+import type {LibrarySummary, MatchCandidate, ProviderConfig} from '@/types';
 
 const api = vi.hoisted(() => ({
   listProviders: vi.fn(),
   updateProvider: vi.fn(),
   testProvider: vi.fn(),
+  getLibrary: vi.fn(),
+  rescanLibrary: vi.fn(),
+  waitForJob: vi.fn(),
   candidateArtworkURL: vi.fn(() => undefined),
 }));
 
@@ -17,6 +20,11 @@ import {SettingsPage} from '@/pages/SettingsPage';
 const provider: ProviderConfig = {
   id: 'musicbrainz', name: 'MusicBrainz', shortName: 'MB', description: '结构化音乐资料',
   capabilities: ['歌曲', '封面'], health: 'ready', enabled: true, accent: '#e84b2c', quotaLabel: '1 req/s',
+};
+
+const library: LibrarySummary = {
+  id: 'lib-test', name: 'TestMusic', rootLabel: '/home/ericwyn/Downloads/TestMusic', trackCount: 24,
+  folderCount: 3, writable: true, lastScanLabel: '刚刚', folders: [],
 };
 
 const candidate = {
@@ -34,6 +42,9 @@ describe('SettingsPage provider diagnostics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.listProviders.mockResolvedValue([provider]);
+    api.getLibrary.mockResolvedValue(library);
+    api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
+    api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
     api.testProvider.mockResolvedValue({
       provider,
       result: {status: 'ok', count: 1, latencyMs: 42},
@@ -63,5 +74,21 @@ describe('SettingsPage provider diagnostics', () => {
     expect(screen.getByText(/\[00:01\.00\] 第一行歌词/)).toBeInTheDocument();
     expect(screen.getByText(/抓取与封面探测日志/)).toBeInTheDocument();
     expect(screen.getByText('封面探测成功')).toBeInTheDocument();
+  });
+
+  it('loads the configured library and runs a real rescan action', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+
+    await user.click(screen.getByRole('button', {name: /音乐目录/}));
+    expect(await screen.findByRole('heading', {name: '音乐目录'})).toBeInTheDocument();
+    expect(screen.getByText('/home/ericwyn/Downloads/TestMusic')).toBeInTheDocument();
+    expect(screen.getByText('24')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', {name: '重新扫描'}));
+    await waitFor(() => expect(api.rescanLibrary).toHaveBeenCalledWith('lib-test'));
+    expect(api.waitForJob).toHaveBeenCalledWith('job-scan');
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('曲库扫描完成'));
   });
 });
