@@ -95,6 +95,7 @@ type ProviderResult struct {
 	LatencyMS int64  `json:"latencyMs"`
 	Retryable bool   `json:"retryable,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Cached    bool   `json:"cached,omitempty"`
 }
 
 type SearchResult struct {
@@ -107,4 +108,5 @@ type searchOutcome struct {
 	candidates []Candidate
 	err        error
 	duration   time.Duration
+	cached     bool
 }

@@ -3,13 +3,27 @@ package providers
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"github.com/ericwyn/tagger/internal/store"
 )
 
 type fakeStrategy struct {
 	descriptor Descriptor
 	candidates []Candidate
 	err        error
+}
+
+type countingStrategy struct {
+	descriptor Descriptor
+	calls      int
+}
+
+func (strategy *countingStrategy) Descriptor() Descriptor { return strategy.descriptor }
+func (strategy *countingStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
+	strategy.calls++
+	return []Candidate{{ExternalID: "1", Title: "Song", Artists: []string{"Artist"}, ArtworkURL: "https://is1-ssl.mzstatic.com/cover.jpg"}}, nil
 }
 
 func (f fakeStrategy) Descriptor() Descriptor { return f.descriptor }
@@ -61,5 +75,68 @@ func TestSimilarityHandlesPunctuationAndCJK(t *testing.T) {
 	}
 	if got := similarity("AC/DC", "ACDC"); got != 1 {
 		t.Fatalf("ASCII similarity = %f", got)
+	}
+}
+
+func TestRegistryCacheAndSettingsSurviveReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tagger.db")
+	repository, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	strategy := &countingStrategy{descriptor: Descriptor{ID: "apple", Name: "Apple", Enabled: true, Health: HealthReady}}
+	registry := NewRegistry(strategy)
+	if err := registry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	query := Query{Title: "Song", Artists: []string{"Artist"}}
+	first, err := registry.Search(context.Background(), query, []string{"apple"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.Search(context.Background(), query, []string{"apple"}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strategy.calls != 1 || first.Providers["apple"].Cached || !second.Providers["apple"].Cached {
+		t.Fatalf("calls=%d first=%#v second=%#v", strategy.calls, first.Providers, second.Providers)
+	}
+	if _, err := registry.SetEnabled(context.Background(), "apple", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	secondStrategy := &countingStrategy{descriptor: strategy.descriptor}
+	secondRegistry := NewRegistry(secondStrategy)
+	if err := secondRegistry.SetPersistence(context.Background(), reopened); err != nil {
+		t.Fatal(err)
+	}
+	if descriptor, _ := secondRegistry.Descriptor("apple"); descriptor.Enabled || descriptor.Health != HealthDisabled {
+		t.Fatalf("persisted descriptor = %#v", descriptor)
+	}
+	if _, err := secondRegistry.SetEnabled(context.Background(), "apple", true); err != nil {
+		t.Fatal(err)
+	}
+	result, err := secondRegistry.Search(context.Background(), query, []string{"apple"}, 5)
+	if err != nil || !result.Providers["apple"].Cached || secondStrategy.calls != 0 {
+		t.Fatalf("reopened cache=%#v calls=%d err=%v", result, secondStrategy.calls, err)
+	}
+	if _, err := secondRegistry.ArtworkReference(result.Candidates[0].ID); err != nil {
+		t.Fatalf("cached artwork reference: %v", err)
+	}
+}
+
+func TestRegistryRejectsEnablingUnavailableExperimentalProvider(t *testing.T) {
+	registry := NewRegistry(NewPlaceholder(Descriptor{ID: "netease", Enabled: false, Experimental: true, Health: HealthDisabled}))
+	_, err := registry.SetEnabled(context.Background(), "netease", true)
+	if !errors.Is(err, ErrProviderUnavailable) {
+		t.Fatalf("error = %v", err)
 	}
 }

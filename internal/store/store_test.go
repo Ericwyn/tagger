@@ -168,6 +168,34 @@ func TestJobsClaimInOrderAndRecoverAfterRestart(t *testing.T) {
 	}
 }
 
+func TestProviderCacheExpiryAndSettings(t *testing.T) {
+	dataStore := openTestStore(t)
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	dataStore.now = func() time.Time { return now }
+	if err := dataStore.SaveProviderCache(context.Background(), "key", "apple", []byte(`[{"Title":"Song"}]`), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	payload, found, err := dataStore.LoadProviderCache(context.Background(), "key")
+	if err != nil || !found || string(payload) != `[{"Title":"Song"}]` {
+		t.Fatalf("cache = %q found=%v err=%v", payload, found, err)
+	}
+	if err := dataStore.SaveProviderEnabled(context.Background(), "apple", false); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := dataStore.LoadProviderSettings(context.Background())
+	if err != nil || settings["apple"] {
+		t.Fatalf("settings = %#v err=%v", settings, err)
+	}
+	now = now.Add(2 * time.Hour)
+	_, found, err = dataStore.LoadProviderCache(context.Background(), "key")
+	if err != nil || found {
+		t.Fatalf("expired cache found=%v err=%v", found, err)
+	}
+	if err := dataStore.DeleteExpiredProviderCache(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	dataStore, err := Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))

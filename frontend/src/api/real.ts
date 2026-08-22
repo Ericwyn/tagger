@@ -146,7 +146,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return result.candidates;
     },
 
-    listProviders(): Promise<ProviderConfig[]> {
+	listProviders(): Promise<ProviderConfig[]> {
       return request<ProviderConfig[]>('/api/v1/providers');
     },
 
@@ -176,6 +176,16 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		headers: {'Content-Type': file.type || 'application/octet-stream', 'If-Match': `"${track.revision}"`},
 		body: file,
 	  });
+	},
+
+	updateProvider(providerId: string, enabled: boolean): Promise<ProviderConfig> {
+	  return request<ProviderConfig>(`/api/v1/providers/${encodeURIComponent(providerId)}`, {
+		method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled}),
+	  });
+	},
+
+	testProvider(providerId: string): Promise<{provider: ProviderConfig; result: {status: string; count: number; latencyMs: number; cached?: boolean}}> {
+	  return request(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, {method: 'POST'});
 	},
 
 	deleteArtwork(track: Track): Promise<ArtworkWriteResult> {

@@ -126,6 +126,19 @@ describe('real API client', () => {
     expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers');
   });
 
+  it('persists provider enablement and runs connection tests', async () => {
+	const provider = {id: 'apple', name: 'Apple', health: 'disabled', enabled: false};
+	const testResult = {provider: {...provider, health: 'ready', enabled: true}, result: {status: 'ok', count: 1, latencyMs: 20, cached: true}};
+	const fetcher = vi.fn()
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: provider}), {status: 200}))
+	  .mockResolvedValueOnce(new Response(JSON.stringify({data: testResult}), {status: 200}));
+	const api = createRealAPI(fetcher);
+	await expect(api.updateProvider('apple', false)).resolves.toEqual(provider);
+	await expect(api.testProvider('apple')).resolves.toEqual(testResult);
+	expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({enabled: false});
+	expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers/apple/test');
+  });
+
   it('lists persistent revision history', async () => {
     const revision = {
       id: 'revlog-1', trackId: 'trk-1', trackTitle: 'Song', fileName: 'Song.flac',

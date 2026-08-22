@@ -80,6 +80,8 @@ func (s *Server) routes() {
 	api.PUT("/tracks/:id/artwork/:index", s.handleWriteArtwork)
 	api.DELETE("/tracks/:id/artwork/:index", s.handleDeleteArtwork)
 	api.GET("/providers", s.handleProviders)
+	api.PATCH("/providers/:id", s.handleProviderUpdate)
+	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/jobs", s.handleJobs)
@@ -713,6 +715,63 @@ func (s *Server) handleProviders(_ context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, s.providers.Descriptors())
+}
+
+type providerUpdateRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (s *Server) handleProviderUpdate(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器尚未初始化")
+		return
+	}
+	var request providerUpdateRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	descriptor, err := s.providers.SetEnabled(ctx, c.Param("id"), request.Enabled)
+	if errors.Is(err, providers.ErrProviderNotFound) {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
+		return
+	}
+	if errors.Is(err, providers.ErrProviderUnavailable) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "provider_unavailable", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "provider_settings_failed", err.Error())
+		return
+	}
+	s.writeData(c, descriptor)
+}
+
+func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) {
+	if s.providers == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "provider_unavailable", "抓取器尚未初始化")
+		return
+	}
+	descriptor, found := s.providers.Descriptor(c.Param("id"))
+	if !found {
+		s.writeError(c, consts.StatusNotFound, "provider_not_found", "数据来源不存在")
+		return
+	}
+	if !descriptor.Enabled {
+		s.writeError(c, consts.StatusUnprocessableEntity, "provider_disabled", "请先启用数据来源")
+		return
+	}
+	result, err := s.providers.Search(ctx, providers.Query{Title: "Imagine", Artists: []string{"John Lennon"}}, []string{descriptor.ID}, 1)
+	if err != nil {
+		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", err.Error())
+		return
+	}
+	outcome := result.Providers[descriptor.ID]
+	if outcome.Status != "ok" {
+		s.writeError(c, consts.StatusBadGateway, "provider_test_failed", outcome.Error)
+		return
+	}
+	s.writeData(c, map[string]any{"provider": descriptor, "result": outcome})
 }
 
 type matchSearchRequest struct {

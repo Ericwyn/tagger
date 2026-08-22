@@ -17,7 +17,7 @@ import {
   ToggleRight,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {listProviders} from '@/api';
+import {apiReadMode, listProviders, testProvider as runProviderTest, updateProvider} from '@/api';
 import type {ProviderConfig} from '@/types';
 
 interface SettingsPageProps {
@@ -42,18 +42,21 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
     listProviders().then(setProviders);
   }, []);
 
-  const toggleProvider = (id: string) => {
-    setProviders((current) => current.map((provider) => provider.id === id
-      ? {...provider, enabled: !provider.enabled, health: provider.enabled ? 'disabled' : provider.health === 'disabled' ? 'ready' : provider.health}
-      : provider));
+	const toggleProvider = async (provider: ProviderConfig) => {
+	try {
+	  const updated = await updateProvider(provider, !provider.enabled);
+	  setProviders((current) => current.map((item) => item.id === updated.id ? updated : item));
+	  onNotice(`${updated.name} 已${updated.enabled ? '启用' : '停用'}并持久化`);
+	} catch (error) {
+	  onNotice(error instanceof Error ? error.message : '数据源设置保存失败');
+	}
   };
 
-  const testProvider = (id: string, name: string) => {
-    setTestingId(id);
-    window.setTimeout(() => {
-      setTestingId(undefined);
-      onNotice(`${name} 连接测试完成`);
-    }, 700);
+	const testProvider = async (provider: ProviderConfig) => {
+	setTestingId(provider.id);
+	try { onNotice(await runProviderTest(provider)); }
+	catch (error) { onNotice(error instanceof Error ? error.message : '连接测试失败'); }
+	finally { setTestingId(undefined); }
   };
 
   return (
@@ -64,7 +67,7 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
           <h1>设置</h1>
           <p>管理受控音乐目录、元数据来源和单二进制运行参数。</p>
         </div>
-        <button className="primary-button" onClick={() => onNotice('设置已保存到 Mock 配置层')}><Save size={15} /> 保存设置</button>
+		<button className="primary-button" onClick={() => onNotice(apiReadMode === 'real' ? '数据源开关已实时保存到 SQLite' : '设置已保存到 Mock 配置层')}><Save size={15} /> 保存设置</button>
       </header>
 
       <div className="settings-layout">
@@ -104,7 +107,7 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
                       <button
                         className="provider-toggle"
                         title={provider.enabled ? '停用数据源' : '启用数据源'}
-                        onClick={() => toggleProvider(provider.id)}
+						onClick={() => void toggleProvider(provider)}
                       >
                         {provider.enabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
                       </button>
@@ -116,7 +119,7 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
                     {provider.experimental && <div className="experimental-note"><CircleAlert size={13} /> 实验性非官方接口</div>}
                     <div className="provider-foot">
                       <small>{provider.quotaLabel}</small>
-                      <button disabled={testingId === provider.id} onClick={() => testProvider(provider.id, provider.name)}>
+					  <button disabled={testingId === provider.id || !provider.enabled} onClick={() => void testProvider(provider)}>
                         {testingId === provider.id ? <LoaderCircle size={13} className="spin" /> : <TestTube2 size={13} />}
                         测试
                       </button>
@@ -125,9 +128,9 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
                   </article>
                 ))}
               </div>
-              <div className="settings-policy-note">
-                <ShieldCheck size={18} />
-                <div><strong>来源用途策略</strong><span>Apple/iTunes promotional artwork 默认不能直接写入文件；实验性来源需要用户主动启用。</span></div>
+			  <div className="settings-policy-note">
+				<ShieldCheck size={18} />
+				<div><strong>来源用途策略</strong><span>远程封面只通过后端候选 ID、安全下载和图片验证后写入；实验性来源需要已实现适配器才能启用。</span></div>
               </div>
             </>
           )}
@@ -153,7 +156,7 @@ export function SettingsPage({onNotice}: SettingsPageProps) {
               </article>
               <div className="settings-policy-note">
                 <FolderCog size={18} />
-                <div><strong>当前使用 Mock 数据</strong><span>真实 Go 后端完成后，这里会读取目录权限并对 TestMusic 执行试扫描。</span></div>
+				<div><strong>{apiReadMode === 'real' ? '当前使用真实曲库索引' : '当前使用 Mock 数据'}</strong><span>{apiReadMode === 'real' ? '目录权限、索引和扫描任务由 Go 后端管理。' : '连接 Go 后端后，这里会读取真实目录权限。'}</span></div>
               </div>
             </>
           )}

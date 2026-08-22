@@ -2,6 +2,9 @@ package providers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -10,6 +13,15 @@ import (
 
 var ErrProviderNotFound = errors.New("provider not found")
 var ErrArtworkReferenceNotFound = errors.New("artwork reference not found")
+var ErrProviderUnavailable = errors.New("provider is unavailable")
+
+type Persistence interface {
+	LoadProviderCache(context.Context, string) ([]byte, bool, error)
+	SaveProviderCache(context.Context, string, string, []byte, time.Duration) error
+	DeleteExpiredProviderCache(context.Context) error
+	LoadProviderSettings(context.Context) (map[string]bool, error)
+	SaveProviderEnabled(context.Context, string, bool) error
+}
 
 type ArtworkReference struct {
 	CandidateID string
@@ -19,15 +31,18 @@ type ArtworkReference struct {
 }
 
 type Registry struct {
-	strategies map[string]Strategy
-	order      []string
-	artworkMu  sync.RWMutex
-	artworks   map[string]ArtworkReference
+	strategies  map[string]Strategy
+	order       []string
+	artworkMu   sync.RWMutex
+	artworks    map[string]ArtworkReference
+	persistence Persistence
+	settingsMu  sync.RWMutex
+	enabled     map[string]bool
 }
 
 func NewRegistry(strategies ...Strategy) *Registry {
 	registry := &Registry{
-		strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies)), artworks: make(map[string]ArtworkReference),
+		strategies: make(map[string]Strategy), order: make([]string, 0, len(strategies)), artworks: make(map[string]ArtworkReference), enabled: make(map[string]bool),
 	}
 	for _, strategy := range strategies {
 		if strategy == nil {
@@ -43,6 +58,56 @@ func NewRegistry(strategies ...Strategy) *Registry {
 		registry.strategies[id] = strategy
 	}
 	return registry
+}
+
+func (r *Registry) SetPersistence(ctx context.Context, persistence Persistence) error {
+	r.persistence = persistence
+	if persistence == nil {
+		return nil
+	}
+	settings, err := persistence.LoadProviderSettings(ctx)
+	if err != nil {
+		return err
+	}
+	r.settingsMu.Lock()
+	r.enabled = settings
+	r.settingsMu.Unlock()
+	return persistence.DeleteExpiredProviderCache(ctx)
+}
+
+func (r *Registry) SetEnabled(ctx context.Context, id string, enabled bool) (Descriptor, error) {
+	strategy, found := r.strategies[id]
+	if !found {
+		return Descriptor{}, fmt.Errorf("%w: %s", ErrProviderNotFound, id)
+	}
+	base := strategy.Descriptor()
+	if enabled && base.Experimental && base.Health == HealthDisabled {
+		return Descriptor{}, fmt.Errorf("%w: %s adapter is not implemented", ErrProviderUnavailable, id)
+	}
+	if r.persistence != nil {
+		if err := r.persistence.SaveProviderEnabled(ctx, id, enabled); err != nil {
+			return Descriptor{}, err
+		}
+	}
+	r.settingsMu.Lock()
+	r.enabled[id] = enabled
+	r.settingsMu.Unlock()
+	return r.descriptor(id), nil
+}
+
+func (r *Registry) descriptor(id string) Descriptor {
+	descriptor := r.strategies[id].Descriptor()
+	r.settingsMu.RLock()
+	enabled, overridden := r.enabled[id]
+	r.settingsMu.RUnlock()
+	if overridden {
+		descriptor.Enabled = enabled
+	}
+	if !descriptor.Enabled {
+		descriptor.Health = HealthDisabled
+	}
+	descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
+	return descriptor
 }
 
 func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error) {
@@ -74,8 +139,7 @@ func (r *Registry) rememberArtwork(candidateID, providerID, artworkURL string) {
 func (r *Registry) Descriptors() []Descriptor {
 	result := make([]Descriptor, 0, len(r.order))
 	for _, id := range r.order {
-		descriptor := r.strategies[id].Descriptor()
-		descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
+		descriptor := r.descriptor(id)
 		result = append(result, descriptor)
 	}
 	return result
@@ -86,9 +150,8 @@ func (r *Registry) Descriptor(id string) (Descriptor, bool) {
 	if !ok {
 		return Descriptor{}, false
 	}
-	descriptor := strategy.Descriptor()
-	descriptor.Capabilities = append([]string(nil), descriptor.Capabilities...)
-	return descriptor, true
+	_ = strategy
+	return r.descriptor(id), true
 }
 
 func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string, limit int) (SearchResult, error) {
@@ -105,7 +168,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 	if len(providerIDs) == 0 {
 		for _, id := range r.order {
 			strategy := r.strategies[id]
-			if descriptor := strategy.Descriptor(); descriptor.Enabled && descriptor.Health != HealthDisabled {
+			if descriptor := r.descriptor(id); descriptor.Enabled && descriptor.Health != HealthDisabled {
 				selected = append(selected, strategy)
 			}
 		}
@@ -115,7 +178,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			if !ok {
 				return SearchResult{}, fmt.Errorf("%w: %s", ErrProviderNotFound, id)
 			}
-			if strategy.Descriptor().Enabled {
+			if r.descriptor(id).Enabled {
 				selected = append(selected, strategy)
 			}
 		}
@@ -128,8 +191,24 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 		go func(strategy Strategy) {
 			defer wait.Done()
 			started := time.Now()
+			descriptor := r.descriptor(strategy.Descriptor().ID)
+			cacheKey := providerCacheKey(descriptor.ID, query, limit)
+			if r.persistence != nil {
+				if payload, found, cacheErr := r.persistence.LoadProviderCache(ctx, cacheKey); cacheErr == nil && found {
+					var candidates []Candidate
+					if json.Unmarshal(payload, &candidates) == nil {
+						outcomes <- searchOutcome{descriptor: descriptor, candidates: candidates, duration: time.Since(started), cached: true}
+						return
+					}
+				}
+			}
 			candidates, err := strategy.Search(ctx, query, limit)
-			outcomes <- searchOutcome{descriptor: strategy.Descriptor(), candidates: candidates, err: err, duration: time.Since(started)}
+			if err == nil && r.persistence != nil {
+				if payload, marshalErr := json.Marshal(candidates); marshalErr == nil {
+					_ = r.persistence.SaveProviderCache(ctx, cacheKey, descriptor.ID, payload, providerCacheTTL(descriptor.ID))
+				}
+			}
+			outcomes <- searchOutcome{descriptor: descriptor, candidates: candidates, err: err, duration: time.Since(started)}
 		}(strategy)
 	}
 	wait.Wait()
@@ -137,7 +216,7 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 
 	result := SearchResult{Candidates: []MatchCandidate{}, Providers: make(map[string]ProviderResult, len(selected))}
 	for outcome := range outcomes {
-		providerResult := ProviderResult{Status: "ok", Count: len(outcome.candidates), LatencyMS: outcome.duration.Milliseconds()}
+		providerResult := ProviderResult{Status: "ok", Count: len(outcome.candidates), LatencyMS: outcome.duration.Milliseconds(), Cached: outcome.cached}
 		if outcome.err != nil {
 			providerResult.Status = "error"
 			providerResult.Error = outcome.err.Error()
@@ -153,6 +232,28 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 	}
 	sortViews(result.Candidates)
 	return result, nil
+}
+
+func providerCacheKey(providerID string, query Query, limit int) string {
+	artists := make([]string, len(query.Artists))
+	for index, artist := range query.Artists {
+		artists[index] = normalize(artist)
+	}
+	payload, _ := json.Marshal(struct {
+		Provider, Title, Album string
+		Artists                []string
+		Duration               int64
+		Limit                  int
+	}{providerID, normalize(query.Title), normalize(query.Album), artists, query.DurationSeconds, limit})
+	digest := sha256.Sum256(payload)
+	return "provider-search-" + hex.EncodeToString(digest[:])
+}
+
+func providerCacheTTL(providerID string) time.Duration {
+	if providerID == "musicbrainz" {
+		return 7 * 24 * time.Hour
+	}
+	return 24 * time.Hour
 }
 
 func isRetryable(err error) bool {

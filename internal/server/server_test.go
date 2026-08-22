@@ -224,6 +224,30 @@ func TestProviderListAndTrackMatchSearch(t *testing.T) {
 	}
 }
 
+func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
+	s := newTestServer(t)
+	disableBody := []byte(`{"enabled":false}`)
+	disabled := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/providers/test-provider",
+		&ut.Body{Body: bytes.NewReader(disableBody), Len: len(disableBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if disabled.Code != 200 || !containsJSON(disabled.Body.Bytes(), `"enabled":false`) || !containsJSON(disabled.Body.Bytes(), `"health":"disabled"`) {
+		t.Fatalf("disable provider = %d %s", disabled.Code, disabled.Body.String())
+	}
+	testDisabled := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", nil)
+	if testDisabled.Code != 422 || !containsJSON(testDisabled.Body.Bytes(), `"code":"provider_disabled"`) {
+		t.Fatalf("test disabled = %d %s", testDisabled.Code, testDisabled.Body.String())
+	}
+	enableBody := []byte(`{"enabled":true}`)
+	enabled := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/providers/test-provider",
+		&ut.Body{Body: bytes.NewReader(enableBody), Len: len(enableBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if enabled.Code != 200 || !containsJSON(enabled.Body.Bytes(), `"enabled":true`) {
+		t.Fatalf("enable = %d %s", enabled.Code, enabled.Body.String())
+	}
+	tested := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/test-provider/test", nil)
+	if tested.Code != 200 || !containsJSON(tested.Body.Bytes(), `"status":"ok"`) {
+		t.Fatalf("test provider = %d %s", tested.Code, tested.Body.String())
+	}
+}
+
 func TestRevisionHistoryAPI(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]

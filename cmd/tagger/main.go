@@ -78,6 +78,10 @@ func main() {
 			Enabled: false, Experimental: true, Accent: "#d69e2e", QuotaLabel: "实验性适配器 · 尚未启用",
 		}),
 	)
+	if err := providerRegistry.SetPersistence(context.Background(), dataStore); err != nil {
+		logger.Error("load provider persistence", "error", err)
+		os.Exit(1)
+	}
 	jobManager := jobs.New(dataStore)
 	jobManager.Register(domain.JobScan, func(ctx context.Context, _ domain.Job, progress jobs.Progress) error {
 		before := libraryService.Library().TrackCount
