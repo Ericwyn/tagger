@@ -20,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
-import {artworkURL} from '@/api';
+import {artworkURL, audioURL} from '@/api';
 import {cn, formatBytes, formatDuration} from '@/lib/utils';
 import type {InspectorTab, Track, TrackPatch} from '@/types';
 
@@ -80,13 +80,19 @@ export function TrackInspector({
   const [showPreview, setShowPreview] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [deleteArtworkArmed, setDeleteArtworkArmed] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const artworkInput = useRef<HTMLInputElement>(null);
+  const playbackURL = track ? audioURL(track) : undefined;
 
   useEffect(() => {
     setDraft(track ? toPatch(track) : null);
     setShowPreview(false);
     setPlaying(false);
 	setDeleteArtworkArmed(false);
+	if (audioRef.current) {
+	  audioRef.current.pause();
+	  audioRef.current.currentTime = 0;
+	}
   }, [track]);
 
   const original = useMemo(() => track ? toPatch(track) : null, [track]);
@@ -133,6 +139,18 @@ export function TrackInspector({
     return Number.isFinite(next) ? next : undefined;
   };
 
+  const togglePlayback = () => {
+    if (!playbackURL || !audioRef.current) {
+      setPlaying((value) => !value);
+      return;
+    }
+    if (audioRef.current.paused) {
+      void audioRef.current.play().catch(() => setPlaying(false));
+    } else {
+      audioRef.current.pause();
+    }
+  };
+
   return (
     <aside className={cn('track-inspector', mobileOpen && 'is-mobile-open')}>
       <div className="inspector-mobile-head">
@@ -154,16 +172,28 @@ export function TrackInspector({
           <h2>{track.title || '未命名曲目'}</h2>
           <p>{track.artists.join(' / ')} <span>·</span> {track.album || '未知专辑'}</p>
           <div className="mini-player">
-            <button title={playing ? '暂停试听' : '试听'} onClick={() => setPlaying((value) => !value)}>
+            <button title={playing ? '暂停试听' : '试听'} onClick={togglePlayback}>
               {playing ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
             </button>
-            <div className={cn('waveform', playing && 'is-playing')} aria-label="模拟音频波形">
+            <div className={cn('waveform', playing && 'is-playing')} aria-label="音频波形">
               {Array.from({length: 24}, (_, index) => (
                 <i key={index} style={{height: `${8 + ((index * 13) % 18)}px`}} />
               ))}
             </div>
             <span>{playing ? '0:24' : formatDuration(track.durationSeconds)}</span>
           </div>
+          {playbackURL && (
+            <audio
+              ref={audioRef}
+              src={playbackURL}
+              preload="metadata"
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onEnded={() => setPlaying(false)}
+              onError={() => setPlaying(false)}
+              aria-label="试听音频"
+            />
+          )}
         </div>
         <button className="hero-more" title="更多曲目操作"><CircleEllipsis size={19} /></button>
       </div>

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -79,6 +81,7 @@ func (s *Server) routes() {
 	api.GET("/tracks", s.handleTracks)
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
+	api.GET("/tracks/:id/audio", s.handleAudio)
 	api.PATCH("/tracks/:id/tags", s.handleWriteTags)
 	api.GET("/tracks/:id/artwork/:index", s.handleReadArtwork)
 	api.PUT("/tracks/:id/artwork/:index", s.handleWriteArtwork)
@@ -642,6 +645,127 @@ func (s *Server) handleTrack(_ context.Context, c *app.RequestContext) {
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, track)
+}
+
+func (s *Server) handleAudio(_ context.Context, c *app.RequestContext) {
+	if s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "audio_unavailable", "音频读取服务尚未启用")
+		return
+	}
+	track, err := s.library.Track(c.Param("id"))
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	ref, err := s.library.FileRef(track.ID)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	file, err := s.writer.OpenRead(ref)
+	if errors.Is(err, filewrite.ErrPathOutsideRoot) {
+		s.writeError(c, consts.StatusForbidden, "forbidden", "文件路径不在曲库安全边界内")
+		return
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		s.writeError(c, consts.StatusNotFound, "audio_not_found", "音频文件不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "audio_open_failed", err.Error())
+		return
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		s.writeError(c, consts.StatusInternalServerError, "audio_stat_failed", err.Error())
+		return
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		s.writeError(c, consts.StatusNotFound, "audio_not_found", "音频文件不存在")
+		return
+	}
+
+	etag := `"` + track.Revision + `"`
+	c.Header("ETag", etag)
+	c.Header("Accept-Ranges", "bytes")
+	c.SetContentType(audioContentType(track.Format))
+	if audioETagMatches(c.Request.Header.Peek("If-None-Match"), etag) {
+		_ = file.Close()
+		c.SetStatusCode(consts.StatusNotModified)
+		return
+	}
+
+	size := info.Size()
+	start, end := int64(0), size-1
+	status := consts.StatusOK
+	if rawRange := c.Request.Header.PeekRange(); len(rawRange) > 0 {
+		maxInt := int64(^uint(0) >> 1)
+		if size > maxInt || size == 0 {
+			_ = file.Close()
+			c.Header("Content-Range", fmt.Sprintf("bytes */%d", size))
+			c.SetStatusCode(consts.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		startPos, endPos, rangeErr := app.ParseByteRange(rawRange, int(size))
+		if rangeErr != nil {
+			_ = file.Close()
+			c.Header("Content-Range", fmt.Sprintf("bytes */%d", size))
+			c.SetStatusCode(consts.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		start, end = int64(startPos), int64(endPos)
+		if _, seekErr := file.Seek(start, io.SeekStart); seekErr != nil {
+			_ = file.Close()
+			s.writeError(c, consts.StatusInternalServerError, "audio_seek_failed", seekErr.Error())
+			return
+		}
+		status = consts.StatusPartialContent
+		c.Response.Header.SetContentRange(startPos, endPos, int(size))
+	}
+
+	length := end - start + 1
+	if length < 0 {
+		_ = file.Close()
+		c.Header("Content-Range", fmt.Sprintf("bytes */%d", size))
+		c.SetStatusCode(consts.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	c.SetStatusCode(status)
+	c.SetBodyStream(&closeOnRead{Reader: io.LimitReader(file, length), Closer: file}, int(length))
+}
+
+func audioETagMatches(header []byte, etag string) bool {
+	for _, candidate := range strings.Split(string(header), ",") {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "*" || candidate == etag || candidate == "W/"+etag {
+			return true
+		}
+	}
+	return false
+}
+
+func audioContentType(format domain.TrackFormat) string {
+	switch format {
+	case domain.FormatMP3:
+		return "audio/mpeg"
+	case domain.FormatFLAC:
+		return "audio/flac"
+	case domain.FormatWAV:
+		return "audio/wav"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+type closeOnRead struct {
+	io.Reader
+	io.Closer
 }
 
 type tagWriteRequest struct {

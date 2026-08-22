@@ -1315,6 +1315,10 @@ button:disabled {
   font-size: 8px;
 }
 
+.mini-player + audio {
+  display: none;
+}
+
 .waveform {
   display: flex;
   flex: 1;

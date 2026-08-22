@@ -93,6 +93,17 @@ func New(root string, engine tags.Engine) (*Writer, error) {
 	return &Writer{root: root, engine: engine}, nil
 }
 
+// OpenRead opens an indexed audio file after applying the same library-root
+// and symlink checks used by write operations. The caller owns the returned
+// file and must close it after consuming the stream.
+func (w *Writer) OpenRead(ref library.FileRef) (*os.File, error) {
+	path, err := w.containedPath(ref)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
 func (w *Writer) Write(ctx context.Context, ref library.FileRef, baseRevision string, patch domain.TagPatch, dryRun bool) (Result, error) {
 	return w.mutate(ctx, ref, baseRevision, dryRun, func(raw map[string][]string) (map[string][]string, []FieldDiff, error) {
 		return compilePatch(raw, patch)

@@ -143,6 +143,11 @@ export function artworkURL(track: Track): string | undefined {
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0?revision=${encodeURIComponent(track.revision)}`;
 }
 
+export function audioURL(track: Track): string | undefined {
+  if (apiReadMode === 'mock') return undefined;
+  return `/api/v1/tracks/${encodeURIComponent(track.id)}/audio?revision=${encodeURIComponent(track.revision)}`;
+}
+
 export async function updateArtwork(trackId: string, file: File | null): Promise<Track> {
   if (apiReadMode === 'mock') return mock.updateArtwork(trackId, file);
   const current = realTrackCache.get(trackId);

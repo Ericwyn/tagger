@@ -55,7 +55,27 @@ describe('TrackInspector', () => {
 
 	await user.click(screen.getByRole('button', {name: '删除当前封面'}));
 	expect(onArtworkChange).toHaveBeenCalledTimes(1);
-	await user.click(screen.getByRole('button', {name: '再次点击确认删除'}));
-	expect(onArtworkChange).toHaveBeenLastCalledWith(null);
+    await user.click(screen.getByRole('button', {name: '再次点击确认删除'}));
+    expect(onArtworkChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('keeps the mock preview player interactive', async () => {
+    const user = userEvent.setup();
+    render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByTitle('试听'));
+    expect(screen.getByTitle('暂停试听')).toBeInTheDocument();
+    await user.click(screen.getByTitle('暂停试听'));
+    expect(screen.getByTitle('试听')).toBeInTheDocument();
   });
 });

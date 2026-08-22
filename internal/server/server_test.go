@@ -111,6 +111,42 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	}
 }
 
+func TestAudioAPIProvidesRangeStreamAndETag(t *testing.T) {
+	s := newTestServer(t)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	ref, err := s.library.FileRef(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("0123456789")
+	if err := os.WriteFile(ref.AbsolutePath, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ranged := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/audio", nil,
+		ut.Header{Key: "Range", Value: "bytes=2-5"})
+	if ranged.Code != 206 || ranged.Body.String() != "2345" ||
+		ranged.Result().Header.Get("Content-Range") != "bytes 2-5/10" ||
+		ranged.Result().Header.Get("Accept-Ranges") != "bytes" ||
+		ranged.Result().Header.Get("Content-Type") != "audio/mpeg" ||
+		ranged.Result().Header.Get("ETag") != `"`+track.Revision+`"` {
+		t.Fatalf("range audio = %d contentRange=%q contentType=%q body=%q", ranged.Code,
+			ranged.Result().Header.Get("Content-Range"), ranged.Result().Header.Get("Content-Type"), ranged.Body.String())
+	}
+
+	notModified := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/audio", nil,
+		ut.Header{Key: "If-None-Match", Value: `"` + track.Revision + `"`})
+	if notModified.Code != 304 || notModified.Body.Len() != 0 {
+		t.Fatalf("audio etag = %d body=%q", notModified.Code, notModified.Body.String())
+	}
+
+	invalid := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/audio", nil,
+		ut.Header{Key: "Range", Value: "bytes=99-100"})
+	if invalid.Code != 416 || invalid.Result().Header.Get("Content-Range") != "bytes */10" {
+		t.Fatalf("invalid audio range = %d contentRange=%q", invalid.Code, invalid.Result().Header.Get("Content-Range"))
+	}
+}
+
 func TestRescanRejectsUnknownLibrary(t *testing.T) {
 	s := newTestServer(t)
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/unknown/scans", nil)
