@@ -31,13 +31,18 @@ export async function updateTrack(trackId: string, patch: TrackPatch): Promise<T
   return structuredClone(tracks[index]);
 }
 
-export async function updateArtwork(trackId: string, image: File | null): Promise<Track> {
+export async function updateArtwork(trackId: string, image: File | null, maxSize = 0): Promise<Track> {
   await wait(180);
   const index = tracks.findIndex((item) => item.id === trackId);
   if (index < 0) throw new Error('track_not_found');
+  const hasArtwork = Boolean(image);
   tracks[index] = {
     ...tracks[index],
-    artworkCount: image ? 1 : 0,
+    artworkCount: hasArtwork ? 1 : 0,
+    artworkWidth: hasArtwork ? (maxSize || 1000) : undefined,
+    artworkHeight: hasArtwork ? (maxSize || 1000) : undefined,
+    artworkSizeBytes: hasArtwork ? (image?.size || 240_000) : undefined,
+    health: hasArtwork ? (tracks[index].lyrics ? 'complete' : 'missing-lyrics') : 'missing-artwork',
     revision: `rev-${trackId}-${Date.now()}`,
     modifiedAt: '刚刚',
   };

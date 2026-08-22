@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it} from 'vitest';
-import {deleteLyricsSidecar, listTracks, resetMockState, updateTrack, writeLyricsSidecar} from '@/mock/api';
+import {deleteLyricsSidecar, listTracks, resetMockState, updateArtwork, updateTrack, writeLyricsSidecar} from '@/mock/api';
 
 describe('mock api', () => {
   afterEach(() => resetMockState());
@@ -47,5 +47,20 @@ describe('mock api', () => {
     const removed = await deleteLyricsSidecar(before.id);
     expect(removed.track.lyricsSidecar).toBeUndefined();
     expect((await listTracks())[0].lyricsSidecar).toBeUndefined();
+  });
+
+  it('updates artwork dimensions in the mock just like the real write response', async () => {
+    const before = (await listTracks())[0];
+    const file = new File([new Uint8Array(128)], 'cover.png', {type: 'image/png'});
+    const resized = await updateArtwork(before.id, file, 500);
+    expect(resized.artworkCount).toBe(1);
+    expect(resized.artworkWidth).toBe(500);
+    expect(resized.artworkHeight).toBe(500);
+    expect(resized.artworkSizeBytes).toBe(128);
+
+    const removed = await updateArtwork(before.id, null);
+    expect(removed.artworkCount).toBe(0);
+    expect(removed.artworkWidth).toBeUndefined();
+    expect(removed.artworkHeight).toBeUndefined();
   });
 });

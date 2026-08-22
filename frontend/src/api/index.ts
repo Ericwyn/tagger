@@ -262,7 +262,7 @@ export function audioURL(track: Track): string | undefined {
 }
 
 export async function updateArtwork(trackId: string, file: File | null, maxSize = 0): Promise<Track> {
-  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, file);
+  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, file, maxSize);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
   const result = file ? await real.writeArtwork(current, file, maxSize) : await real.deleteArtwork(current);
@@ -271,7 +271,7 @@ export async function updateArtwork(trackId: string, file: File | null, maxSize 
 }
 
 export async function applyCandidateArtwork(trackId: string, candidateId: string, maxSize = 0): Promise<Track> {
-  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, new File([], 'provider-cover.jpg', {type: 'image/jpeg'}));
+  if (apiReadMode === 'mock') return mock.updateArtwork(trackId, new File([], 'provider-cover.jpg', {type: 'image/jpeg'}), maxSize);
   const current = realTrackCache.get(trackId);
   if (!current) throw new Error('track_not_found');
   const result = await real.applyCandidateArtwork(current, candidateId, maxSize);

@@ -305,6 +305,16 @@ export function LibraryPage({onOpenReview, onNotice, playerTrackId, playerPlayin
         setBatchEditOpen(false);
         setSelectedIds(new Set());
         onNotice(job ? `批量编辑任务已创建：${job.id}` : '批量编辑任务已创建');
+        if (job) {
+          void waitForJob(job.id).then(async (completed) => {
+            const refreshed = await listTracks();
+            setTracks(refreshed);
+            setActiveTrackId((current) => current && refreshed.some((track) => track.id === current) ? current : refreshed[0]?.id);
+            onNotice(completed.state === 'succeeded'
+              ? `批量编辑已完成，曲库已刷新${artwork ? '封面尺寸' : '标签'}`
+              : `批量编辑结束：${completed.detail || completed.state}`);
+          }).catch((error) => onNotice(error instanceof Error ? `批量编辑完成后刷新失败：${error.message}` : '批量编辑完成后刷新失败'));
+        }
       } catch (error) {
         onNotice(error instanceof Error ? error.message : '批量编辑任务创建失败');
       } finally {
