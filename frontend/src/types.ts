@@ -80,6 +80,7 @@ export interface LibrarySummary {
   id: string;
   name: string;
   rootLabel: string;
+  rootPath?: string;
   trackCount: number;
   folderCount: number;
   writable: boolean;

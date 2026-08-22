@@ -103,6 +103,7 @@ type SidecarResult struct {
 }
 
 type Writer struct {
+	rootMu sync.RWMutex
 	root   string
 	engine tags.Engine
 	locks  sync.Map
@@ -124,6 +125,33 @@ func New(root string, engine tags.Engine) (*Writer, error) {
 		return nil, fmt.Errorf("library root is not a directory")
 	}
 	return &Writer{root: root, engine: engine}, nil
+}
+
+func (w *Writer) Root() string {
+	w.rootMu.RLock()
+	defer w.rootMu.RUnlock()
+	return w.root
+}
+
+// SetRoot validates a new library root before replacing the writer boundary.
+// Callers should coordinate this with the scanner/service switch and reject
+// active write jobs before invoking it.
+func (w *Writer) SetRoot(root string) error {
+	root, err := filepath.Abs(strings.TrimSpace(root))
+	if err != nil {
+		return fmt.Errorf("resolve library root: %w", err)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("stat library root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("library root is not a regular directory")
+	}
+	w.rootMu.Lock()
+	w.root = root
+	w.rootMu.Unlock()
+	return nil
 }
 
 // OpenRead opens an indexed audio file after applying the same library-root
@@ -738,7 +766,8 @@ func (w *Writer) containedPath(ref library.FileRef) (string, error) {
 	if cleanRelative == ".." || strings.HasPrefix(cleanRelative, ".."+string(filepath.Separator)) {
 		return "", ErrPathOutsideRoot
 	}
-	expected := filepath.Join(w.root, cleanRelative)
+	root := w.Root()
+	expected := filepath.Join(root, cleanRelative)
 	expectedAbs, err := filepath.Abs(expected)
 	if err != nil {
 		return "", ErrPathOutsideRoot
@@ -754,7 +783,7 @@ func (w *Writer) containedPath(ref library.FileRef) (string, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", ErrPathOutsideRoot
 	}
-	rootResolved, err := filepath.EvalSymlinks(w.root)
+	rootResolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", err
 	}

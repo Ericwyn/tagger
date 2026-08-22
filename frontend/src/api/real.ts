@@ -186,6 +186,12 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       });
     },
 
+    switchLibrary(libraryId: string, path: string): Promise<Job> {
+      return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/switch`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({path}),
+      });
+    },
+
 	async listTracks(): Promise<Track[]> {
 	  const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks');
 	  return (result.tracks ?? []).map(normalizeTrack);

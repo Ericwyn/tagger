@@ -100,6 +100,20 @@ func (m *Manager) List(ctx context.Context, limit int) ([]domain.Job, error) {
 }
 func (m *Manager) Get(ctx context.Context, id string) (domain.Job, error) { return m.repo.Job(ctx, id) }
 
+func (m *Manager) HasActive(ctx context.Context) (bool, error) {
+	items, err := m.repo.ListJobs(ctx, 200)
+	if err != nil {
+		return false, err
+	}
+	for _, job := range items {
+		switch job.State {
+		case domain.JobWaiting, domain.JobRunning, domain.JobReview:
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Cancel requests cooperative cancellation. Waiting/review jobs can be
 // cancelled immediately; running handlers receive a child context cancellation
 // and are finalized as cancelled once they return.

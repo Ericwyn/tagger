@@ -101,12 +101,18 @@ func TestServiceLoadsPersistedIndexAndRescansOnDemand(t *testing.T) {
 	if engine.reads.Load() != 1 || first.Library().TrackCount != 1 {
 		t.Fatalf("initial scan reads=%d tracks=%d", engine.reads.Load(), first.Library().TrackCount)
 	}
+	if first.Library().RootPath != root {
+		t.Fatalf("initial root path=%q, want %q", first.Library().RootPath, root)
+	}
 	second, err := New(context.Background(), musicScanner, dataStore)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if engine.reads.Load() != 1 || second.Library().TrackCount != 1 {
 		t.Fatalf("persisted load unexpectedly rescanned: reads=%d tracks=%d", engine.reads.Load(), second.Library().TrackCount)
+	}
+	if second.Library().RootPath != root {
+		t.Fatalf("persisted root path=%q, want %q", second.Library().RootPath, root)
 	}
 	if err := second.Rescan(context.Background()); err != nil {
 		t.Fatal(err)
@@ -145,5 +151,43 @@ func TestServiceRescanTrackOnlyReadsRequestedFile(t *testing.T) {
 	}
 	if updated.ID != tracks[0].ID || engine.reads.Load() != 3 {
 		t.Fatalf("single scan updated=%#v reads=%d, want one additional read", updated, engine.reads.Load())
+	}
+}
+
+func TestServiceSwitchRootScansBeforeReplacingActiveIndex(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "First.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "Next.flac"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dataStore.Close()
+	firstScanner, err := scanner.New(serviceEngine{}, scanner.Options{Root: first, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), firstScanner, dataStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SwitchRoot(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	if service.Root() != second || service.Library().TrackCount != 1 {
+		t.Fatalf("switched root=%q library=%#v", service.Root(), service.Library())
+	}
+	tracks := service.ListTracks(TrackFilter{})
+	if len(tracks) != 1 || tracks[0].FileName != "Next.flac" {
+		t.Fatalf("switched tracks = %#v", tracks)
+	}
+	persisted, found, err := dataStore.LibraryRoot(context.Background())
+	if err != nil || !found || persisted != second {
+		t.Fatalf("persisted root=%q found=%v err=%v", persisted, found, err)
 	}
 }

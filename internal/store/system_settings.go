@@ -4,13 +4,55 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 const (
 	historyRetentionSetting = "history_retention"
+	libraryRootSetting      = "library_root"
 	defaultHistoryRetention = 20
 )
+
+func (s *Store) LibraryRoot(ctx context.Context) (string, bool, error) {
+	var value string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key=?`, libraryRootSetting).Scan(&value)
+	if err == sql.ErrNoRows {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("load library root: %w", err)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false, nil
+	}
+	root, err := filepath.Abs(value)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve library root: %w", err)
+	}
+	return root, true, nil
+}
+
+func (s *Store) SetLibraryRoot(ctx context.Context, root string) error {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return fmt.Errorf("library root cannot be empty")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolve library root: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO system_settings(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+		libraryRootSetting, abs, formatTime(s.now().UTC()))
+	if err != nil {
+		return fmt.Errorf("save library root: %w", err)
+	}
+	return nil
+}
 
 var supportedHistoryRetention = map[int]struct{}{3: {}, 5: {}, 10: {}, 20: {}}
 

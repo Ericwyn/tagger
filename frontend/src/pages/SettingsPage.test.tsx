@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   testProvider: vi.fn(),
   getLibrary: vi.fn(),
   probeLibrary: vi.fn(),
+  switchLibrary: vi.fn(),
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
   getSystem: vi.fn(),
@@ -27,7 +28,7 @@ const provider: ProviderConfig = {
 };
 
 const library: LibrarySummary = {
-  id: 'lib-test', name: 'TestMusic', rootLabel: '/home/ericwyn/Downloads/TestMusic', trackCount: 24,
+  id: 'lib-test', name: 'TestMusic', rootLabel: 'TestMusic', rootPath: '/home/ericwyn/Downloads/TestMusic', trackCount: 24,
   folderCount: 3, writable: true, lastScanLabel: '刚刚', folders: [],
 };
 
@@ -51,6 +52,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
     api.getLibrary.mockResolvedValue(library);
     api.probeLibrary.mockResolvedValue({path: '/home/ericwyn/Downloads/TestMusic', name: 'TestMusic', readable: true, writable: true, audioFiles: 24, folders: 3, formats: {mp3: 9, flac: 15, wav: 0}, warnings: []});
+    api.switchLibrary.mockResolvedValue({id: 'job-switch', state: 'waiting', kind: 'scan', title: '切换曲库', detail: '等待', processed: 0, total: 24, succeeded: 0, failed: 0, startedAt: '刚刚'});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
     api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090'});
@@ -140,7 +142,23 @@ describe('SettingsPage provider diagnostics', () => {
     await user.click(screen.getByRole('button', {name: '开始探测'}));
     await waitFor(() => expect(api.probeLibrary).toHaveBeenCalledWith('/home/ericwyn/Downloads/TestMusic'));
     expect(within(screen.getByRole('dialog', {name: '目录探测'})).getByText('24')).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog', {name: '目录探测'})).getByText(/探测结果仅用于确认目录状态/)).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog', {name: '目录探测'})).getByText(/切换会排队扫描/)).toBeInTheDocument();
+  });
+
+  it('switches the active library through a guarded background job', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', {name: /音乐目录/}));
+    await screen.findByRole('heading', {name: '音乐目录'});
+    await user.click(screen.getByRole('button', {name: '验证目录'}));
+    await user.click(screen.getByRole('button', {name: '开始探测'}));
+    await waitFor(() => expect(api.probeLibrary).toHaveBeenCalled());
+    api.waitForJob.mockResolvedValueOnce({id: 'job-switch', state: 'succeeded', detail: '已切换', processed: 24, total: 24, succeeded: 24, failed: 0});
+    await user.click(screen.getByRole('button', {name: '切换到此目录'}));
+    await waitFor(() => expect(api.switchLibrary).toHaveBeenCalledWith('lib-test', '/home/ericwyn/Downloads/TestMusic'));
+    expect(api.waitForJob).toHaveBeenCalledWith('job-switch');
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('已切换到曲库'));
   });
 
   it('shows the startup HTTP listener as read-only and exposes history retention choices', async () => {

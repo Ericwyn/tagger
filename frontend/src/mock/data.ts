@@ -209,7 +209,7 @@ export const seedTracks: Track[] = [
 export const library: LibrarySummary = {
   id: 'lib-test-music',
   name: 'TestMusic',
-  rootLabel: '/home/ericwyn/Downloads/TestMusic',
+  rootLabel: 'TestMusic', rootPath: '/home/ericwyn/Downloads/TestMusic',
   trackCount: seedTracks.length,
   folderCount: 3,
   writable: true,

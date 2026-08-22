@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, probeLibrary, rescanLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, getLibrary, getSystem, listProviders, probeLibrary, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 
@@ -104,6 +104,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [directoryProbe, setDirectoryProbe] = useState<DirectoryProbe>();
   const [directoryProbeError, setDirectoryProbeError] = useState('');
   const [directoryProbing, setDirectoryProbing] = useState(false);
+  const [directorySwitching, setDirectorySwitching] = useState(false);
   const [systemInfo, setSystemInfo] = useState<SystemInfo>();
   const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
 
@@ -135,7 +136,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   };
 
   const openDirectoryProbe = () => {
-    setDirectoryPath(library?.rootLabel ?? '');
+    setDirectoryPath(library?.rootPath || library?.rootLabel || '');
     setDirectoryProbe(undefined);
     setDirectoryProbeError('');
     setDirectoryProbeOpen(true);
@@ -156,6 +157,27 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
       setDirectoryProbeError(error instanceof Error ? error.message : '目录探测失败');
     } finally {
       setDirectoryProbing(false);
+    }
+  };
+
+  const switchActiveLibrary = async () => {
+    if (!library || !directoryProbe || directorySwitching) return;
+    setDirectorySwitching(true);
+    try {
+      const job = await switchLibrary(library.id, directoryProbe.path);
+      if (job && apiReadMode === 'real') {
+        const completed = await waitForJob(job.id);
+        if (completed.state !== 'succeeded') {
+          throw new Error(completed.detail || `曲库切换${completed.state}`);
+        }
+      }
+      await loadLibrary();
+      setDirectoryProbeOpen(false);
+      onNotice(`已切换到曲库：${directoryProbe.name}`);
+    } catch (error) {
+      setDirectoryProbeError(error instanceof Error ? error.message : '曲库切换失败');
+    } finally {
+      setDirectorySwitching(false);
     }
   };
 
@@ -409,7 +431,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
           <div>
             <span className="eyebrow">LIBRARY DIRECTORY PROBE</span>
             <h3>验证音乐目录</h3>
-            <p>只读取目录权限和音频样本，不会切换当前曲库或修改文件。</p>
+            <p>先读取目录权限和音频样本；确认后才会排队切换当前曲库，不会直接修改文件。</p>
           </div>
           <button className="icon-button" title="关闭目录探测" onClick={() => setDirectoryProbeOpen(false)}><X size={17} /></button>
         </div>
@@ -428,7 +450,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
               </div>
               <div className="directory-probe-formats">{Object.entries(directoryProbe.formats).map(([format, count]) => <span key={format}>{format.toUpperCase()} <strong>{count}</strong></span>)}</div>
               {(directoryProbe.warnings?.length ?? 0) > 0 && <div className="directory-probe-warnings">{directoryProbe.warnings!.map((warning) => <p key={warning}><CircleAlert size={13} /> {warning}</p>)}</div>}
-              <small>探测结果仅用于确认目录状态；要切换曲库，请使用启动参数 <code>--music-dir</code> 或环境变量并重启。</small>
+              <small>切换会排队扫描并更新当前曲库；有运行中或待审核任务时会被拒绝。未显式提供 <code>--music-dir</code> 时，重启会恢复最近一次选择。</small>
+              <button className="primary-button" type="button" disabled={!directoryProbe.readable || directorySwitching} onClick={() => void switchActiveLibrary()}>{directorySwitching ? <LoaderCircle size={14} className="spin" /> : <FolderCog size={14} />} {directorySwitching ? '切换中…' : '切换到此目录'}</button>
             </div>
           )}
         </form>
@@ -526,7 +549,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
               <article className="library-setting-card" aria-busy={libraryLoading}>
                 <div className="library-setting-title">
                   <span><Database size={20} /></span>
-                  <div><strong>{library?.name ?? (libraryLoading ? '正在读取曲库…' : '未配置曲库')}</strong><code>{library?.rootLabel ?? '请检查 --music-dir / TAGGER_MUSIC_DIR'}</code></div>
+                  <div><strong>{library?.name ?? (libraryLoading ? '正在读取曲库…' : '未配置曲库')}</strong><code>{library?.rootPath || library?.rootLabel || '请检查 --music-dir / TAGGER_MUSIC_DIR'}</code></div>
                   <em>{library?.writable ? <><Check size={12} /> 可读写</> : <><CircleAlert size={12} /> 只读或不可用</>}</em>
                 </div>
                 <div className="library-setting-summary">

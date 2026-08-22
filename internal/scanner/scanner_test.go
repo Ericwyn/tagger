@@ -273,6 +273,29 @@ func TestScannerReadsTestMusicCorpus(t *testing.T) {
 	}
 }
 
+func TestScannerWithRootPreservesEngineAndWorkerPolicy(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(second, "next.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	original, err := New(fakeEngine{}, Options{Root: first, LibraryName: "First", Workers: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := original.WithRoot(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Root() == original.Root() || next.Root() != second {
+		t.Fatalf("roots original=%q next=%q", original.Root(), next.Root())
+	}
+	result, err := next.Scan(context.Background())
+	if err != nil || len(result.Tracks) != 1 {
+		t.Fatalf("next scan tracks=%d err=%v", len(result.Tracks), err)
+	}
+}
+
 func mustWriteFile(t *testing.T, path string, content []byte) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

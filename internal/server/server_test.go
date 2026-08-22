@@ -150,6 +150,45 @@ func TestLibraryDirectoryProbeAPI(t *testing.T) {
 	}
 }
 
+func TestLibrarySwitchQueuesSafeBackgroundJob(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "next.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"path":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/"+s.library.Library().ID+"/switch", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 202 || !containsJSON(response.Body.Bytes(), `"kind":"scan"`) {
+		t.Fatalf("switch = %d %s", response.Code, response.Body.String())
+	}
+	var envelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := manager.Get(context.Background(), envelope.Data.ID)
+	if err != nil || !strings.Contains(queued.Payload, root) {
+		t.Fatalf("queued=%#v err=%v", queued, err)
+	}
+
+	busyServer := newTestServer(t)
+	busyManager := jobs.New(busyServer.store)
+	busyServer.SetJobManager(busyManager)
+	if _, err := busyManager.Enqueue(context.Background(), domain.Job{Kind: domain.JobScan, State: domain.JobWaiting, Title: "busy"}); err != nil {
+		t.Fatal(err)
+	}
+	busyBody := []byte(`{"path":"` + strings.ReplaceAll(root, `\`, `\\`) + `"}`)
+	busy := ut.PerformRequest(busyServer.h.Engine, "POST", "/api/v1/libraries/"+busyServer.library.Library().ID+"/switch", &ut.Body{Body: bytes.NewReader(busyBody), Len: len(busyBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if busy.Code != 409 || !containsJSON(busy.Body.Bytes(), `"code":"library_switch_busy"`) {
+		t.Fatalf("busy switch = %d %s", busy.Code, busy.Body.String())
+	}
+}
+
 func TestOptionalBearerTokenProtection(t *testing.T) {
 	s := newTestServer(t)
 	s.SetAuthToken("secret-token")

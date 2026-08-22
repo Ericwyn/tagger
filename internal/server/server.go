@@ -92,6 +92,7 @@ func (s *Server) routes() {
 	api.PATCH("/system/settings", s.handleSystemSettings)
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries/probe", s.handleLibraryProbe)
+	api.POST("/libraries/:id/switch", s.handleLibrarySwitch)
 	api.POST("/libraries/:id/scans", s.handleRescan)
 	api.GET("/tracks", s.handleTracks)
 	api.POST("/tracks/:id/scan", s.handleTrackScan)
@@ -228,6 +229,47 @@ func (s *Server) handleLibraryProbe(_ context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, probe)
+}
+
+func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "曲库切换任务队列尚未启用")
+		return
+	}
+	current := s.library.Library()
+	if c.Param("id") != current.ID {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	active, err := s.jobs.HasActive(ctx)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
+		return
+	}
+	if active {
+		s.writeError(c, consts.StatusConflict, "library_switch_busy", "存在运行中或待审核任务，请完成或取消后再切换曲库")
+		return
+	}
+	var request libraryProbeRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "曲库切换 JSON 无效")
+		return
+	}
+	probe, err := library.ProbeRoot(request.Path)
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "directory_probe_failed", err.Error())
+		return
+	}
+	payload, _ := json.Marshal(map[string]string{"root": probe.Path})
+	job, err := s.jobs.Enqueue(ctx, domain.Job{
+		Kind: domain.JobScan, LibraryID: current.ID, Title: "切换曲库 · " + probe.Name,
+		Detail: "等待曲库切换 worker", Total: probe.AudioFiles, Payload: string(payload),
+	})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job), "probe": probe})
 }
 
 func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {

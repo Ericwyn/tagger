@@ -431,6 +431,31 @@ func TestWriterRejectsPathEscapeAndSymlink(t *testing.T) {
 	}
 }
 
+func TestWriterSetRootChangesVerifiedBoundary(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "first.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "second.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := New(first, newMemoryEngine(map[string][]string{"TITLE": {"song"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.SetRoot(second); err != nil {
+		t.Fatal(err)
+	}
+	if writer.Root() != second {
+		t.Fatalf("writer root=%q", writer.Root())
+	}
+	ref := library.FileRef{RelativePath: "second.mp3", AbsolutePath: filepath.Join(second, "second.mp3"), Format: domain.FormatMP3}
+	if _, err := writer.OpenRead(ref); err != nil {
+		t.Fatalf("open switched root file: %v", err)
+	}
+}
+
 func TestWriterWithCopiedTestMusicMP3AndFLAC(t *testing.T) {
 	corpus := os.Getenv("TAGGER_TEST_MUSIC_DIR")
 	if corpus == "" {

@@ -36,6 +36,10 @@ type Repository interface {
 	LoadScan(ctx context.Context, root string) (scanner.Result, bool, error)
 }
 
+type RootRepository interface {
+	SetLibraryRoot(context.Context, string) error
+}
+
 type Service struct {
 	scanner *scanner.Scanner
 	repo    Repository
@@ -59,6 +63,9 @@ func New(ctx context.Context, scanner *scanner.Scanner, repositories ...Reposito
 			return nil, fmt.Errorf("load persisted library: %w", err)
 		}
 		if found {
+			if result.Library.RootPath == "" {
+				result.Library.RootPath = scanner.Root()
+			}
 			service.apply(result)
 			return service, nil
 		}
@@ -73,12 +80,13 @@ func (s *Service) Rescan(ctx context.Context) error {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
 
-	result, err := s.scanner.Scan(ctx)
+	currentScanner := s.currentScanner()
+	result, err := currentScanner.Scan(ctx)
 	if err != nil {
 		return err
 	}
 	if s.repo != nil {
-		if err := s.repo.SaveScan(ctx, s.scanner.Root(), result); err != nil {
+		if err := s.repo.SaveScan(ctx, currentScanner.Root(), result); err != nil {
 			return fmt.Errorf("persist scan: %w", err)
 		}
 	}
@@ -97,17 +105,63 @@ func (s *Service) RescanTrack(ctx context.Context, id string) (domain.Track, err
 	if err != nil {
 		return domain.Track{}, err
 	}
-	track, scanErr := s.scanner.ScanTrack(ctx, current.RelativePath)
+	currentScanner := s.currentScanner()
+	track, scanErr := currentScanner.ScanTrack(ctx, current.RelativePath)
 	if track.ID == "" {
 		return domain.Track{}, scanErr
 	}
 	s.applyTrack(track)
 	if s.repo != nil {
-		if persistErr := s.repo.SaveScan(ctx, s.scanner.Root(), s.snapshotResult()); persistErr != nil {
+		if persistErr := s.repo.SaveScan(ctx, currentScanner.Root(), s.snapshotResult()); persistErr != nil {
 			return track, fmt.Errorf("persist track scan: %w", persistErr)
 		}
 	}
 	return track, scanErr
+}
+
+// SwitchRoot scans or restores a candidate root completely before replacing
+// the active scanner. A failed probe/scan leaves the current library intact.
+func (s *Service) SwitchRoot(ctx context.Context, root string) error {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+
+	currentScanner := s.currentScanner()
+	nextScanner, err := currentScanner.WithRoot(root)
+	if err != nil {
+		return err
+	}
+	var result scanner.Result
+	found := false
+	if s.repo != nil {
+		result, found, err = s.repo.LoadScan(ctx, nextScanner.Root())
+		if err != nil {
+			return fmt.Errorf("load switched library: %w", err)
+		}
+	}
+	if !found {
+		result, err = nextScanner.Scan(ctx)
+		if err != nil {
+			return err
+		}
+		if s.repo != nil {
+			if err := s.repo.SaveScan(ctx, nextScanner.Root(), result); err != nil {
+				return fmt.Errorf("persist switched library: %w", err)
+			}
+		}
+	}
+	if result.Library.RootPath == "" {
+		result.Library.RootPath = nextScanner.Root()
+	}
+	if rootRepository, ok := s.repo.(RootRepository); ok {
+		if err := rootRepository.SetLibraryRoot(ctx, nextScanner.Root()); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.scanner = nextScanner
+	s.mu.Unlock()
+	s.apply(result)
+	return nil
 }
 
 func (s *Service) apply(result scanner.Result) {
@@ -202,13 +256,22 @@ func (s *Service) FileRef(id string) (FileRef, error) {
 	if err != nil {
 		return FileRef{}, err
 	}
+	root := s.Root()
 	return FileRef{
 		ID:           track.ID,
 		RelativePath: track.RelativePath,
-		AbsolutePath: filepath.Join(s.scanner.Root(), filepath.FromSlash(track.RelativePath)),
+		AbsolutePath: filepath.Join(root, filepath.FromSlash(track.RelativePath)),
 		Revision:     track.Revision,
 		Format:       track.Format,
 	}, nil
+}
+
+func (s *Service) Root() string { return s.currentScanner().Root() }
+
+func (s *Service) currentScanner() *scanner.Scanner {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.scanner
 }
 
 func trackMatches(track domain.Track, query string) bool {

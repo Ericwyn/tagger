@@ -137,6 +137,7 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 			ID:            s.opts.LibraryID,
 			Name:          s.opts.LibraryName,
 			RootLabel:     filepath.Base(s.opts.Root),
+			RootPath:      s.opts.Root,
 			TrackCount:    len(tracks),
 			FolderCount:   len(folders),
 			Writable:      rootWritable,
@@ -157,6 +158,22 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 }
 
 func (s *Scanner) Root() string { return s.opts.Root }
+
+// WithRoot creates a scanner with the same tag engine and worker policy for a
+// different, validated library root. The original scanner remains unchanged
+// until its owner explicitly swaps it in after a successful scan.
+func (s *Scanner) WithRoot(root string) (*Scanner, error) {
+	if s == nil {
+		return nil, fmt.Errorf("scanner is required")
+	}
+	opts := s.opts
+	opts.Root = root
+	opts.LibraryID = ""
+	if opts.LibraryName == filepath.Base(s.opts.Root) {
+		opts.LibraryName = ""
+	}
+	return New(s.engine, opts)
+}
 
 // ScanTrack re-reads one already-indexed relative path without walking the
 // rest of the library. Callers must provide a relative, non-symlinked path;

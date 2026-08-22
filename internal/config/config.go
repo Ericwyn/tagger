@@ -56,9 +56,6 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	if cfg.Listen == "" {
 		return Config{}, fmt.Errorf("listen address cannot be empty")
 	}
-	if cfg.MusicDir == "" {
-		return Config{}, fmt.Errorf("music directory is required; pass --music-dir or TAGGER_MUSIC_DIR")
-	}
 	if cfg.DataDir == "" {
 		return Config{}, fmt.Errorf("data directory cannot be empty")
 	}

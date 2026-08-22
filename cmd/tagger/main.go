@@ -43,17 +43,6 @@ func main() {
 		os.Exit(2)
 	}
 
-	engine := taglibwasm.New()
-	musicScanner, err := scanner.New(engine, scanner.Options{
-		Root:        cfg.MusicDir,
-		LibraryName: cfg.LibraryName,
-		Workers:     cfg.ScanWorkers,
-	})
-	if err != nil {
-		logger.Error("initialize scanner", "error", err)
-		os.Exit(1)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	dataStore, err := store.Open(ctx, filepath.Join(cfg.DataDir, "tagger.db"))
 	if err != nil {
@@ -62,6 +51,39 @@ func main() {
 		os.Exit(1)
 	}
 	defer dataStore.Close()
+	musicDir := strings.TrimSpace(cfg.MusicDir)
+	if musicDir == "" {
+		persisted, found, rootErr := dataStore.LibraryRoot(ctx)
+		if rootErr != nil {
+			cancel()
+			logger.Error("load persisted library root", "error", rootErr)
+			os.Exit(1)
+		}
+		if !found {
+			cancel()
+			logger.Error("music directory is required", "hint", "pass --music-dir/TAGGER_MUSIC_DIR once or select a persisted library")
+			os.Exit(2)
+		}
+		musicDir = persisted
+	}
+	engine := taglibwasm.New()
+	musicScanner, err := scanner.New(engine, scanner.Options{
+		Root:        musicDir,
+		LibraryName: cfg.LibraryName,
+		Workers:     cfg.ScanWorkers,
+	})
+	if err != nil {
+		cancel()
+		logger.Error("initialize scanner", "error", err)
+		os.Exit(1)
+	}
+	if cfg.MusicDir != "" {
+		if err := dataStore.SetLibraryRoot(ctx, musicScanner.Root()); err != nil {
+			cancel()
+			logger.Error("persist library root", "error", err)
+			os.Exit(1)
+		}
+	}
 	libraryService, err := library.New(ctx, musicScanner, dataStore)
 	cancel()
 	if err != nil {
@@ -87,7 +109,28 @@ func main() {
 		os.Exit(1)
 	}
 	jobManager := jobs.New(dataStore)
-	jobManager.Register(domain.JobScan, func(ctx context.Context, _ domain.Job, progress jobs.Progress) error {
+	jobManager.Register(domain.JobScan, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
+		var payload struct {
+			Root string `json:"root"`
+		}
+		if strings.TrimSpace(job.Payload) != "" {
+			if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+				return fmt.Errorf("decode scan payload: %w", err)
+			}
+		}
+		if strings.TrimSpace(payload.Root) != "" {
+			if err := progress(0, job.Total, 0, 0, "正在切换并扫描新的音乐目录"); err != nil {
+				return err
+			}
+			if err := libraryService.SwitchRoot(ctx, payload.Root); err != nil {
+				return err
+			}
+			if err := tagWriter.SetRoot(payload.Root); err != nil {
+				return err
+			}
+			total := libraryService.Library().TrackCount
+			return progress(total, total, total, 0, fmt.Sprintf("已切换曲库并索引 %d 首曲目", total))
+		}
 		before := libraryService.Library().TrackCount
 		if err := progress(0, before, 0, 0, "正在发现并解析音乐文件"); err != nil {
 			return err
@@ -293,7 +336,7 @@ func main() {
 	srv.SetJobManager(jobManager)
 	logger.Info("tagger started",
 		"listen", cfg.Listen,
-		"library", cfg.MusicDir,
+		"library", musicScanner.Root(),
 		"data", dataStore.Path(),
 		"tracks", libraryService.Library().TrackCount,
 		"version", version.Version,

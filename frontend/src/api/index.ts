@@ -46,6 +46,11 @@ export async function probeLibrary(path: string): Promise<DirectoryProbe> {
   return real.probeLibrary(path);
 }
 
+export async function switchLibrary(libraryId: string, path: string): Promise<Job | null> {
+  if (apiReadMode === 'mock') return mock.switchLibrary(libraryId, path);
+  return real.switchLibrary(libraryId, path);
+}
+
 export function getSystem(): Promise<SystemInfo> {
   return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20}) : real.getSystem();
 }

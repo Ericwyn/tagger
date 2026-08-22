@@ -269,6 +269,34 @@ func TestProviderCacheExpiryAndSettings(t *testing.T) {
 	}
 }
 
+func TestLibraryRootSettingPersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tagger.db")
+	dataStore, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "Music")
+	if err := dataStore.SetLibraryRoot(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	loaded, found, err := dataStore.LibraryRoot(context.Background())
+	if err != nil || !found || loaded != root {
+		t.Fatalf("root=%q found=%v err=%v", loaded, found, err)
+	}
+	if err := dataStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	loaded, found, err = reopened.LibraryRoot(context.Background())
+	if err != nil || !found || loaded != root {
+		t.Fatalf("reopened root=%q found=%v err=%v", loaded, found, err)
+	}
+}
+
 func TestMatchQueryHistoryPersistsNewestQueriesFirst(t *testing.T) {
 	dataStore := openTestStore(t)
 	base := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)

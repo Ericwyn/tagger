@@ -33,10 +33,10 @@ func TestParseUsesDefaultDataDirectory(t *testing.T) {
 	}
 }
 
-func TestParseRejectsMissingLibrary(t *testing.T) {
-	_, err := Parse(nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "music directory is required") {
-		t.Fatalf("error = %v, want missing music directory", err)
+func TestParseAllowsMissingLibraryForPersistedSelection(t *testing.T) {
+	cfg, err := Parse(nil, nil)
+	if err != nil || cfg.MusicDir != "" {
+		t.Fatalf("config = %#v err=%v, want an empty directory for persisted selection", cfg, err)
 	}
 }
 

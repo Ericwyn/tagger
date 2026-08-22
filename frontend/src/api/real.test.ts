@@ -73,11 +73,20 @@ describe('real API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
   });
 
-  it('probes a candidate library directory without changing the active library', async () => {
+  it('probes a candidate library directory before an explicit switch', async () => {
     const probe = {path: '/music', name: 'music', readable: true, writable: true, audioFiles: 3, folders: 1, formats: {mp3: 1, flac: 1, wav: 1}};
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: probe}), {status: 200}));
     const api = createRealAPI(fetcher);
     await expect(api.probeLibrary('/music')).resolves.toEqual(probe);
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({path: '/music'});
+  });
+
+  it('queues a guarded active-library switch', async () => {
+    const job = {id: 'job-switch', kind: 'scan', state: 'waiting', title: '切换曲库', detail: '等待', processed: 0, total: 3, succeeded: 0, failed: 0, startedAt: 'now'};
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));
+    const api = createRealAPI(fetcher);
+    await expect(api.switchLibrary('lib/a', '/music')).resolves.toEqual(job);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/libraries/lib%2Fa/switch');
     expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({path: '/music'});
   });
 
