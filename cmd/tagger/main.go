@@ -249,7 +249,12 @@ func main() {
 				if len(diff) == 0 {
 					continue
 				}
-				if _, historyErr := dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: action, Source: descriptor.Name, BaseRevision: baseRevision, ResultRevision: resultRevision, Diff: diff, CoverTone: track.CoverTone, BeforeTags: beforeTags, AfterTags: afterTags}); historyErr != nil {
+				var beforeArtwork, afterArtwork *domain.ArtworkSnapshot
+				if item.artworkResult != nil {
+					beforeArtwork = artworkRevisionSnapshot(item.artworkResult.Before)
+					afterArtwork = artworkRevisionSnapshot(item.artworkResult.After)
+				}
+				if _, historyErr := dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: action, Source: descriptor.Name, BaseRevision: baseRevision, ResultRevision: resultRevision, Diff: diff, CoverTone: track.CoverTone, BeforeTags: beforeTags, AfterTags: afterTags, BeforeArtwork: beforeArtwork, AfterArtwork: afterArtwork}); historyErr != nil {
 					return fmt.Errorf("persist batch revision for %s: %w", item.trackID, historyErr)
 				}
 			}
@@ -278,6 +283,13 @@ type artworkDownloader func(context.Context, providers.ArtworkReference) (artwor
 
 func defaultArtworkDownloader(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
 	return providers.DownloadArtwork(ctx, reference, nil)
+}
+
+func artworkRevisionSnapshot(asset *artwork.Asset) *domain.ArtworkSnapshot {
+	if asset == nil {
+		return nil
+	}
+	return &domain.ArtworkSnapshot{MIME: asset.MIME, Format: asset.Format, Width: asset.Width, Height: asset.Height, Size: asset.Size, Hash: asset.Hash, Data: append([]byte(nil), asset.Data...)}
 }
 
 func prepareCandidateArtwork(ctx context.Context, registry *providers.Registry, candidate providers.MatchCandidate, download artworkDownloader) (*artwork.Asset, error) {

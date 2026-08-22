@@ -16,6 +16,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	artworkpkg "github.com/ericwyn/tagger/internal/artwork"
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
@@ -184,8 +185,49 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	coverDelete := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/artwork/0", nil,
+	coverHistory, err := dataStore.ListRevisions(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var coverRevision domain.Revision
+	for _, candidateRevision := range coverHistory {
+		if candidateRevision.Action == "替换封面" {
+			coverRevision = candidateRevision
+			break
+		}
+	}
+	if coverRevision.ID == "" {
+		t.Fatal("cover revision was not persisted")
+	}
+	coverRestoreBody, err := json.Marshal(map[string]any{"baseRevision": coveredTrack.Revision, "target": "before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverRestorePreview := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+coverRevision.ID+"/restore-preview",
+		&ut.Body{Body: bytes.NewReader(coverRestoreBody), Len: len(coverRestoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
 		ut.Header{Key: "If-Match", Value: `"` + coveredTrack.Revision + `"`})
+	if coverRestorePreview.Code != 200 || !containsJSON(coverRestorePreview.Body.Bytes(), `"field":"artwork"`) ||
+		!containsJSON(coverRestorePreview.Body.Bytes(), `"width":4`) || !containsJSON(coverRestorePreview.Body.Bytes(), `"width":2`) {
+		t.Fatalf("cover restore preview = %d %s", coverRestorePreview.Code, coverRestorePreview.Body.String())
+	}
+	coverRestore := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+coverRevision.ID+"/restore",
+		&ut.Body{Body: bytes.NewReader(coverRestoreBody), Len: len(coverRestoreBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + coveredTrack.Revision + `"`})
+	if coverRestore.Code != 200 || !containsJSON(coverRestore.Body.Bytes(), `"width":2`) {
+		t.Fatalf("cover restore = %d %s", coverRestore.Code, coverRestore.Body.String())
+	}
+	restoredCoverTrack, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredCover := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks/"+track.ID+"/artwork/0", nil)
+	if restoredCover.Code != 200 || restoredCover.Result().Header.Get("X-Tagger-Artwork-Size") != "2x2" {
+		t.Fatalf("restored cover = %d size=%q", restoredCover.Code, restoredCover.Result().Header.Get("X-Tagger-Artwork-Size"))
+	}
+	coverDelete := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/tracks/"+track.ID+"/artwork/0", nil,
+		ut.Header{Key: "If-Match", Value: `"` + restoredCoverTrack.Revision + `"`})
 	if coverDelete.Code != 200 || !containsJSON(coverDelete.Body.Bytes(), `"artworkCount":0`) {
 		t.Fatalf("cover delete = %d %s", coverDelete.Code, coverDelete.Body.String())
 	}
@@ -203,10 +245,10 @@ func TestSuccessfulRealTagWriteCreatesPersistentRevision(t *testing.T) {
 	}
 	defer reopened.Close()
 	revisions, err = reopened.ListRevisions(context.Background(), 10)
-	if err != nil || len(revisions) != 5 || revisions[0].Action != "删除封面" || revisions[1].Action != "替换封面" ||
-		revisions[2].Action != "采用数据源封面" || revisions[2].Source != "Test Provider" ||
-		revisions[3].Action != "恢复到修订前" || revisions[3].Source != "历史修订 "+revisions[4].ID ||
-		revisions[3].Diff[0].After != track.Title {
+	if err != nil || len(revisions) != 6 || revisions[0].Action != "删除封面" || revisions[1].Action != "恢复到修订前" ||
+		revisions[2].Action != "替换封面" || revisions[3].Action != "采用数据源封面" || revisions[3].Source != "Test Provider" ||
+		revisions[4].Action != "恢复到修订前" || revisions[4].Source != "历史修订 "+revisions[5].ID ||
+		revisions[4].Diff[0].After != track.Title {
 		t.Fatalf("reopened history = %#v err=%v", revisions, err)
 	}
 	loaded, found, err := reopened.LoadScan(context.Background(), root)

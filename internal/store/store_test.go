@@ -212,6 +212,38 @@ func TestProviderCacheExpiryAndSettings(t *testing.T) {
 	}
 }
 
+func TestRevisionStoresDeduplicatedArtworkBlobAndHydratesOnRead(t *testing.T) {
+	dataStore := openTestStore(t)
+	snapshot := &domain.ArtworkSnapshot{MIME: "image/png", Format: "PNG", Width: 2, Height: 2, Size: 5, Hash: "art-hash", Data: []byte("image")}
+	base := domain.Revision{LibraryID: "lib", TrackID: "track", TrackTitle: "Song", FileName: "song.mp3", Action: "替换封面", Source: "测试", BaseRevision: "r1", ResultRevision: "r2", Diff: []domain.RevisionDiff{{Field: "artwork", Operation: domain.OperationSet}}, CoverTone: domain.CoverMoss, BeforeArtwork: snapshot}
+	first, err := dataStore.CreateRevision(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base.ID = "revision-two"
+	base.BaseRevision, base.ResultRevision = "r2", "r3"
+	base.AfterArtwork = snapshot
+	second, err := dataStore.CreateRevision(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := dataStore.db.QueryRow(`SELECT COUNT(*) FROM artwork_blobs WHERE hash=?`, snapshot.Hash).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("artwork blob count = %d", count)
+	}
+	loaded, err := dataStore.Revision(context.Background(), first.ID)
+	if err != nil || loaded.BeforeArtwork == nil || string(loaded.BeforeArtwork.Data) != "image" {
+		t.Fatalf("loaded first revision = %#v err=%v", loaded, err)
+	}
+	loaded, err = dataStore.Revision(context.Background(), second.ID)
+	if err != nil || loaded.AfterArtwork == nil || string(loaded.AfterArtwork.Data) != "image" {
+		t.Fatalf("loaded second revision = %#v err=%v", loaded, err)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	dataStore, err := Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))

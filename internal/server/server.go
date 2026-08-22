@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"mime"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -744,6 +745,20 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		s.handleWriteError(c, err)
 		return
 	}
+	var artworkResult *filewrite.ArtworkResult
+	if targetArtwork, hasArtwork := revisionArtworkTarget(revision, request.Target); hasArtwork {
+		artResult, artworkErr := s.writer.WriteArtwork(ctx, ref, result.CurrentRevision, 0, targetArtwork, dryRun)
+		if artworkErr != nil {
+			s.handleWriteError(c, artworkErr)
+			return
+		}
+		artworkResult = &artResult
+		result.Changed = result.Changed || artResult.Changed
+		result.CurrentRevision = artResult.CurrentRevision
+		result.Diff = append(result.Diff, artResult.Diff...)
+		result.Warnings = append(result.Warnings, artResult.Warnings...)
+		result.AfterTags = artResult.AfterTags
+	}
 	if dryRun {
 		s.writeData(c, map[string]any{
 			"revisionId": revision.ID, "trackId": revision.TrackID, "target": request.Target, "preview": result,
@@ -771,6 +786,7 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 			Action: action, Source: "历史修订 " + revision.ID, BaseRevision: result.BaseRevision,
 			ResultRevision: track.Revision, Diff: result.Diff, CoverTone: track.CoverTone,
 			BeforeTags: result.BeforeTags, AfterTags: result.AfterTags,
+			BeforeArtwork: artworkResultSnapshot(artworkResult, true), AfterArtwork: artworkResultSnapshot(artworkResult, false),
 		})
 		if historyErr != nil {
 			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
@@ -780,6 +796,30 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 	s.writeData(c, map[string]any{
 		"track": track, "write": result, "restoredRevisionId": revision.ID, "target": request.Target,
 	})
+}
+
+func revisionArtworkTarget(revision domain.Revision, target string) (*artwork.Asset, bool) {
+	if !slices.Contains(revision.Fields, "artwork") {
+		return nil, false
+	}
+	snapshot := revision.BeforeArtwork
+	if target == "after" {
+		snapshot = revision.AfterArtwork
+	}
+	if snapshot == nil {
+		return nil, true
+	}
+	return &artwork.Asset{Data: append([]byte(nil), snapshot.Data...), MIME: snapshot.MIME, Format: snapshot.Format, Width: snapshot.Width, Height: snapshot.Height, Size: snapshot.Size, Hash: snapshot.Hash}, true
+}
+
+func artworkResultSnapshot(result *filewrite.ArtworkResult, before bool) *domain.ArtworkSnapshot {
+	if result == nil {
+		return nil
+	}
+	if before {
+		return artworkSnapshot(result.Before)
+	}
+	return artworkSnapshot(result.After)
 }
 
 func (s *Server) handleWriteError(c *app.RequestContext, err error) {
@@ -915,6 +955,7 @@ func (s *Server) finishArtworkMutation(ctx context.Context, c *app.RequestContex
 			LibraryID: s.library.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName,
 			Action: action, Source: source, BaseRevision: result.BaseRevision, ResultRevision: track.Revision,
 			Diff: result.Diff, CoverTone: track.CoverTone, BeforeTags: result.BeforeTags, AfterTags: result.AfterTags,
+			BeforeArtwork: artworkSnapshot(result.Before), AfterArtwork: artworkSnapshot(result.After),
 		})
 		if historyErr != nil {
 			result.Warnings = append(result.Warnings, "修订历史写入失败："+historyErr.Error())
@@ -922,6 +963,16 @@ func (s *Server) finishArtworkMutation(ctx context.Context, c *app.RequestContex
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, map[string]any{"track": track, "write": result})
+}
+
+func artworkSnapshot(asset *artwork.Asset) *domain.ArtworkSnapshot {
+	if asset == nil {
+		return nil
+	}
+	return &domain.ArtworkSnapshot{
+		MIME: asset.MIME, Format: asset.Format, Width: asset.Width, Height: asset.Height,
+		Size: asset.Size, Hash: asset.Hash, Data: append([]byte(nil), asset.Data...),
+	}
 }
 
 type matchArtworkRequest struct {

@@ -224,18 +224,98 @@ func (s *Store) CreateRevision(ctx context.Context, revision domain.Revision) (d
 	if err != nil {
 		return domain.Revision{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Revision{}, err
+	}
+	defer tx.Rollback()
+	beforeArtworkHash, err := s.saveArtworkBlob(ctx, tx, revision.BeforeArtwork)
+	if err != nil {
+		return domain.Revision{}, err
+	}
+	afterArtworkHash, err := s.saveArtworkBlob(ctx, tx, revision.AfterArtwork)
+	if err != nil {
+		return domain.Revision{}, err
+	}
+	revision.BeforeArtworkHash = beforeArtworkHash
+	revision.AfterArtworkHash = afterArtworkHash
+	_, err = tx.ExecContext(ctx, `
         INSERT INTO revisions(
             id, library_id, track_id, track_title, file_name, action, source,
             base_revision, result_revision, fields_json, diff_json,
-            before_tags_json, after_tags_json, cover_tone, created_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            before_tags_json, after_tags_json, cover_tone, created_at,
+            before_artwork_hash, after_artwork_hash
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		revision.ID, revision.LibraryID, revision.TrackID, revision.TrackTitle,
 		revision.FileName, revision.Action, revision.Source, revision.BaseRevision,
 		revision.ResultRevision, fieldsJSON, diffJSON, beforeJSON, afterJSON,
-		revision.CoverTone, revision.CreatedAt.UTC().Format(time.RFC3339Nano))
+		revision.CoverTone, revision.CreatedAt.UTC().Format(time.RFC3339Nano),
+		beforeArtworkHash, afterArtworkHash)
 	if err != nil {
 		return domain.Revision{}, fmt.Errorf("insert revision: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Revision{}, fmt.Errorf("commit revision: %w", err)
+	}
+	return revision, nil
+}
+
+func (s *Store) saveArtworkBlob(ctx context.Context, tx *sql.Tx, snapshot *domain.ArtworkSnapshot) (string, error) {
+	if snapshot == nil {
+		return "", nil
+	}
+	if snapshot.Hash == "" {
+		return "", fmt.Errorf("artwork snapshot hash is required")
+	}
+	if len(snapshot.Data) == 0 {
+		var exists int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM artwork_blobs WHERE hash=?`, snapshot.Hash).Scan(&exists); err != nil {
+			return "", fmt.Errorf("artwork blob %s is unavailable: %w", snapshot.Hash, err)
+		}
+		return snapshot.Hash, nil
+	}
+	if len(snapshot.Data) > 10<<20 {
+		return "", fmt.Errorf("artwork snapshot exceeds 10 MiB")
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO artwork_blobs(hash, mime, format, width, height, size, data, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(hash) DO NOTHING`, snapshot.Hash, snapshot.MIME, snapshot.Format, snapshot.Width, snapshot.Height, snapshot.Size, snapshot.Data, formatTime(s.now().UTC()))
+	if err != nil {
+		return "", fmt.Errorf("save artwork blob: %w", err)
+	}
+	return snapshot.Hash, nil
+}
+
+func (s *Store) loadArtworkSnapshot(ctx context.Context, hash string) (*domain.ArtworkSnapshot, error) {
+	if hash == "" {
+		return nil, nil
+	}
+	var snapshot domain.ArtworkSnapshot
+	var data []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT mime, format, width, height, size, data FROM artwork_blobs WHERE hash=?`, hash).
+		Scan(&snapshot.MIME, &snapshot.Format, &snapshot.Width, &snapshot.Height, &snapshot.Size, &data); err != nil {
+		return nil, err
+	}
+	snapshot.Hash = hash
+	snapshot.Data = append([]byte(nil), data...)
+	return &snapshot, nil
+}
+
+func (s *Store) hydrateRevisionArtwork(ctx context.Context, revision domain.Revision) (domain.Revision, error) {
+	if revision.BeforeArtworkHash != "" {
+		snapshot, err := s.loadArtworkSnapshot(ctx, revision.BeforeArtworkHash)
+		if err != nil {
+			return domain.Revision{}, err
+		}
+		revision.BeforeArtwork = snapshot
+	}
+	if revision.AfterArtworkHash != "" {
+		snapshot, err := s.loadArtworkSnapshot(ctx, revision.AfterArtworkHash)
+		if err != nil {
+			return domain.Revision{}, err
+		}
+		revision.AfterArtwork = snapshot
 	}
 	return revision, nil
 }
@@ -250,7 +330,8 @@ func (s *Store) ListRevisions(ctx context.Context, limit int) ([]domain.Revision
 	rows, err := s.db.QueryContext(ctx, `
         SELECT id, library_id, track_id, track_title, file_name, action, source,
                base_revision, result_revision, fields_json, diff_json,
-               before_tags_json, after_tags_json, cover_tone, created_at
+               before_tags_json, after_tags_json, cover_tone, created_at,
+               before_artwork_hash, after_artwork_hash
         FROM revisions ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -271,9 +352,14 @@ func (s *Store) Revision(ctx context.Context, id string) (domain.Revision, error
 	row := s.db.QueryRowContext(ctx, `
         SELECT id, library_id, track_id, track_title, file_name, action, source,
                base_revision, result_revision, fields_json, diff_json,
-               before_tags_json, after_tags_json, cover_tone, created_at
+               before_tags_json, after_tags_json, cover_tone, created_at,
+               before_artwork_hash, after_artwork_hash
         FROM revisions WHERE id = ?`, id)
-	return scanRevision(row)
+	revision, err := scanRevision(row)
+	if err != nil {
+		return domain.Revision{}, err
+	}
+	return s.hydrateRevisionArtwork(ctx, revision)
 }
 
 type rowScanner interface{ Scan(...any) error }
@@ -282,11 +368,12 @@ func scanRevision(row rowScanner) (domain.Revision, error) {
 	var revision domain.Revision
 	var fieldsJSON, diffJSON, beforeJSON, afterJSON []byte
 	var createdAt string
+	var beforeArtworkHash, afterArtworkHash sql.NullString
 	err := row.Scan(
 		&revision.ID, &revision.LibraryID, &revision.TrackID, &revision.TrackTitle,
 		&revision.FileName, &revision.Action, &revision.Source, &revision.BaseRevision,
 		&revision.ResultRevision, &fieldsJSON, &diffJSON, &beforeJSON, &afterJSON,
-		&revision.CoverTone, &createdAt,
+		&revision.CoverTone, &createdAt, &beforeArtworkHash, &afterArtworkHash,
 	)
 	if err != nil {
 		return domain.Revision{}, err
@@ -306,6 +393,18 @@ func scanRevision(row rowScanner) (domain.Revision, error) {
 	revision.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
 		return domain.Revision{}, err
+	}
+	if beforeArtworkHash.Valid {
+		revision.BeforeArtworkHash = beforeArtworkHash.String
+	}
+	if afterArtworkHash.Valid {
+		revision.AfterArtworkHash = afterArtworkHash.String
+	}
+	if revision.BeforeArtworkHash != "" {
+		revision.BeforeArtwork = &domain.ArtworkSnapshot{Hash: revision.BeforeArtworkHash}
+	}
+	if revision.AfterArtworkHash != "" {
+		revision.AfterArtwork = &domain.ArtworkSnapshot{Hash: revision.AfterArtworkHash}
 	}
 	return revision, nil
 }

@@ -55,7 +55,7 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
     ? active.diff
     : active?.fields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined})) ?? [];
   const activeDiff = restorePreview?.preview.diff ?? recordedDiff;
-	const hasRestorableTagFields = Boolean(active?.fields.some((field) => field !== 'artwork'));
+	const hasRestorableFields = Boolean(active?.fields.length);
 
 	const buildRestorePreview = async () => {
 	  if (!active) return;
@@ -199,11 +199,11 @@ export function HistoryPage({onNotice}: HistoryPageProps) {
 			) : (
 			  <button
 				className="secondary-button full-button"
-				disabled={restoreState !== 'idle' || !active.currentRevision || !hasRestorableTagFields}
-				title={!hasRestorableTagFields ? '封面二进制历史恢复将在 blob 去重阶段接入' : active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
+				disabled={restoreState !== 'idle' || !active.currentRevision || !hasRestorableFields}
+				title={!hasRestorableFields ? '当前修订没有可恢复字段' : active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
 				onClick={() => void buildRestorePreview()}
-			  >
-				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : !hasRestorableTagFields ? '封面恢复待接入' : '恢复到修改前…'}
+			>
+				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : '恢复到修改前…'}
 			  </button>
 			)}
           </aside>
