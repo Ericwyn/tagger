@@ -68,7 +68,9 @@ func TestDownloadArtworkValidatesResponseBytes(t *testing.T) {
 			t.Fatalf("headers = %#v", request.Header)
 		}
 		return &http.Response{
-			StatusCode: 200, Header: http.Header{"Content-Type": {"image/png"}},
+			// Deliberately lie about the type: this mirrors CDN responses where a
+			// .jpg URL or stale header contains a valid PNG payload.
+			StatusCode: 200, Header: http.Header{"Content-Type": {"image/jpeg"}},
 			Body: io.NopCloser(bytes.NewReader(imageData.Bytes())), Request: request,
 		}, nil
 	})}

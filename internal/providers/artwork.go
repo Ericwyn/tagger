@@ -45,7 +45,12 @@ func DownloadArtwork(ctx context.Context, reference ArtworkReference, client *ht
 	if len(body) > artwork.MaxBytes {
 		return artwork.Asset{}, fmt.Errorf("provider artwork exceeds %d MiB", artwork.MaxBytes>>20)
 	}
-	asset, err := artwork.Validate(body, response.Header.Get("Content-Type"))
+	// Provider CDNs often serve an image with a stale or generic Content-Type
+	// (NetEase has returned image/jpeg for PNG bytes). The bytes are the source
+	// of truth here; Validate still sniffs, decodes, size-checks and dimensions-
+	// checks the actual payload. Local uploads continue to use strict declared
+	// MIME validation in the server path.
+	asset, err := artwork.Validate(body, "")
 	if err != nil {
 		return artwork.Asset{}, err
 	}
