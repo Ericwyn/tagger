@@ -2,6 +2,7 @@ import type {
   LibrarySummary,
 	Job,
   MatchCandidate,
+	MatchItem,
   ArtworkWriteResult,
   ProviderConfig,
   RestorePreview,
@@ -107,6 +108,17 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
 	getJob(jobId: string): Promise<Job> {
 	  return request<Job>(`/api/v1/jobs/${encodeURIComponent(jobId)}`);
+	},
+
+	createMatchJob(trackIds: string[], providerIds: string[] = []): Promise<Job> {
+	  return request<Job>('/api/v1/matches/tracks/batch', {
+		method: 'POST', headers: {'Content-Type': 'application/json'},
+		body: JSON.stringify({trackIds, providerIds, limit: 5}),
+	  });
+	},
+
+	listMatchItems(jobId: string): Promise<MatchItem[]> {
+	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {

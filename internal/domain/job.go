@@ -30,6 +30,7 @@ type Job struct {
 	Succeeded   int
 	Failed      int
 	Error       string
+	Payload     string
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	CompletedAt time.Time

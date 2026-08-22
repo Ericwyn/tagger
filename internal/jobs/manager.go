@@ -32,6 +32,8 @@ type Manager struct {
 	now      func() time.Time
 }
 
+var ErrNeedsReview = errors.New("job requires review")
+
 func New(repo Repository) *Manager {
 	return &Manager{repo: repo, handlers: make(map[domain.JobKind]Handler), wake: make(chan struct{}, 1), now: time.Now}
 }
@@ -126,9 +128,23 @@ func (m *Manager) execute(ctx context.Context, job domain.Job) {
 		return
 	}
 	job.CompletedAt = m.now().UTC()
+	if errors.Is(err, ErrNeedsReview) {
+		job.State, job.Error = domain.JobReview, ""
+		if job.Total > 0 {
+			job.Processed = job.Total
+			job.Succeeded = job.Total - job.Failed
+		}
+		_ = m.repo.UpdateJob(context.Background(), job)
+		return
+	}
 	if err != nil {
 		job.State, job.Error, job.Failed = domain.JobFailed, err.Error(), max(1, job.Failed)
 		job.Detail = "任务失败：" + err.Error()
+	} else if job.Failed > 0 {
+		job.State, job.Error = domain.JobPartial, ""
+		if job.Total > 0 {
+			job.Processed, job.Succeeded = job.Total, job.Total-job.Failed
+		}
 	} else {
 		job.State, job.Error = domain.JobSucceeded, ""
 		if job.Total > 0 {

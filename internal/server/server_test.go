@@ -248,6 +248,22 @@ func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 	}
 }
 
+func TestMatchItemsAPIReadsPersistedCandidates(t *testing.T) {
+	s := newTestServer(t)
+	job, err := s.store.CreateJob(context.Background(), domain.Job{ID: "job-match-test", Kind: domain.JobMatch, Title: "Match", Detail: "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, _ := json.Marshal([]providers.MatchCandidate{{ID: "cand-1", ProviderID: "test-provider", Title: providers.Field[string]{Value: "Alpha", Source: "Test"}}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: job.ID, TrackID: "trk-test", State: "review", Candidates: candidates}); err != nil {
+		t.Fatal(err)
+	}
+	response := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+job.ID+"/matches", nil)
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"id":"cand-1"`) || !containsJSON(response.Body.Bytes(), `"trackId":"trk-test"`) {
+		t.Fatalf("match items = %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRevisionHistoryAPI(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]

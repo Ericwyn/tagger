@@ -83,9 +83,11 @@ func (s *Server) routes() {
 	api.PATCH("/providers/:id", s.handleProviderUpdate)
 	api.POST("/providers/:id/test", s.handleProviderTest)
 	api.POST("/matches/tracks/search", s.handleMatchSearch)
+	api.POST("/matches/tracks/batch", s.handleMatchBatch)
 	api.POST("/matches/tracks/:id/artwork", s.handleMatchArtwork)
 	api.GET("/jobs", s.handleJobs)
 	api.GET("/jobs/:id", s.handleJob)
+	api.GET("/jobs/:id/matches", s.handleJobMatches)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
 	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
@@ -195,6 +197,48 @@ func (s *Server) handleJob(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, toJobResponse(job))
+}
+
+type matchBatchRequest struct {
+	TrackIDs    []string `json:"trackIds"`
+	ProviderIDs []string `json:"providerIds"`
+	Limit       int      `json:"limit"`
+}
+
+func (s *Server) handleMatchBatch(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "任务队列尚未启用")
+		return
+	}
+	var request matchBatchRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || len(request.TrackIDs) == 0 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "trackIds 不能为空且请求 JSON 必须有效")
+		return
+	}
+	if len(request.TrackIDs) > 1000 {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "单次最多处理 1000 首曲目")
+		return
+	}
+	payload, _ := json.Marshal(request)
+	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobMatch, LibraryID: s.library.Library().ID, Title: "批量抓取元数据", Detail: "等待匹配 worker", Total: len(request.TrackIDs), Payload: string(payload)})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
+}
+
+func (s *Server) handleJobMatches(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeData(c, []store.MatchItem{})
+		return
+	}
+	items, err := s.store.ListMatchItems(ctx, c.Param("id"))
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "matches_failed", err.Error())
+		return
+	}
+	s.writeData(c, items)
 }
 
 func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {

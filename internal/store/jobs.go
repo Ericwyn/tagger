@@ -23,10 +23,10 @@ func (s *Store) CreateJob(ctx context.Context, job domain.Job) (domain.Job, erro
 	}
 	job.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO jobs(id, kind, state, library_id, title, detail, processed, total, succeeded, failed, error_text, created_at, updated_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO jobs(id, kind, state, library_id, title, detail, processed, total, succeeded, failed, error_text, payload_json, created_at, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Kind, job.State, job.LibraryID, job.Title, job.Detail, job.Processed, job.Total,
-		job.Succeeded, job.Failed, job.Error, formatTime(job.CreatedAt), formatTime(job.UpdatedAt))
+		job.Succeeded, job.Failed, job.Error, nonEmptyJSON(job.Payload), formatTime(job.CreatedAt), formatTime(job.UpdatedAt))
 	if err != nil {
 		return domain.Job{}, fmt.Errorf("insert job: %w", err)
 	}
@@ -47,7 +47,7 @@ func (s *Store) ClaimJob(ctx context.Context) (domain.Job, bool, error) {
 		UPDATE jobs SET state = ?, started_at = COALESCE(started_at, ?), updated_at = ?
 		WHERE id = (SELECT id FROM jobs WHERE state = ? ORDER BY created_at, id LIMIT 1)
 		RETURNING id, kind, state, library_id, title, detail, processed, total, succeeded, failed,
-		          error_text, created_at, started_at, completed_at, updated_at`,
+		          error_text, payload_json, created_at, started_at, completed_at, updated_at`,
 		domain.JobRunning, now, now, domain.JobWaiting)
 	job, err := scanJob(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -62,10 +62,10 @@ func (s *Store) ClaimJob(ctx context.Context) (domain.Job, bool, error) {
 func (s *Store) UpdateJob(ctx context.Context, job domain.Job) error {
 	job.UpdatedAt = s.now().UTC()
 	_, err := s.db.ExecContext(ctx, `
-		UPDATE jobs SET state=?, detail=?, processed=?, total=?, succeeded=?, failed=?, error_text=?,
+		UPDATE jobs SET state=?, detail=?, processed=?, total=?, succeeded=?, failed=?, error_text=?, payload_json=?,
 		started_at=?, completed_at=?, updated_at=? WHERE id=?`,
 		job.State, job.Detail, job.Processed, job.Total, job.Succeeded, job.Failed, job.Error,
-		nullTime(job.StartedAt), nullTime(job.CompletedAt), formatTime(job.UpdatedAt), job.ID)
+		nonEmptyJSON(job.Payload), nullTime(job.StartedAt), nullTime(job.CompletedAt), formatTime(job.UpdatedAt), job.ID)
 	return err
 }
 
@@ -75,7 +75,7 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, kind, state, library_id, title, detail, processed, total, succeeded, failed,
-		       error_text, created_at, started_at, completed_at, updated_at
+		       error_text, payload_json, created_at, started_at, completed_at, updated_at
 		FROM jobs ORDER BY created_at DESC, id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]domain.Job, error) {
 func (s *Store) Job(ctx context.Context, id string) (domain.Job, error) {
 	return scanJob(s.db.QueryRowContext(ctx, `
 		SELECT id, kind, state, library_id, title, detail, processed, total, succeeded, failed,
-		       error_text, created_at, started_at, completed_at, updated_at FROM jobs WHERE id=?`, id))
+		       error_text, payload_json, created_at, started_at, completed_at, updated_at FROM jobs WHERE id=?`, id))
 }
 
 func scanJob(row rowScanner) (domain.Job, error) {
@@ -103,7 +103,7 @@ func scanJob(row rowScanner) (domain.Job, error) {
 	var created, updated string
 	var started, completed sql.NullString
 	err := row.Scan(&job.ID, &job.Kind, &job.State, &job.LibraryID, &job.Title, &job.Detail,
-		&job.Processed, &job.Total, &job.Succeeded, &job.Failed, &job.Error,
+		&job.Processed, &job.Total, &job.Succeeded, &job.Failed, &job.Error, &job.Payload,
 		&created, &started, &completed, &updated)
 	if err != nil {
 		return domain.Job{}, err

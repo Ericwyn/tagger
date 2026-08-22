@@ -107,6 +107,17 @@ export interface Job {
   error?: string;
 }
 
+export interface MatchItem {
+  id: string;
+  jobId: string;
+  trackId: string;
+  state: 'review' | 'no_match' | 'failed';
+  candidates: MatchCandidate[];
+  selectedCandidateId?: string;
+  error?: string;
+  updatedAt?: string;
+}
+
 export interface Revision {
   id: string;
   trackId: string;

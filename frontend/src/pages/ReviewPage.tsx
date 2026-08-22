@@ -14,8 +14,8 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {listTracks} from '@/api';
-import type {MatchCandidate, Track} from '@/types';
+import {apiReadMode, createMatchJob, listMatchItems, listTracks, waitForJob} from '@/api';
+import type {Job, MatchCandidate, Track} from '@/types';
 
 interface ReviewPageProps {
   trackIds: string[];
@@ -37,22 +37,34 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [query, setQuery] = useState('');
+	const [job, setJob] = useState<Job>();
 
   useEffect(() => {
-    listTracks().then((allTracks) => {
+    listTracks().then(async (allTracks) => {
       const ids = trackIds.length ? new Set(trackIds) : new Set(allTracks.filter((track) => track.album === '安泊猜想').map((track) => track.id));
       const next = allTracks
-        .filter((track) => ids.has(track.id))
-        .map((track) => {
-          const candidate = candidatesFor(track)[0];
+        .filter((track) => ids.has(track.id));
+	  let candidateByTrack = new Map<string, MatchCandidate>();
+	  if (apiReadMode === 'real') {
+		const created = await createMatchJob(next.map((track) => track.id));
+		if (created) {
+		  setJob(created);
+		  const completed = await waitForJob(created.id);
+		  setJob(completed);
+		  const matchItems = await listMatchItems(created.id);
+		  candidateByTrack = new Map(matchItems.map((item) => [item.trackId, item.candidates[0]]).filter((entry): entry is [string, MatchCandidate] => Boolean(entry[1])));
+		}
+	  }
+	  const reviewed = next.map((track) => {
+		  const candidate = candidateByTrack.get(track.id) ?? candidatesFor(track)[0];
           return {
             track,
             candidate,
-            state: candidate.score >= 0.92 ? 'accepted' as const : 'review' as const,
-          };
-        });
-      setItems(next);
-      setActiveId(next[0]?.track.id);
+	            state: candidate.score >= 0.92 ? 'accepted' as const : 'review' as const,
+	          };
+	  });
+	  setItems(reviewed);
+	  setActiveId(reviewed[0]?.track.id);
       setLoading(false);
     });
   }, [trackIds]);
@@ -81,7 +93,7 @@ export function ReviewPage({trackIds, onBack, onComplete}: ReviewPageProps) {
       <header className="review-header">
         <button className="back-button" onClick={onBack}><ArrowLeft size={17} /> 返回曲库</button>
         <div>
-          <div className="eyebrow">BATCH REVIEW / JOB DRAFT</div>
+          <div className="eyebrow">BATCH REVIEW / {job ? job.id.toUpperCase() : 'JOB DRAFT'}</div>
           <h1>审核抓取结果</h1>
           <p>自动分析已完成。确认字段差异后才会创建写入任务。</p>
         </div>

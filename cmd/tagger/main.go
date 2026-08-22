@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -93,6 +94,50 @@ func main() {
 		}
 		total := libraryService.Library().TrackCount
 		return progress(total, total, total, 0, fmt.Sprintf("扫描完成，共索引 %d 首曲目", total))
+	})
+	jobManager.Register(domain.JobMatch, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
+		var payload struct {
+			TrackIDs    []string `json:"trackIds"`
+			ProviderIDs []string `json:"providerIds"`
+			Limit       int      `json:"limit"`
+		}
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return err
+		}
+		if payload.Limit <= 0 {
+			payload.Limit = 5
+		}
+		failed, succeeded := 0, 0
+		for index, trackID := range payload.TrackIDs {
+			track, err := libraryService.Track(trackID)
+			if err != nil {
+				failed++
+				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()})
+			} else {
+				result, searchErr := providerRegistry.Search(ctx, providers.Query{Title: track.Title, Artists: track.Artists, Album: track.Album, DurationSeconds: track.DurationSeconds}, payload.ProviderIDs, payload.Limit)
+				if searchErr != nil {
+					failed++
+					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()})
+				} else {
+					state := "review"
+					if len(result.Candidates) == 0 {
+						state = "no_match"
+						failed++
+					} else {
+						succeeded++
+					}
+					candidateJSON, _ := json.Marshal(result.Candidates)
+					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON})
+				}
+			}
+			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, fmt.Sprintf("已分析 %d/%d 首曲目", index+1, len(payload.TrackIDs))); err != nil {
+				return err
+			}
+		}
+		if failed > 0 {
+			return nil
+		}
+		return jobs.ErrNeedsReview
 	})
 	if err := jobManager.Start(context.Background()); err != nil {
 		logger.Error("start persistent job worker", "error", err)

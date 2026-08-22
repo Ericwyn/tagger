@@ -4,6 +4,7 @@ import type {
   Job,
   LibrarySummary,
   MatchCandidate,
+	MatchItem,
   ProviderConfig,
   RestorePreview,
   RestoreResult,
@@ -49,6 +50,16 @@ export async function waitForJob(jobId: string, timeoutMs = 5 * 60_000): Promise
 	await new Promise((resolve) => window.setTimeout(resolve, 350));
   }
   throw new Error('等待扫描任务超时');
+}
+
+export async function createMatchJob(trackIds: string[]): Promise<Job | null> {
+  if (apiReadMode === 'mock') return null;
+  return real.createMatchJob(trackIds);
+}
+
+export async function listMatchItems(jobId: string): Promise<MatchItem[]> {
+  if (apiReadMode === 'mock') return [];
+  return real.listMatchItems(jobId);
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {
