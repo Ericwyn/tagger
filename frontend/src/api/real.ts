@@ -9,10 +9,11 @@ import type {
   RestoreResult,
   Revision,
   Track,
-  TrackPatch,
+	TrackPatch,
 	WriteSelection,
 	BatchEditItem,
 	BatchEditOperation,
+	BatchEditSelection,
 	UpdateProvenance,
 } from '@/types';
 
@@ -156,11 +157,15 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
-	createBatchEditJob(items: BatchEditItem[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job> {
+	createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job> {
 	  return request<Job>('/api/v1/tracks/batch-edit', {
 		method: 'POST', headers: {'Content-Type': 'application/json'},
 		body: JSON.stringify({items, operations, sequenceTracks}),
 	  });
+	},
+
+	listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {
+	  return request<BatchEditItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/batch-edit-items`);
 	},
 
     async updateTrack(track: Track, patch: TrackPatch, provenance?: UpdateProvenance): Promise<WriteResult> {

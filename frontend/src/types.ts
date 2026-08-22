@@ -135,9 +135,21 @@ export interface BatchEditOperation {
   value: string;
 }
 
-export interface BatchEditItem {
+export interface BatchEditSelection {
   trackId: string;
   baseRevision: string;
+}
+
+export type BatchEditItemState = 'pending' | 'written' | 'failed';
+
+export interface BatchEditItem {
+  id: string;
+  jobId: string;
+  trackId: string;
+  state: BatchEditItemState;
+  error?: string;
+  diff: RevisionDiff[];
+  updatedAt?: string;
 }
 
 export interface Revision {

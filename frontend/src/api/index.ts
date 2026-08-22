@@ -15,6 +15,7 @@ import type {
 	WriteSelection,
 	BatchEditItem,
 	BatchEditOperation,
+	BatchEditSelection,
 } from '@/types';
 
 const configuredMode = import.meta.env.VITE_API_MODE;
@@ -70,9 +71,13 @@ export async function createWriteJob(matchJobId: string, items: WriteSelection[]
   return real.createWriteJob(matchJobId, items);
 }
 
-export async function createBatchEditJob(items: BatchEditItem[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job | null> {
+export async function createBatchEditJob(items: BatchEditSelection[], operations: BatchEditOperation[], sequenceTracks: boolean): Promise<Job | null> {
   if (apiReadMode === 'mock') return null;
   return real.createBatchEditJob(items, operations, sequenceTracks);
+}
+
+export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {
+  return apiReadMode === 'mock' ? Promise.resolve([]) : real.listBatchEditItems(jobId);
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch, provenance?: UpdateProvenance): Promise<Track> {

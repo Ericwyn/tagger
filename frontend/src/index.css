@@ -3151,6 +3151,7 @@ button:disabled {
 .job-kind.kind-match { color: var(--accent); }
 .job-kind.kind-scan { color: var(--blue); }
 .job-kind.kind-write { color: var(--success); }
+.job-kind.kind-batch_edit { color: var(--accent); }
 
 .job-copy {
   min-width: 0;
@@ -3305,6 +3306,119 @@ button:disabled {
   color: color-mix(in srgb, var(--paper) 73%, transparent);
   font-family: var(--mono);
   font-size: 8px;
+}
+
+.job-items {
+  margin-bottom: 18px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.job-items-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 11px 0 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.job-items-head small,
+.job-items-empty,
+.job-item-noop {
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: none;
+}
+
+.job-items-empty {
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  line-height: 1.5;
+}
+
+.job-item-list {
+  display: grid;
+  gap: 7px;
+}
+
+.job-item {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.job-item.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+}
+
+.job-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-item-head strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-item-head span {
+  flex: none;
+  color: var(--success);
+  font-family: var(--mono);
+  font-size: 8px;
+}
+
+.job-item.is-failed .job-item-head span {
+  color: var(--danger);
+}
+
+.job-item-error {
+  margin: 7px 0 0;
+  color: var(--danger);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.job-item-diff {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.job-item-diff p {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) 12px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 8px;
+}
+
+.job-item-diff em {
+  color: var(--muted);
+  font-style: normal;
+}
+
+.job-item-diff del,
+.job-item-diff ins {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-item-diff del {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.job-item-diff ins {
+  color: var(--accent);
+  text-decoration: none;
 }
 
 /* History */

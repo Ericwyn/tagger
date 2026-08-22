@@ -120,6 +120,14 @@ describe('real API client', () => {
 	});
   });
 
+  it('lists batch edit item snapshots for the job detail view', async () => {
+	const items = [{id: 'item-1', jobId: 'job-edit', trackId: 'trk-1', state: 'failed', error: 'revision conflict', diff: [{field: 'genres', operation: 'set', before: ['Pop'], after: ['Live']}]}];
+	const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: items}), {status: 200}));
+	const api = createRealAPI(fetcher);
+	await expect(api.listBatchEditItems('job/edit')).resolves.toEqual(items);
+	expect(fetcher).toHaveBeenCalledWith('/api/v1/jobs/job%2Fedit/batch-edit-items', expect.any(Object));
+  });
+
   it('writes an explicit patch guarded by the indexed revision', async () => {
     const fullTrack = {
       ...track,

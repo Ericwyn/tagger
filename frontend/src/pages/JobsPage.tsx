@@ -13,8 +13,8 @@ import {
   X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {apiReadMode, cancelJob, listJobs, retryJob, subscribeJobEvents} from '@/api';
-import type {Job} from '@/types';
+import {apiReadMode, cancelJob, listBatchEditItems, listJobs, listTracks, retryJob, subscribeJobEvents} from '@/api';
+import type {BatchEditItem, Job} from '@/types';
 
 interface JobsPageProps {
   onOpenReview: () => void;
@@ -37,10 +37,33 @@ const kindIcon = {
   batch_edit: Tags,
 };
 
+const batchItemStateText: Record<BatchEditItem['state'], string> = {
+  pending: '等待中',
+  written: '已写入',
+  failed: '失败',
+};
+
+const batchFieldText: Record<string, string> = {
+  album: '专辑',
+  albumArtists: '专辑艺术家',
+  genres: '风格',
+  year: '年份',
+  trackNumber: '音轨号',
+  trackTotal: '总音轨',
+};
+
+function formatBatchValue(value: unknown): string {
+  if (Array.isArray(value)) return value.length ? value.join(' / ') : '空';
+  if (value === undefined || value === null || value === '') return '空';
+  return String(value);
+}
+
 export function JobsPage({onOpenReview}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
 	const [actionError, setActionError] = useState('');
+	const [batchItems, setBatchItems] = useState<BatchEditItem[]>([]);
+	const [trackNames, setTrackNames] = useState<Map<string, string>>(new Map());
 
 	const refresh = () => listJobs().then((next) => {
 	  setJobs(next);
@@ -64,6 +87,29 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 	}, [selectedId]);
 
   const active = jobs.find((job) => job.id === selectedId);
+	const activeJobId = active?.id;
+	const activeJobKind = active?.kind;
+
+	useEffect(() => {
+	  if (apiReadMode === 'mock' || activeJobKind !== 'batch_edit' || !activeJobId) {
+		setBatchItems([]);
+		setTrackNames(new Map());
+		return;
+	  }
+	  let disposed = false;
+	  void listTracks().then((tracks) => {
+		if (!disposed) setTrackNames(new Map(tracks.map((track) => [track.id, track.fileName])));
+	  }).catch(() => undefined);
+	  const loadItems = () => void listBatchEditItems(activeJobId).then((items) => {
+		if (!disposed) setBatchItems(items);
+	  }).catch(() => undefined);
+	  loadItems();
+	  const timer = window.setInterval(loadItems, 1000);
+	  return () => {
+		disposed = true;
+		window.clearInterval(timer);
+	  };
+	}, [activeJobId, activeJobKind]);
 
   return (
     <div className="section-page jobs-page">
@@ -115,7 +161,7 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
         </section>
 
         {active && (
-          <aside className="job-detail">
+		  <aside className="job-detail">
             <div className="eyebrow">JOB / {active.id.toUpperCase()}</div>
             <h2>{active.title}</h2>
             <p>{active.detail}</p>
@@ -136,6 +182,33 @@ export function JobsPage({onOpenReview}: JobsPageProps) {
 			<code>{active.startedAt}　{active.detail}</code>
 			{active.error && <code>{active.error}</code>}
             </div>
+			{active.kind === 'batch_edit' && (
+			  <section className="job-items">
+				<div className="job-items-head"><span>逐文件结果</span><small>{batchItems.length} / {active.total} 已返回</small></div>
+				{batchItems.length === 0 ? (
+				  <div className="job-items-empty">任务开始后，这里会显示每个文件的写入状态和字段差异。</div>
+				) : (
+				  <div className="job-item-list">
+					{batchItems.map((item) => (
+					  <article className={cn('job-item', `is-${item.state}`)} key={item.id || item.trackId}>
+						<div className="job-item-head">
+						  <strong>{trackNames.get(item.trackId) ?? item.trackId}</strong>
+						  <span>{batchItemStateText[item.state]}</span>
+						</div>
+						{item.error && <p className="job-item-error">{item.error}</p>}
+						{item.diff.length > 0 ? (
+						  <div className="job-item-diff">
+							{item.diff.map((diff, index) => (
+							  <p key={`${diff.field}-${index}`}><em>{batchFieldText[diff.field] ?? diff.field}</em><del>{formatBatchValue(diff.before)}</del><b>→</b><ins>{formatBatchValue(diff.after)}</ins></p>
+							))}
+						  </div>
+						) : item.state === 'written' ? <small className="job-item-noop">没有字段变化</small> : null}
+					  </article>
+					))}
+				  </div>
+				)}
+			  </section>
+			)}
             {active.state === 'review' && (
               <button className="primary-button full-button" onClick={onOpenReview}>
                 <Sparkles size={15} /> 打开审核页
