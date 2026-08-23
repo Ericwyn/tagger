@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
+	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/store"
 )
 
 type artworkTestStrategy struct{}
@@ -46,6 +50,102 @@ func TestPatchFromCandidateDistinguishesOmittedAndEmptyFieldLists(t *testing.T) 
 func TestFormatMatchProgressIncludesProviderAndCandidateCounts(t *testing.T) {
 	if got := formatMatchProgress(3, 10, 9, 14); got != "已分析 3/10 首曲目 · 已查询 9 次数据源 · 返回 14 个候选" {
 		t.Fatalf("progress = %q", got)
+	}
+}
+
+func TestFinalizeMatchJobAfterWriteClosesCompletedReview(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-finalize", Kind: domain.JobMatch, State: domain.JobReview,
+		Title: "批量抓取元数据", Detail: "等待审核", Total: 3, Processed: 3, Succeeded: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for trackID, state := range map[string]string{"written-1": "written", "written-2": "written", "skipped-1": "skipped"} {
+		if err := repository.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: trackID, State: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := finalizeMatchJobAfterWrite(context.Background(), manager, repository, matchJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Get(context.Background(), matchJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != domain.JobSucceeded || updated.Processed != 3 || updated.Succeeded != 3 || updated.Failed != 0 || !strings.Contains(updated.Detail, "已写入 2 首") || !strings.Contains(updated.Detail, "跳过 1 首") {
+		t.Fatalf("finalized match job = %#v", updated)
+	}
+}
+
+func TestFinalizeMatchJobAfterWriteKeepsReviewWhenItemsRemain(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-pending", Kind: domain.JobMatch, State: domain.JobReview,
+		Title: "批量抓取元数据", Detail: "等待审核", Total: 2, Processed: 2, Succeeded: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for trackID, state := range map[string]string{"written-1": "written", "review-1": "review"} {
+		if err := repository.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: trackID, State: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := finalizeMatchJobAfterWrite(context.Background(), manager, repository, matchJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Get(context.Background(), matchJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != domain.JobReview {
+		t.Fatalf("pending review should remain open, got %#v", updated)
+	}
+}
+
+func TestFinalizeMatchJobAfterWriteMarksFailuresPartial(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-partial", Kind: domain.JobMatch, State: domain.JobReview,
+		Title: "批量抓取元数据", Detail: "等待审核", Total: 2, Processed: 2, Succeeded: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for trackID, state := range map[string]string{"written-1": "written", "failed-1": "write_failed"} {
+		if err := repository.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: trackID, State: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := finalizeMatchJobAfterWrite(context.Background(), manager, repository, matchJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Get(context.Background(), matchJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != domain.JobPartial || updated.Succeeded != 1 || updated.Failed != 1 || !strings.Contains(updated.Detail, "1 首失败") {
+		t.Fatalf("partial match job = %#v", updated)
 	}
 }
 

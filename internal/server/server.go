@@ -1009,30 +1009,45 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 			return
 		}
 	}
-	payload, _ := json.Marshal(struct {
-		MatchJobID string           `json:"matchJobId"`
-		Items      []writeSelection `json:"items"`
-	}{matchJob.ID, request.Items})
-	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "批量安全写入标签", Detail: "等待写入 worker", Total: len(request.Items), Payload: string(payload)})
-	if err != nil {
-		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
-		return
-	}
+	// Mark review items as pending before waking the write worker. Enqueue
+	// signals the worker immediately; doing this in the opposite order can let
+	// a fast worker finish and then have the request overwrite `written` back
+	// to `write_pending`.
+	previousItems := make([]store.MatchItem, 0, len(request.Items))
 	for _, selection := range request.Items {
 		item, itemErr := s.store.MatchItem(ctx, matchJob.ID, selection.TrackID)
 		if itemErr != nil {
 			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
 			return
 		}
+		previousItems = append(previousItems, item)
+	}
+	for index, selection := range request.Items {
+		item := previousItems[index]
 		item.State = "write_pending"
 		item.SelectedCandidateID = selection.CandidateID
 		item.ReviewFields = append([]string(nil), selection.Fields...)
 		item.ReviewArtwork = selection.Artwork
 		item.ReviewArtworkMaxSize = selection.ArtworkMaxSize
 		if itemErr := s.store.UpsertMatchItem(ctx, item); itemErr != nil {
+			for _, previous := range previousItems[:index] {
+				_ = s.store.UpsertMatchItem(ctx, previous)
+			}
 			s.writeError(c, consts.StatusInternalServerError, "match_state_update_failed", itemErr.Error())
 			return
 		}
+	}
+	payload, _ := json.Marshal(struct {
+		MatchJobID string           `json:"matchJobId"`
+		Items      []writeSelection `json:"items"`
+	}{matchJob.ID, request.Items})
+	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "批量安全写入标签", Detail: "等待写入 worker", Total: len(request.Items), Payload: string(payload)})
+	if err != nil {
+		for _, previous := range previousItems {
+			_ = s.store.UpsertMatchItem(ctx, previous)
+		}
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
 	}
 	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
 }

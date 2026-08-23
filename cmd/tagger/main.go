@@ -385,6 +385,9 @@ func main() {
 				}
 			}
 		}
+		if err := finalizeMatchJobAfterWrite(ctx, jobManager, dataStore, payload.MatchJobID); err != nil {
+			return fmt.Errorf("finalize match job after write: %w", err)
+		}
 		return nil
 	})
 	jobManager.Register(domain.JobBatchEdit, newBatchEditHandler(libraryService, tagWriter, dataStore))
@@ -412,6 +415,78 @@ func main() {
 
 func formatMatchProgress(processed, total, providerQueries, candidateCount int) string {
 	return fmt.Sprintf("已分析 %d/%d 首曲目 · 已查询 %d 次数据源 · 返回 %d 个候选", processed, total, providerQueries, candidateCount)
+}
+
+// finalizeMatchJobAfterWrite closes the parent review workflow once its
+// selected write items have reached terminal states. The write job remains the
+// authoritative progress record for the actual file operations; this update
+// only prevents the parent match job from staying in "待审核" forever after
+// every item has been handled.
+func finalizeMatchJobAfterWrite(ctx context.Context, manager *jobs.Manager, dataStore *store.Store, matchJobID string) error {
+	if manager == nil || dataStore == nil || strings.TrimSpace(matchJobID) == "" {
+		return nil
+	}
+	matchJob, err := manager.Get(ctx, matchJobID)
+	if err != nil {
+		return err
+	}
+	if matchJob.Kind != domain.JobMatch || (matchJob.State != domain.JobReview && matchJob.State != domain.JobPartial) {
+		return nil
+	}
+	items, err := dataStore.ListMatchItems(ctx, matchJobID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	pending := false
+	written := 0
+	skipped := 0
+	failures := 0
+	for _, item := range items {
+		switch item.State {
+		case "written":
+			written++
+		case "skipped":
+			skipped++
+		case "failed", "no_match", "write_failed", "artwork_failed":
+			failures++
+		case "review", "accepted", "write_pending":
+			pending = true
+		default:
+			// Unknown future states are kept open rather than prematurely marking
+			// the parent task complete.
+			pending = true
+		}
+	}
+	if pending {
+		return nil
+	}
+	if matchJob.Failed > failures {
+		// Preserve failures from an earlier matching pass even if an old
+		// database snapshot does not contain a corresponding match item.
+		failures = matchJob.Failed
+	}
+	if matchJob.Total == 0 {
+		matchJob.Total = len(items)
+	}
+	matchJob.Processed = matchJob.Total
+	matchJob.Failed = failures
+	matchJob.Succeeded = max(0, matchJob.Total-failures)
+	matchJob.CompletedAt = time.Now().UTC()
+	if failures > 0 {
+		matchJob.State = domain.JobPartial
+		matchJob.Detail = fmt.Sprintf("审核完成：已写入 %d 首，%d 首失败", written, failures)
+	} else {
+		matchJob.State = domain.JobSucceeded
+		matchJob.Detail = fmt.Sprintf("审核完成：已写入 %d 首", written)
+	}
+	if skipped > 0 {
+		matchJob.Detail += fmt.Sprintf("，跳过 %d 首", skipped)
+	}
+	return manager.Update(ctx, matchJob)
 }
 
 func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.Writer, dataStore *store.Store) jobs.Handler {

@@ -100,6 +100,17 @@ func (m *Manager) List(ctx context.Context, limit int) ([]domain.Job, error) {
 }
 func (m *Manager) Get(ctx context.Context, id string) (domain.Job, error) { return m.repo.Job(ctx, id) }
 
+// Update persists an externally completed job transition and publishes the
+// same snapshot to subscribers. Workers use this when one durable job (for
+// example, a write job) also advances the state of its parent workflow.
+func (m *Manager) Update(ctx context.Context, job domain.Job) error {
+	if err := m.repo.UpdateJob(ctx, job); err != nil {
+		return err
+	}
+	m.publish(job)
+	return nil
+}
+
 func (m *Manager) HasActive(ctx context.Context) (bool, error) {
 	items, err := m.repo.ListJobs(ctx, 200)
 	if err != nil {
