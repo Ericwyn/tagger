@@ -988,6 +988,13 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	}
 }
 
+func TestRevisionResponseUsesNonNilArraysForLegacySnapshots(t *testing.T) {
+	response := toRevisionResponse(domain.Revision{ID: "legacy-revision"}, "current")
+	if response.Fields == nil || response.Diff == nil {
+		t.Fatalf("legacy revision response arrays must be non-nil: %#v", response)
+	}
+}
+
 func TestArtworkAPIRejectsInvalidImagesBeforeWriting(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]

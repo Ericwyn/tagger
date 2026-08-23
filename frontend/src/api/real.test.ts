@@ -459,6 +459,27 @@ describe('real API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/v1/revisions', expect.any(Object));
   });
 
+  it('normalizes legacy null revision arrays and restore preview warnings', async () => {
+    const legacyRevision = {
+      id: 'revlog-legacy', trackId: 'trk-1', trackTitle: 'Song', fileName: 'Song.flac',
+      action: '替换封面', source: '手工编辑', time: '2026-08-20 12:00', fields: null, diff: null,
+      coverTone: 'moss',
+    };
+    const legacyPreview = {
+      revisionId: 'revlog-legacy', trackId: 'trk-1', target: 'before',
+      preview: {baseRevision: 'current-rev', currentRevision: 'current-rev', dryRun: true, changed: true, diff: null, warnings: null},
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: [legacyRevision]}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: legacyPreview}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.listRevisions()).resolves.toEqual([expect.objectContaining({fields: [], diff: []})]);
+    await expect(api.previewRevisionRestore('revlog-legacy', 'current-rev')).resolves.toEqual(expect.objectContaining({
+      preview: expect.objectContaining({diff: [], warnings: []}),
+    }));
+  });
+
   it('requests a bounded revision history window when configured', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: []}), {status: 200}));
     const api = createRealAPI(fetcher);

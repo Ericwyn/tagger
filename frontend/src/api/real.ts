@@ -8,8 +8,9 @@ import type {
 	ProviderConfig,
 	ProviderTestResponse,
   RestorePreview,
-  RestoreResult,
+	RestoreResult,
 	Revision,
+	RevisionDiff,
 	RawTagsResponse,
 	Track,
 	TrackPatch,
@@ -147,6 +148,40 @@ export function normalizeLibrary(library: LibrarySummary): LibrarySummary {
     trackCount: typeof raw.trackCount === 'number' ? raw.trackCount : 0,
     folderCount: typeof raw.folderCount === 'number' ? raw.folderCount : folders.length,
     folders,
+  };
+}
+
+function normalizeRevisionDiff(value: unknown): RevisionDiff[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map((item) => ({
+      field: stringValue(item.field),
+      operation: item.operation === 'delete' || item.operation === 'keep' ? item.operation : 'set',
+      before: item.before,
+      after: item.after,
+    }));
+}
+
+export function normalizeRevision(revision: Revision): Revision {
+  const raw = revision as Revision & Record<string, unknown>;
+  return {
+    ...revision,
+    fields: stringArray(raw.fields),
+    diff: normalizeRevisionDiff(raw.diff),
+  };
+}
+
+function normalizeRestorePreview(value: RestorePreview): RestorePreview {
+  const raw = value as RestorePreview & {preview?: Record<string, unknown> | null};
+  const preview = raw.preview ?? {};
+  return {
+    ...value,
+    preview: {
+      ...(value.preview ?? {}),
+      diff: normalizeRevisionDiff(preview.diff),
+      warnings: stringArray(preview.warnings),
+    },
   };
 }
 
@@ -399,7 +434,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 
     listRevisions(limit = 100): Promise<Revision[]> {
       const query = limit > 0 && limit < 100 ? `?limit=${limit}` : '';
-      return request<Revision[]>(`/api/v1/revisions${query}`);
+      return request<Revision[]>(`/api/v1/revisions${query}`).then((items) => (items ?? []).map(normalizeRevision));
     },
 
     previewRevisionRestore(revisionId: string, baseRevision: string): Promise<RestorePreview> {
@@ -407,7 +442,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
         body: JSON.stringify({baseRevision, target: 'before'}),
-      });
+      }).then(normalizeRestorePreview);
     },
 
     restoreRevision(revisionId: string, baseRevision: string): Promise<RestoreResult> {

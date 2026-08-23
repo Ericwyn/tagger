@@ -87,7 +87,31 @@ describe('HistoryPage restore flow', () => {
 	await userEvent.setup().click(restoreButton);
 	await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(artworkRevision));
 	expect(screen.getByRole('deletion')).toHaveTextContent('JPEG · 600×600');
-	expect(screen.getByRole('insertion')).toHaveTextContent('JPEG · 1200×1200');
+    expect(screen.getByRole('insertion')).toHaveTextContent('JPEG · 1200×1200');
+  });
+
+  it('keeps legacy restore previews with null optional arrays renderable', async () => {
+    const legacyPreview = {
+      ...preview,
+      preview: {
+        ...preview.preview,
+        diff: null as unknown as RestorePreview['preview']['diff'],
+        warnings: null as unknown as RestorePreview['preview']['warnings'],
+      },
+    };
+    vi.mocked(listRevisions).mockResolvedValue([{
+      ...revision,
+      fields: ['artwork'],
+      diff: null as unknown as Revision['diff'],
+    }]);
+    vi.mocked(previewRevisionRestore).mockResolvedValue(legacyPreview);
+    const user = userEvent.setup();
+    render(<HistoryPage onNotice={vi.fn()} />);
+
+    await user.click(await screen.findByRole('button', {name: '恢复到修改前…'}));
+    await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(expect.objectContaining({id: revision.id})));
+    expect(screen.getByText('将当前文件恢复到这次修改之前')).toBeInTheDocument();
+    expect(screen.queryByText('null')).not.toBeInTheDocument();
   });
 
   it('filters revisions by source and recent date', async () => {

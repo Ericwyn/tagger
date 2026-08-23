@@ -1712,11 +1712,19 @@ func (s *Server) handleRevision(ctx context.Context, c *app.RequestContext) {
 }
 
 func toRevisionResponse(revision domain.Revision, currentRevision string) revisionResponse {
+	fields := revision.Fields
+	if fields == nil {
+		fields = []string{}
+	}
+	diff := revision.Diff
+	if diff == nil {
+		diff = []domain.RevisionDiff{}
+	}
 	return revisionResponse{
 		ID: revision.ID, TrackID: revision.TrackID, TrackTitle: revision.TrackTitle,
 		FileName: revision.FileName, Action: revision.Action, Source: revision.Source,
-		Time: revision.CreatedAt.Local().Format("2006-01-02 15:04"), Fields: revision.Fields,
-		Diff: revision.Diff, CoverTone: revision.CoverTone, BaseRevision: revision.BaseRevision,
+		Time: revision.CreatedAt.Local().Format("2006-01-02 15:04"), Fields: fields,
+		Diff: diff, CoverTone: revision.CoverTone, BaseRevision: revision.BaseRevision,
 		ResultRevision: revision.ResultRevision, CurrentRevision: currentRevision,
 		BeforeSidecar: toSidecarResponse(revision.BeforeSidecar), AfterSidecar: toSidecarResponse(revision.AfterSidecar),
 	}
@@ -1812,7 +1820,10 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		// Artwork-only and sidecar-only revisions still need the audio revision
 		// guard, but must not interpret an empty tag snapshot as “delete every
 		// tag”. The subsequent asset writer performs the real current-file check.
-		result = filewrite.Result{BaseRevision: request.BaseRevision, CurrentRevision: request.BaseRevision, DryRun: dryRun}
+		result = filewrite.Result{
+			BaseRevision: request.BaseRevision, CurrentRevision: request.BaseRevision,
+			DryRun: dryRun, Diff: []filewrite.FieldDiff{}, Warnings: []string{},
+		}
 	}
 	var artworkResult *filewrite.ArtworkResult
 	if targetArtwork, hasArtwork := revisionArtworkTarget(revision, request.Target); hasArtwork {

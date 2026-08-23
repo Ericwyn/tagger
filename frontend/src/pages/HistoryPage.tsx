@@ -67,11 +67,13 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
       .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
   });
   const active = visibleRevisions.find((revision) => revision.id === activeId) ?? visibleRevisions[0];
+	const activeFields = Array.isArray(active?.fields) ? active.fields : [];
 	const recordedDiff = active?.diff?.length
     ? active.diff
-    : active?.fields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined})) ?? [];
-  const activeDiff = restorePreview?.preview.diff ?? recordedDiff;
-	const hasRestorableFields = Boolean(active?.fields.length);
+	    : activeFields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined}));
+	const activeDiff = Array.isArray(restorePreview?.preview?.diff) ? restorePreview.preview.diff : recordedDiff;
+	const restoreWarnings = Array.isArray(restorePreview?.preview?.warnings) ? restorePreview.preview.warnings : [];
+	const hasRestorableFields = activeFields.length > 0;
 
 	const buildRestorePreview = async () => {
 	  if (!active) return;
@@ -163,7 +165,7 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
                 <small>{revision.action}</small>
                 <em>{revision.source} · {revision.time}</em>
               </span>
-              <span className="field-count">{revision.fields.length} 字段</span>
+              <span className="field-count">{Array.isArray(revision.fields) ? revision.fields.length : 0} 字段</span>
               <ChevronRight size={16} />
               {index < visibleRevisions.length - 1 && <i className="timeline-line" />}
             </button>
@@ -202,7 +204,7 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
                 </div>
               ))}
             </div>
-			{restorePreview?.preview.warnings.map((warning) => <p className="restore-warning" key={warning}>{warning}</p>)}
+			{restoreWarnings.map((warning) => <p className="restore-warning" key={warning}>{warning}</p>)}
 			{restoreError && <p className="restore-error">{restoreError}</p>}
             <div className="integrity-note">
               <Check size={15} />

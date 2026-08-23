@@ -412,17 +412,37 @@ func scanRevision(row rowScanner) (domain.Revision, error) {
 	if err != nil {
 		return domain.Revision{}, err
 	}
-	if err := json.Unmarshal(fieldsJSON, &revision.Fields); err != nil {
+	if len(fieldsJSON) == 0 || string(fieldsJSON) == "null" {
+		revision.Fields = []string{}
+	} else if err := json.Unmarshal(fieldsJSON, &revision.Fields); err != nil {
 		return domain.Revision{}, err
 	}
-	if err := json.Unmarshal(diffJSON, &revision.Diff); err != nil {
+	if revision.Fields == nil {
+		revision.Fields = []string{}
+	}
+	if len(diffJSON) == 0 || string(diffJSON) == "null" {
+		revision.Diff = []domain.RevisionDiff{}
+	} else if err := json.Unmarshal(diffJSON, &revision.Diff); err != nil {
 		return domain.Revision{}, err
 	}
-	if err := json.Unmarshal(beforeJSON, &revision.BeforeTags); err != nil {
+	if revision.Diff == nil {
+		revision.Diff = []domain.RevisionDiff{}
+	}
+	if len(beforeJSON) == 0 || string(beforeJSON) == "null" {
+		revision.BeforeTags = map[string][]string{}
+	} else if err := json.Unmarshal(beforeJSON, &revision.BeforeTags); err != nil {
 		return domain.Revision{}, err
 	}
-	if err := json.Unmarshal(afterJSON, &revision.AfterTags); err != nil {
+	if revision.BeforeTags == nil {
+		revision.BeforeTags = map[string][]string{}
+	}
+	if len(afterJSON) == 0 || string(afterJSON) == "null" {
+		revision.AfterTags = map[string][]string{}
+	} else if err := json.Unmarshal(afterJSON, &revision.AfterTags); err != nil {
 		return domain.Revision{}, err
+	}
+	if revision.AfterTags == nil {
+		revision.AfterTags = map[string][]string{}
 	}
 	if err := unmarshalSidecarSnapshot(beforeSidecarJSON, &revision.BeforeSidecar); err != nil {
 		return domain.Revision{}, err
