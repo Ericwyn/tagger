@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Tagger monochrome mark</title>
+  <desc id="desc">A monochrome solid vinyl record with a center hole and a metadata label.</desc>
+  <style>
+    .ink { fill: #191a17; }
+    .paper { fill: #fffefa; }
+    @media (prefers-color-scheme: dark) {
+      .ink { fill: #f0eee5; }
+      .paper { fill: #181916; }
+    }
+  </style>
+  <circle class="ink" cx="32" cy="32" r="26"/>
+  <circle class="paper" cx="32" cy="32" r="10"/>
+  <rect class="paper" x="22" y="12.5" width="20" height="6" rx="3"/>
+</svg>

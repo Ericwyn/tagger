@@ -168,6 +168,9 @@ func (s *Server) routes() {
 
 	s.h.GET("/", s.handleIndex)
 	s.h.GET("/assets/*filepath", s.handleAsset)
+	s.h.GET("/favicon.ico", s.handlePublicAsset)
+	s.h.GET("/favicon.svg", s.handlePublicAsset)
+	s.h.GET("/brand/*filepath", s.handlePublicAsset)
 	s.h.NoRoute(s.handleSPAFallback)
 }
 
@@ -2804,6 +2807,15 @@ func (s *Server) handleAsset(_ context.Context, c *app.RequestContext) {
 	s.serveFrontendFile(c, "assets/"+path, true)
 }
 
+func (s *Server) handlePublicAsset(_ context.Context, c *app.RequestContext) {
+	path := strings.TrimPrefix(string(c.Request.URI().Path()), "/")
+	if path == "" || strings.Contains(path, "..") || strings.ContainsRune(path, '\x00') {
+		s.writeError(c, consts.StatusNotFound, "not_found", "资源不存在")
+		return
+	}
+	s.serveFrontendFile(c, path, false)
+}
+
 func (s *Server) handleSPAFallback(_ context.Context, c *app.RequestContext) {
 	path := string(c.Request.URI().Path())
 	if string(c.Method()) != consts.MethodGet ||
@@ -2832,6 +2844,8 @@ func (s *Server) serveFrontendFile(c *app.RequestContext, name string, immutable
 		c.Header("Cache-Control", "no-cache")
 	} else if immutable {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		c.Header("Cache-Control", "no-cache")
 	}
 	c.Data(consts.StatusOK, contentType, data)
 }

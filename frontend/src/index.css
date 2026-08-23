@@ -318,25 +318,12 @@ button:disabled {
 }
 
 .brand-mark {
-  display: flex;
-  align-items: flex-end;
-  gap: 3px;
+  display: block;
+  flex: 0 0 auto;
   width: 31px;
   height: 31px;
-  padding: 5px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
+  color: var(--ink);
 }
-
-.brand-mark span {
-  display: block;
-  width: 5px;
-  background: var(--paper);
-}
-
-.brand-mark span:nth-child(1) { height: 8px; }
-.brand-mark span:nth-child(2) { height: 19px; background: var(--accent); }
-.brand-mark span:nth-child(3) { height: 13px; }
 
 .brand-block strong {
   display: block;

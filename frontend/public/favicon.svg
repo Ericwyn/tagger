@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Tagger">
+  <style>
+    .disc { fill: #191a17; }
+    .hole { fill: #fffefa; }
+    .label { fill: #e84b2c; }
+    @media (prefers-color-scheme: dark) {
+      .disc { fill: #f0eee5; }
+      .hole { fill: #181916; }
+      .label { fill: #ff6748; }
+    }
+  </style>
+  <circle class="disc" cx="32" cy="32" r="26"/>
+  <circle class="hole" cx="32" cy="32" r="10"/>
+  <rect class="label" x="22" y="12.5" width="20" height="6" rx="3"/>
+</svg>

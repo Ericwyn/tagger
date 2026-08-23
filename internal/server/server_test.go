@@ -131,6 +131,18 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	if asset.Code != 200 || asset.Result().Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
 		t.Fatalf("asset = %d cache=%q", asset.Code, asset.Result().Header.Get("Cache-Control"))
 	}
+	faviconICO := ut.PerformRequest(s.h.Engine, "GET", "/favicon.ico", nil)
+	if faviconICO.Code != 200 || faviconICO.Result().Header.Get("Content-Type") != "image/vnd.microsoft.icon" || faviconICO.Result().Header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("favicon ico = %d type=%q cache=%q", faviconICO.Code, faviconICO.Result().Header.Get("Content-Type"), faviconICO.Result().Header.Get("Cache-Control"))
+	}
+	faviconSVG := ut.PerformRequest(s.h.Engine, "GET", "/favicon.svg", nil)
+	if faviconSVG.Code != 200 || faviconSVG.Result().Header.Get("Content-Type") != "image/svg+xml" || faviconSVG.Result().Header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("favicon svg = %d type=%q cache=%q", faviconSVG.Code, faviconSVG.Result().Header.Get("Content-Type"), faviconSVG.Result().Header.Get("Cache-Control"))
+	}
+	brand := ut.PerformRequest(s.h.Engine, "GET", "/brand/tagger-mark.svg", nil)
+	if brand.Code != 200 || brand.Result().Header.Get("Content-Type") != "image/svg+xml" || brand.Result().Header.Get("Cache-Control") != "no-cache" {
+		t.Fatalf("brand = %d type=%q cache=%q", brand.Code, brand.Result().Header.Get("Content-Type"), brand.Result().Header.Get("Cache-Control"))
+	}
 	spa := ut.PerformRequest(s.h.Engine, "GET", "/library/album", nil, ut.Header{Key: "Accept", Value: "text/html"})
 	if spa.Code != 200 || spa.Body.String() != "<main>Tagger</main>" {
 		t.Fatalf("spa = %d %s", spa.Code, spa.Body.String())
@@ -1061,8 +1073,11 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	frontend := fstest.MapFS{
-		"index.html":    &fstest.MapFile{Data: []byte("<main>Tagger</main>")},
-		"assets/app.js": &fstest.MapFile{Data: []byte("console.log('tagger')")},
+		"index.html":            &fstest.MapFile{Data: []byte("<main>Tagger</main>")},
+		"assets/app.js":         &fstest.MapFile{Data: []byte("console.log('tagger')")},
+		"favicon.ico":           &fstest.MapFile{Data: []byte("ico")},
+		"favicon.svg":           &fstest.MapFile{Data: []byte("<svg/>")},
+		"brand/tagger-mark.svg": &fstest.MapFile{Data: []byte("<svg/>")},
 	}
 	registry := providers.NewRegistry(serverProvider{})
 	return New("127.0.0.1:0", service, writer, registry, dataStore, fs.FS(frontend), "test-version", serverEngine{}.Version())

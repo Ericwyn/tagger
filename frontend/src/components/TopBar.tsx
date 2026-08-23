@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {GlobalPlayer} from '@/components/GlobalPlayer';
+import {TaggerMark} from '@/components/TaggerMark';
 import type {PageID, Track} from '@/types';
 
 interface TopBarProps {
@@ -28,11 +29,7 @@ export function TopBar({page, onNavigate, playerTrack, playerPlaying, onPlayerPl
   return (
     <header className="top-bar">
       <button className="brand-block" onClick={() => onNavigate('library')} aria-label="返回曲库">
-        <span className="brand-mark">
-          <span />
-          <span />
-          <span />
-        </span>
+        <TaggerMark className="brand-mark" />
         <span>
           <strong>TAGGER</strong>
           <small>MUSIC ARCHIVE / 01</small>
