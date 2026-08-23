@@ -4,8 +4,8 @@ import {
   Archive,
   FolderTree,
   LoaderCircle,
-  Menu,
   MoreHorizontal,
+  PanelRightOpen,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -851,7 +851,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
       <section className="library-workspace">
         <div className="workspace-titlebar">
-          <button className="mobile-panel-button" title="打开目录" onClick={() => setMobileSidebar(true)}>
+          <button className="mobile-panel-button" title="打开目录" aria-label="打开目录" onClick={() => { setMobileSidebar(true); setMobileInspector(false); }}>
             <FolderTree size={18} />
           </button>
           <div>
@@ -960,8 +960,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
               </label>
             </div>
           </div>
-          <button className="mobile-panel-button" title="打开曲目详情" onClick={() => setMobileInspector(true)}>
-            <Menu size={18} />
+          <button className="mobile-panel-button" title="打开曲目详情" aria-label="打开曲目详情" onClick={() => { setMobileInspector(true); setMobileSidebar(false); }}>
+            <PanelRightOpen size={18} />
           </button>
         </div>
 
@@ -973,6 +973,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
           onSelectTrack={(track) => {
             setActiveTrackId(track.id);
             setMobileInspector(true);
+            setMobileSidebar(false);
           }}
           onToggleTrack={toggleTrack}
           onToggleAll={toggleAll}

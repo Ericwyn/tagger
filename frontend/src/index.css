@@ -6693,7 +6693,7 @@ button:disabled {
   }
 
   .library-page {
-    grid-template-columns: minmax(490px, 1fr) 390px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .global-player {
@@ -6726,6 +6726,24 @@ button:disabled {
 
   .workspace-actions-menu {
     display: block;
+  }
+
+  .track-inspector {
+    position: fixed;
+    z-index: 75;
+    top: 68px;
+    right: 0;
+    bottom: 0;
+    width: min(430px, 94vw);
+    background: var(--paper-2);
+    border-left: 1px solid var(--ink);
+    box-shadow: var(--shadow);
+    transform: translateX(102%);
+    transition: transform 220ms ease;
+  }
+
+  .track-inspector.is-mobile-open {
+    transform: translateX(0);
   }
 
   .track-inspector {

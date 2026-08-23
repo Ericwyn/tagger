@@ -170,4 +170,18 @@ describe('LibraryPage active library boundary', () => {
     expect(screen.getByRole('button', {name: '取消全选'})).toBeInTheDocument();
     expect(api.listTrackPage).toHaveBeenCalled();
   });
+
+  it('opens and closes the track inspector from the compact toolbar', async () => {
+    const user = userEvent.setup();
+    const {container} = render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+
+    await screen.findByText('第一首');
+    const inspector = container.querySelector('.track-inspector');
+    expect(inspector).not.toHaveClass('is-mobile-open');
+
+    await user.click(screen.getByRole('button', {name: '打开曲目详情'}));
+    expect(inspector).toHaveClass('is-mobile-open');
+    await user.click(screen.getByRole('button', {name: '关闭详情'}));
+    expect(inspector).not.toHaveClass('is-mobile-open');
+  });
 });
