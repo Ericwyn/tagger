@@ -1,4 +1,8 @@
-# Tagger
+<p align="center">
+  <img src="frontend/public/brand/tagger-mark.svg" alt="Tagger logo" width="96" />
+</p>
+
+<h1 align="center">Tagger</h1>
 
 > 面向个人音乐档案的本地元数据工作台：浏览、匹配、审核，然后安全地写回音乐文件。
 
@@ -59,6 +63,49 @@ flowchart LR
 - **任务中心**：扫描、抓取、写入和批量编辑的持久化状态；显示处理进度、失败原因、取消和重试入口。
 - **历史**：按曲目查看字段 diff、标签快照和封面 blob，先预览再恢复，恢复本身也会产生新的审计记录。
 - **设置**：曲库注册与切换、数据源启用/配置/测试、主题字体、历史保留策略、封面占位和安全写入开关。
+
+#### 界面预览
+
+下面是当前工作台的代表性页面。截图只用于快速理解操作流程，实际能力以运行中的界面和上方功能说明为准；图片已统一压缩到适合文档阅读的尺寸。
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/曲库列表.png" alt="曲库列表：按目录浏览、筛选和检查音乐标签" width="100%" />
+      <br />
+      <sub><strong>曲库列表</strong> · 按目录浏览、筛选和检查音乐标签</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/任务中心.png" alt="任务中心：追踪扫描、匹配与写入任务进度" width="100%" />
+      <br />
+      <sub><strong>任务中心</strong> · 追踪扫描、匹配与写入任务进度</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/任务结果审核页.png" alt="审核结果页：逐字段审核候选值后再创建写入任务" width="100%" />
+      <br />
+      <sub><strong>审核结果页</strong> · 逐字段审核候选值后再创建写入任务</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/查询结果页.png" alt="查询结果页：查看多数据源候选、封面与歌词" width="100%" />
+      <br />
+      <sub><strong>查询结果页</strong> · 查看多数据源候选、封面与歌词</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/设置-数据源.png" alt="数据源设置：配置 MusicBrainz、LRCLIB 等来源" width="100%" />
+      <br />
+      <sub><strong>数据源设置</strong> · 配置 MusicBrainz、LRCLIB 等来源</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshot/设置-音乐目录.png" alt="音乐目录设置：注册、探测和切换本地曲库" width="100%" />
+      <br />
+      <sub><strong>音乐目录设置</strong> · 注册、探测和切换本地曲库</sub>
+    </td>
+  </tr>
+</table>
 
 ## 数据源策略
 
