@@ -19,6 +19,7 @@ import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySi
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
 import {TagSnapshotPanel, trackToPatch, type SnapshotUpdate} from '@/components/library/TagSnapshotPanel';
+import {cn} from '@/lib/utils';
 import {
   apiReadMode,
   applyCandidateArtwork,
@@ -33,7 +34,7 @@ import {
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import type {BatchArtworkInput, CandidateSearchQuery, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
+import type {BatchArtworkInput, CandidateSearchQuery, FolderNode, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
@@ -78,6 +79,59 @@ const sortLabels: Record<SortMode, string> = {
 
 const trackCollator = new Intl.Collator('zh-Hans-CN', {numeric: true, sensitivity: 'base'});
 
+export const libraryBrowseStateKey = 'tagger-library-browse-state-v1';
+
+interface LibraryBrowseState {
+  folderId?: string;
+  folderPath?: string;
+  includeSubfolders?: boolean;
+}
+
+function readBrowseState(libraryId: string): LibraryBrowseState {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const payload = JSON.parse(localStorage.getItem(libraryBrowseStateKey) ?? '{}') as Record<string, LibraryBrowseState>;
+    const value = payload?.[libraryId];
+    return value && typeof value === 'object' ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeBrowseState(libraryId: string, state: LibraryBrowseState): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const payload = JSON.parse(localStorage.getItem(libraryBrowseStateKey) ?? '{}') as Record<string, LibraryBrowseState>;
+    payload[libraryId] = state;
+    localStorage.setItem(libraryBrowseStateKey, JSON.stringify(payload));
+  } catch {
+    // Private browsing or a full storage quota must not interrupt navigation.
+  }
+}
+
+function clearBrowseFolder(libraryId: string): void {
+  const state = readBrowseState(libraryId);
+  writeBrowseState(libraryId, {...state, folderId: undefined, folderPath: undefined, includeSubfolders: false});
+}
+
+function folderIdsForSelection(folderId: string | null, folderPath: string | null, folders: FolderNode[], includeSubfolders: boolean): Set<string> | null {
+  if (!folderId && !folderPath) return null;
+  const selected = folderPath ? folders.find((folder) => folder.name === folderPath) : folders.find((folder) => folder.id === folderId);
+  const selectedName = folderPath?.trim() || selected?.name.trim() || '';
+  if (!includeSubfolders) {
+    return new Set(folders.filter((folder) => folder.id === folderId || (selectedName !== '' && folder.name === selectedName)).map((folder) => folder.id));
+  }
+  const prefix = selectedName ? `${selectedName} · ` : '';
+  return new Set(folders
+    .filter((folder) => folder.id === folderId || (prefix !== '' && (folder.name === selectedName || folder.name.startsWith(prefix))))
+    .map((folder) => folder.id));
+}
+
+function firstTrackInScope(tracks: Track[], folders: FolderNode[], folderId: string | null, folderPath: string | null, includeSubfolders: boolean, health: SidebarFilter): Track | undefined {
+  const folderIds = folderIdsForSelection(folderId, folderPath, folders, includeSubfolders);
+  return tracks.find((track) => (!folderIds || folderIds.has(track.folderId)) && (health === 'all' || track.health === health));
+}
+
 export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
@@ -89,7 +143,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   const [activeTrackId, setActiveTrackId] = useState<string>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [activeFolderPath, setActiveFolderPath] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<SidebarFilter>('all');
+  const [includeSubfolders, setIncludeSubfolders] = useState(false);
   const [search, setSearch] = useState('');
   const [formatFilter, setFormatFilter] = useState<FormatFilter>('all');
   const [sortMode, setSortMode] = useState<SortMode>('album');
@@ -117,14 +173,28 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       setLibraries(nextLibraries.map((item) => ({...item, active: item.id === nextLibrary.id})));
       setLibrary({...nextLibrary, active: true});
       setTracks(nextTracks);
-      setActiveFolder((current) => preserveSelection && current && nextLibrary.folders.some((folder) => folder.id === current) ? current : null);
+      const storedBrowseState = preserveSelection ? {} : readBrowseState(nextLibrary.id);
+      const nextFolder = preserveSelection
+        ? activeFolder && nextLibrary.folders.some((folder) => folder.id === activeFolder) ? activeFolder : null
+        : storedBrowseState.folderId && nextLibrary.folders.some((folder) => folder.id === storedBrowseState.folderId) ? storedBrowseState.folderId : null;
+      const storedFolderPath = typeof storedBrowseState.folderPath === 'string' ? storedBrowseState.folderPath.trim() : '';
+      const folderPathFromID = nextFolder ? nextLibrary.folders.find((folder) => folder.id === nextFolder)?.name ?? '' : '';
+      const nextFolderPath = preserveSelection
+        ? (activeFolderPath ?? folderPathFromID) || null
+        : storedFolderPath && nextLibrary.folders.some((folder) => folder.name === storedFolderPath || folder.name.startsWith(`${storedFolderPath} · `))
+          ? storedFolderPath
+          : folderPathFromID || null;
+      const nextIncludeSubfolders = preserveSelection ? includeSubfolders : Boolean(storedBrowseState.includeSubfolders);
+      setActiveFolder(nextFolder);
+      setActiveFolderPath(nextFolderPath);
+      setIncludeSubfolders(nextIncludeSubfolders);
       if (!preserveSelection) {
         setActiveFilter('all');
         setSelectedIds(new Set());
       }
       setActiveTrackId((current) => preserveSelection && nextTracks.some((track) => track.id === current)
         ? current
-        : nextTracks[0]?.id);
+        : firstTrackInScope(nextTracks, nextLibrary.folders, nextFolder, nextFolderPath, nextIncludeSubfolders, preserveSelection ? activeFilter : 'all')?.id ?? nextTracks[0]?.id);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : '曲库加载失败');
     } finally {
@@ -173,26 +243,16 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
   const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? null;
 
-  const counts = useMemo(() => {
-    const next: Record<SidebarFilter, number> = {
-      all: tracks.length,
-      complete: 0,
-      'missing-artwork': 0,
-      'missing-lyrics': 0,
-      'needs-review': 0,
-      'parse-error': 0,
-    };
-    tracks.forEach((track) => {
-      next[track.health] += 1;
-    });
-    return next;
-  }, [tracks]);
+  const activeFolderIds = useMemo(
+    () => folderIdsForSelection(activeFolder, activeFolderPath, library?.folders ?? [], includeSubfolders),
+    [activeFolder, activeFolderPath, includeSubfolders, library?.folders],
+  );
 
   const visibleTracks = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     const filtered = tracks.filter((track) => {
-      if (activeFolder && track.folderId !== activeFolder) return false;
-      if (!activeFolder && activeFilter !== 'all' && track.health !== activeFilter) return false;
+      if (activeFolderIds && !activeFolderIds.has(track.folderId)) return false;
+      if (activeFilter !== 'all' && track.health !== activeFilter) return false;
       if (formatFilter !== 'all' && track.format !== formatFilter) return false;
       if (!query) return true;
       return [
@@ -204,7 +264,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       ].some((value) => value.toLocaleLowerCase().includes(query));
     });
     return [...filtered].sort((left, right) => compareTracks(left, right, sortMode));
-  }, [activeFilter, activeFolder, formatFilter, search, sortMode, tracks]);
+  }, [activeFilter, activeFolderIds, formatFilter, search, sortMode, tracks]);
 
   const snapshotTracks = selectedIds.size > 0
     ? tracks.filter((track) => selectedIds.has(track.id))
@@ -463,9 +523,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     );
   }
 
-  const currentLabel = activeFolder
-    ? library.folders.find((folder) => folder.id === activeFolder)?.name
-    : filterLabels[activeFilter];
+  const currentLabel = activeFolderPath
+    || (activeFolder ? library.folders.find((folder) => folder.id === activeFolder)?.name : undefined)
+    || filterLabels[activeFilter];
 
   return (
     <div className="library-page">
@@ -474,8 +534,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         libraries={libraries}
         switchingLibraryId={switchingLibraryId}
         activeFolder={activeFolder}
+        activeFolderPath={activeFolderPath}
         activeFilter={activeFilter}
-        counts={counts}
         sourceLabel={apiReadMode === 'real' ? '真实索引' : 'Mock 模式'}
         indexedSizeBytes={tracks.reduce((total, track) => total + track.sizeBytes, 0)}
         mobileOpen={mobileSidebar}
@@ -486,13 +546,24 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         onOpenSettings={onOpenSettings}
         onSelectFolder={(id) => {
           setActiveFolder(id);
+          const nextFolderPath = id ? library.folders.find((folder) => folder.id === id)?.name ?? null : null;
+          setActiveFolderPath(nextFolderPath);
           setActiveFilter('all');
-          setActiveTrackId((id ? tracks.find((track) => track.folderId === id) : tracks[0])?.id);
+          setIncludeSubfolders(false);
+          if (library) {
+            if (id) writeBrowseState(library.id, {folderId: id, folderPath: nextFolderPath ?? undefined, includeSubfolders: false});
+            else clearBrowseFolder(library.id);
+          }
+          setActiveTrackId(firstTrackInScope(tracks, library?.folders ?? [], id, nextFolderPath, false, 'all')?.id);
           setMobileSidebar(false);
         }}
-        onSelectFilter={(filter) => {
-          setActiveFilter(filter);
-          setActiveTrackId((filter === 'all' ? tracks[0] : tracks.find((track) => track.health === filter))?.id);
+        onSelectFolderPath={(path) => {
+          setActiveFolder(null);
+          setActiveFolderPath(path);
+          setActiveFilter('all');
+          setIncludeSubfolders(false);
+          if (library) writeBrowseState(library.id, {folderPath: path, includeSubfolders: false});
+          setActiveTrackId(firstTrackInScope(tracks, library?.folders ?? [], null, path, false, 'all')?.id);
           setMobileSidebar(false);
         }}
       />
@@ -537,10 +608,40 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
           <button className="toolbar-button" disabled={snapshotTracks.length === 0} onClick={() => setSnapshotOpen(true)}><Archive size={15} /> 标签快照</button>
           <label className="toolbar-filter">
             <SlidersHorizontal size={15} />
-            <span>筛选</span>
+            <span>格式</span>
             <select aria-label="曲目格式筛选" value={formatFilter} onChange={(event) => setFormatFilter(event.target.value as FormatFilter)}>
               {Object.entries(formatLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
+          </label>
+          <label className="toolbar-filter">
+            <Tags size={15} />
+            <span>状态</span>
+            <select
+              aria-label="曲目状态筛选"
+              value={activeFilter}
+              onChange={(event) => {
+                const nextFilter = event.target.value as SidebarFilter;
+                setActiveFilter(nextFilter);
+                setActiveTrackId(firstTrackInScope(tracks, library.folders, activeFolder, activeFolderPath, includeSubfolders, nextFilter)?.id);
+              }}
+            >
+              {Object.entries(filterLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
+          </label>
+          <label className={cn('toolbar-toggle', includeSubfolders && 'is-checked', !activeFolder && !activeFolderPath && 'is-disabled')} title={activeFolder || activeFolderPath ? '同时显示当前目录下的所有子目录曲目' : '选择一个目录后可递归显示子目录曲目'}>
+            <input
+              type="checkbox"
+              aria-label="包含子目录"
+              checked={includeSubfolders}
+              disabled={!activeFolder && !activeFolderPath}
+              onChange={(event) => {
+                const nextValue = event.target.checked;
+                setIncludeSubfolders(nextValue);
+                if (library && (activeFolder || activeFolderPath)) writeBrowseState(library.id, {folderId: activeFolder ?? undefined, folderPath: activeFolderPath ?? undefined, includeSubfolders: nextValue});
+                setActiveTrackId(firstTrackInScope(tracks, library?.folders ?? [], activeFolder, activeFolderPath, nextValue, activeFilter)?.id);
+              }}
+            />
+            <span>含子目录</span>
           </label>
           <label className="toolbar-filter">
             <ArrowDownUp size={15} />

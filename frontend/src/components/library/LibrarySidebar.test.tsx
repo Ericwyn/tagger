@@ -23,13 +23,11 @@ function renderSidebar(overrides: Partial<SidebarTestOverrides> = {}) {
     libraries: [library, otherLibrary],
     activeFolder: null,
     activeFilter: 'all',
-    counts: {all: 12, complete: 12, 'missing-artwork': 0, 'missing-lyrics': 0, 'needs-review': 0, 'parse-error': 0},
     sourceLabel: 'Mock',
     indexedSizeBytes: 1024,
     mobileOpen: false,
     onCloseMobile: vi.fn(),
     onSelectFolder: vi.fn(),
-    onSelectFilter: vi.fn(),
     onSwitchLibrary: overrides.onSwitchLibrary ?? vi.fn(),
     onRescan: overrides.onRescan ?? vi.fn(),
     onOpenSettings: overrides.onOpenSettings ?? vi.fn(),
@@ -69,9 +67,8 @@ describe('LibrarySidebar library controls', () => {
     render(<LibrarySidebar {...{
       library: {...library, folders: [{id: 'folder-long', name: longName, count: 1}]},
       libraries: [library, otherLibrary], activeFolder: null, activeFilter: 'all',
-      counts: {all: 12, complete: 12, 'missing-artwork': 0, 'missing-lyrics': 0, 'needs-review': 0, 'parse-error': 0},
       sourceLabel: 'Mock', indexedSizeBytes: 1024, mobileOpen: false, onCloseMobile: vi.fn(),
-      onSelectFolder: vi.fn(), onSelectFilter: vi.fn(), onSwitchLibrary: vi.fn(), onRescan: vi.fn(), onOpenSettings: vi.fn(),
+      onSelectFolder: vi.fn(), onSwitchLibrary: vi.fn(), onRescan: vi.fn(), onOpenSettings: vi.fn(),
     }} />);
     expect(screen.getByTitle(longName)).toHaveTextContent(longName);
   });

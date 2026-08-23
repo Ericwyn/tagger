@@ -1,17 +1,11 @@
 import {useEffect, useRef, useState, type CSSProperties} from 'react';
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronRight,
-  CircleDashed,
   Disc3,
-  FileWarning,
   Folder,
   FolderOpen,
-  ImageOff,
-  Music2,
   RefreshCw,
-  ShieldCheck,
   X,
 } from 'lucide-react';
 import {cn, formatBytes} from '@/lib/utils';
@@ -25,8 +19,8 @@ interface LibrarySidebarProps {
   libraries?: LibrarySummary[];
   switchingLibraryId?: string;
   activeFolder: string | null;
+  activeFolderPath?: string | null;
   activeFilter: SidebarFilter;
-  counts: Record<SidebarFilter, number>;
   sourceLabel: string;
   indexedSizeBytes: number;
   mobileOpen: boolean;
@@ -36,20 +30,12 @@ interface LibrarySidebarProps {
   scanning?: boolean;
   onOpenSettings?: () => void;
   onSelectFolder: (id: string | null) => void;
-  onSelectFilter: (filter: SidebarFilter) => void;
+  onSelectFolderPath?: (path: string) => void;
 }
-
-const smartFilters: Array<{id: SidebarFilter; label: string; icon: typeof Music2}> = [
-  {id: 'all', label: '全部音乐', icon: Music2},
-  {id: 'missing-artwork', label: '缺少封面', icon: ImageOff},
-  {id: 'missing-lyrics', label: '缺少歌词', icon: CircleDashed},
-  {id: 'needs-review', label: '需要确认', icon: AlertTriangle},
-  {id: 'parse-error', label: '解析失败', icon: FileWarning},
-  {id: 'complete', label: '资料完整', icon: ShieldCheck},
-];
 
 interface FolderBranch {
   key: string;
+  path: string;
   name: string;
   count: number;
   folderId?: string;
@@ -68,7 +54,7 @@ function folderTree(folders: FolderNode[]): FolderBranch[] {
       key = key ? `${key}/${part}` : part;
       let branch = siblings.find((item) => item.key === key);
       if (!branch) {
-        branch = {key, name: part, count: 0, children: []};
+        branch = {key, path: parts.slice(0, index + 1).join(' · '), name: part, count: 0, children: []};
         siblings.push(branch);
       }
       branch.count += folder.count;
@@ -82,6 +68,10 @@ function folderTree(folders: FolderNode[]): FolderBranch[] {
   };
   sort(roots);
   return roots;
+}
+
+function branchContainsSelection(branch: FolderBranch, folderId: string | null, folderPath: string | null): boolean {
+  return branch.folderId === folderId || branch.path === folderPath || branch.children.some((child) => branchContainsSelection(child, folderId, folderPath));
 }
 
 function TreeLabel({children}: {children: string}) {
@@ -117,13 +107,19 @@ function TreeLabel({children}: {children: string}) {
   );
 }
 
-function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: FolderBranch; activeFolder: string | null; onSelectFolder: (id: string | null) => void}) {
-  const [expanded, setExpanded] = useState(false);
+function FolderBranchRow({branch, activeFolder, activeFolderPath, onSelectFolder, onSelectFolderPath}: {branch: FolderBranch; activeFolder: string | null; activeFolderPath: string | null; onSelectFolder: (id: string | null) => void; onSelectFolderPath?: (path: string) => void}) {
   const hasChildren = branch.children.length > 0;
-  const active = branch.folderId === activeFolder;
+  const containsActiveFolder = branchContainsSelection(branch, activeFolder, activeFolderPath);
+  const [expanded, setExpanded] = useState(containsActiveFolder);
+  const active = branch.folderId === activeFolder || branch.path === activeFolderPath;
+
+  useEffect(() => {
+    if (containsActiveFolder) setExpanded(true);
+  }, [containsActiveFolder]);
+
   return (
     <div className="tree-branch">
-      <button className={cn('tree-row', active && 'is-active')} aria-expanded={hasChildren ? expanded : undefined} onClick={() => branch.folderId ? onSelectFolder(branch.folderId) : setExpanded((value) => !value)}>
+      <button className={cn('tree-row', active && 'is-active')} aria-expanded={hasChildren ? expanded : undefined} onClick={() => branch.folderId ? onSelectFolder(branch.folderId) : onSelectFolderPath ? onSelectFolderPath(branch.path) : setExpanded((value) => !value)}>
         <span
           className={cn('tree-disclosure', !hasChildren && 'is-empty')}
           onClick={(event) => { if (hasChildren) { event.stopPropagation(); setExpanded((value) => !value); } }}
@@ -132,7 +128,7 @@ function FolderBranchRow({branch, activeFolder, onSelectFolder}: {branch: Folder
         <TreeLabel>{branch.name}</TreeLabel>
         <em>{branch.count}</em>
       </button>
-      {expanded && hasChildren && <div className="tree-nested-children">{branch.children.map((child) => <FolderBranchRow key={child.key} branch={child} activeFolder={activeFolder} onSelectFolder={onSelectFolder} />)}</div>}
+      {expanded && hasChildren && <div className="tree-nested-children">{branch.children.map((child) => <FolderBranchRow key={child.key} branch={child} activeFolder={activeFolder} activeFolderPath={activeFolderPath} onSelectFolder={onSelectFolder} onSelectFolderPath={onSelectFolderPath} />)}</div>}
     </div>
   );
 }
@@ -142,8 +138,8 @@ export function LibrarySidebar({
   libraries = [],
   switchingLibraryId,
   activeFolder,
+  activeFolderPath = null,
   activeFilter,
-  counts,
   sourceLabel,
   indexedSizeBytes,
   mobileOpen,
@@ -153,7 +149,7 @@ export function LibrarySidebar({
   scanning = false,
   onOpenSettings,
   onSelectFolder,
-  onSelectFilter,
+  onSelectFolderPath,
 }: LibrarySidebarProps) {
   const folders = folderTree(library.folders);
   const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
@@ -195,10 +191,9 @@ export function LibrarySidebar({
       <section className="sidebar-section">
         <div className="section-label">目录</div>
         <button
-          className={cn('tree-row tree-root', activeFolder === null && activeFilter === 'all' && 'is-active')}
+          className={cn('tree-row tree-root', activeFolder === null && activeFolderPath === null && activeFilter === 'all' && 'is-active')}
           onClick={() => {
             onSelectFolder(null);
-            onSelectFilter('all');
           }}
         >
           <span className="tree-disclosure is-empty" aria-hidden="true" />
@@ -207,26 +202,8 @@ export function LibrarySidebar({
           <em>{library.trackCount}</em>
         </button>
         <div className="tree-children">
-          {folders.map((folder) => <FolderBranchRow key={folder.key} branch={folder} activeFolder={activeFolder} onSelectFolder={onSelectFolder} />)}
+          {folders.map((folder) => <FolderBranchRow key={folder.key} branch={folder} activeFolder={activeFolder} activeFolderPath={activeFolderPath} onSelectFolder={onSelectFolder} onSelectFolderPath={onSelectFolderPath} />)}
         </div>
-      </section>
-
-      <section className="sidebar-section smart-section">
-        <div className="section-label">智能筛选</div>
-        {smartFilters.map(({id, label, icon: Icon}) => (
-          <button
-            key={id}
-            className={cn('smart-row', activeFilter === id && activeFolder === null && 'is-active')}
-            onClick={() => {
-              onSelectFolder(null);
-              onSelectFilter(id);
-            }}
-          >
-            <Icon size={15} />
-            <span>{label}</span>
-            <em>{counts[id] ?? 0}</em>
-          </button>
-        ))}
       </section>
 
       <section className="storage-note">

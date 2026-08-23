@@ -1020,8 +1020,7 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.tree-row,
-.smart-row {
+.tree-row {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
@@ -1037,8 +1036,7 @@ button:disabled {
 
 .tree-row { grid-template-columns: 15px 18px minmax(0, 1fr) auto; }
 
-.tree-row span,
-.smart-row span {
+.tree-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1071,28 +1069,24 @@ button:disabled {
   .tree-label.is-overflow:hover > span { animation: none; }
 }
 
-.tree-row em,
-.smart-row em {
+.tree-row em {
   color: var(--faint);
   font-family: var(--mono);
   font-size: 11px;
   font-style: normal;
 }
 
-.tree-row:hover,
-.smart-row:hover {
+.tree-row:hover {
   background: color-mix(in srgb, var(--ink) 5%, transparent);
   color: var(--ink);
 }
 
-.tree-row.is-active,
-.smart-row.is-active {
+.tree-row.is-active {
   background: var(--ink);
   color: var(--paper);
 }
 
-.tree-row.is-active em,
-.smart-row.is-active em {
+.tree-row.is-active em {
   color: color-mix(in srgb, var(--paper) 62%, transparent);
 }
 
@@ -1142,11 +1136,6 @@ button:disabled {
   width: 1px;
   background: var(--line);
   content: "";
-}
-
-.smart-section {
-  margin-top: 6px;
-  border-top: 1px solid var(--line);
 }
 
 .storage-note {
@@ -1348,6 +1337,39 @@ button:disabled {
   color: var(--ink);
   font: inherit;
   font-weight: 650;
+}
+
+.toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.toolbar-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.toolbar-toggle.is-checked {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+
+.toolbar-toggle.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .track-list {
@@ -6445,6 +6467,20 @@ button:disabled {
   .track-head,
   .track-row {
     grid-template-columns: 28px 44px minmax(160px, 1.6fr) minmax(100px, 0.9fr) minmax(110px, 1fr) 45px 50px 43px 16px 26px;
+  }
+
+  .track-toolbar {
+    flex-wrap: wrap;
+    min-height: 92px;
+  }
+
+  .track-toolbar .toolbar-spacer {
+    display: none;
+  }
+
+  .track-toolbar .search-box {
+    flex: 1 1 100%;
+    order: -1;
   }
 
   .candidate-layout {
