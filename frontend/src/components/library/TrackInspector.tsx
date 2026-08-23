@@ -23,7 +23,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {artworkURL, getRawTags} from '@/api';
 import {cn, formatBytes, formatDuration} from '@/lib/utils';
-import type {InspectorTab, Track, TrackPatch} from '@/types';
+import type {InspectorTab, RestoreDraftRequest, Track, TrackPatch} from '@/types';
 
 interface TrackInspectorProps {
   track: Track | null;
@@ -40,6 +40,8 @@ interface TrackInspectorProps {
   onTogglePlayer?: () => void;
   onNotice?: (message: string) => void;
   showGeneratedCovers?: boolean;
+  restoreDraft?: RestoreDraftRequest;
+  onDiscardRestoreDraft?: () => void;
 }
 
 export interface TrackSaveOptions {
@@ -132,6 +134,8 @@ export function TrackInspector({
   onTogglePlayer,
   onNotice,
   showGeneratedCovers = false,
+  restoreDraft,
+  onDiscardRestoreDraft,
 }: TrackInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>('tags');
   const [draft, setDraft] = useState<TrackPatch | null>(track ? toPatch(track) : null);
@@ -148,7 +152,8 @@ export function TrackInspector({
   const artworkInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setDraft(track ? toPatch(track) : null);
+    const isRestoreTarget = Boolean(track && restoreDraft?.trackId === track.id);
+    setDraft(track ? isRestoreTarget && restoreDraft?.patch ? restoreDraft.patch : toPatch(track) : null);
     setShowPreview(false);
 	setFallbackPlaying(false);
 	setDeleteArtworkArmed(false);
@@ -158,7 +163,7 @@ export function TrackInspector({
 	setRawTags(null);
 	setRawTagsOpen(false);
 	setRawTagsError('');
-  }, [track]);
+  }, [track, restoreDraft?.key]);
 
   const original = useMemo(() => track ? toPatch(track) : null, [track]);
   const dirty = Boolean(draft && original && !patchEqual(draft, original));
@@ -305,6 +310,16 @@ export function TrackInspector({
           </button>
         ))}
       </div>
+
+      {restoreDraft?.trackId === track.id && (
+        <div className="restore-draft-banner">
+          <div>
+            <strong>已加载历史快照</strong>
+            <span>{restoreDraft.label} · 当前只是编辑草稿，尚未写入文件</span>
+          </div>
+          <button type="button" onClick={onDiscardRestoreDraft}>取消加载</button>
+        </div>
+      )}
 
       <div className="inspector-scroll">
         {tab === 'tags' && (

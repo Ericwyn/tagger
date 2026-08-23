@@ -72,6 +72,39 @@ func TestCacheReusesValidatedArtworkAcrossQueryVariants(t *testing.T) {
 	}
 }
 
+func TestCacheStatsAndClearOnlyOwnFiles(t *testing.T) {
+	dir := t.TempDir()
+	cache, err := NewCache(dir, time.Hour)
+	if err != nil {
+		t.Fatalf("new cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "unrelated.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := testPNG(t)
+	if _, err := cache.Get(context.Background(), "https://cdn.example/cover.jpg", func() (Asset, error) { return Validate(data, "") }); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".artwork-manual.tmp"), []byte("temporary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := cache.Stats(context.Background())
+	if err != nil || stats.Files != 2 || stats.Bytes <= 0 {
+		t.Fatalf("stats = %#v err=%v", stats, err)
+	}
+	cleared, err := cache.Clear(context.Background())
+	if err != nil || cleared.Files != stats.Files || cleared.Bytes != stats.Bytes {
+		t.Fatalf("clear = %#v stats=%#v err=%v", cleared, stats, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unrelated.txt")); err != nil {
+		t.Fatalf("unrelated file removed: %v", err)
+	}
+	remaining, err := cache.Stats(context.Background())
+	if err != nil || remaining.Files != 0 || remaining.Bytes != 0 {
+		t.Fatalf("remaining cache = %#v err=%v", remaining, err)
+	}
+}
+
 func TestCacheExpiresAndCleansFiles(t *testing.T) {
 	cache, err := NewCache(t.TempDir(), time.Hour)
 	if err != nil {

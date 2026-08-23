@@ -10,7 +10,7 @@ import {ReviewPage} from '@/pages/ReviewPage';
 import {SettingsPage} from '@/pages/SettingsPage';
 import {pageRoute, readRoute, routePath, type AppRoute} from '@/lib/router';
 import {normalizeFont, normalizeTheme, type FontID, type ThemeID} from '@/theme';
-import type {PageID, Track} from '@/types';
+import type {PageID, RestoreDraftRequest, Track} from '@/types';
 
 export function App() {
   const [route, setRoute] = useState<AppRoute>(() => readRoute());
@@ -23,6 +23,7 @@ export function App() {
   const [showGeneratedCovers, setShowGeneratedCovers] = useState(() => localStorage.getItem('tagger-generated-covers') === 'true');
   const [authState, setAuthState] = useState<'checking' | 'ready' | 'required'>(apiReadMode === 'mock' ? 'ready' : 'checking');
   const [authError, setAuthError] = useState('');
+  const [restoreDraft, setRestoreDraft] = useState<RestoreDraftRequest>();
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -136,7 +137,7 @@ export function App() {
             exit={{opacity: 0, y: -5}}
             transition={{duration: 0.22, ease: [0.22, 1, 0.36, 1]}}
           >
-            {route.page === 'library' && <LibraryPage onOpenReview={openReview} onOpenSettings={() => navigatePage('settings')} onNotice={setNotice} playerTrackId={playerTrack?.id} playerPlaying={playerPlaying} onPlayTrack={playTrack} onTogglePlayer={() => setPlayerPlaying((value) => !value)} showGeneratedCovers={showGeneratedCovers} />}
+            {route.page === 'library' && <LibraryPage onOpenReview={openReview} onOpenSettings={() => navigatePage('settings')} onNotice={setNotice} playerTrackId={playerTrack?.id} playerPlaying={playerPlaying} onPlayTrack={playTrack} onTogglePlayer={() => setPlayerPlaying((value) => !value)} showGeneratedCovers={showGeneratedCovers} restoreDraft={restoreDraft} onRestoreDraftConsumed={() => setRestoreDraft(undefined)} onDiscardRestoreDraft={() => setRestoreDraft(undefined)} />}
             {route.page === 'review' && (
               <ReviewPage
                 trackIds={route.batchIds}
@@ -151,7 +152,7 @@ export function App() {
               />
             )}
             {route.page === 'jobs' && <JobsPage onOpenReview={openReviewJob} focusJobId={jobFocusId} />}
-            {route.page === 'history' && <HistoryPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} />}
+            {route.page === 'history' && <HistoryPage onNotice={setNotice} onLoadSnapshot={(request) => { setRestoreDraft(request); navigatePage('library'); }} showGeneratedCovers={showGeneratedCovers} />}
             {route.page === 'settings' && <SettingsPage onNotice={setNotice} showGeneratedCovers={showGeneratedCovers} onShowGeneratedCoversChange={setShowGeneratedCovers} theme={theme} onThemeChange={setTheme} font={font} onFontChange={setFont} />}
           </motion.div>
         </AnimatePresence>

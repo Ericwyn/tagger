@@ -44,6 +44,7 @@ describe('Tagger app prototype', () => {
 
     await user.click(screen.getByRole('button', {name: '设置'}));
     expect(await screen.findByRole('heading', {name: '设置'})).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: /数据源/}));
     await waitFor(() => expect(screen.getByText('MusicBrainz')).toBeInTheDocument());
   });
 

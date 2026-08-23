@@ -23,8 +23,8 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
-import {cn} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {cn, formatBytes} from '@/lib/utils';
+import {apiReadMode, candidateArtworkURL, clearRuntimeCache, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
@@ -90,7 +90,7 @@ function candidateAssetLabel(candidate: MatchCandidate): string {
 }
 
 export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCoversChange, theme = 'ivory', onThemeChange = () => undefined, font = 'editorial', onFontChange = () => undefined}: SettingsPageProps) {
-  const [tab, setTab] = useState<SettingsTab>('providers');
+  const [tab, setTab] = useState<SettingsTab>('libraries');
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [testingId, setTestingId] = useState<string>();
   const [testProviderId, setTestProviderId] = useState<string>();
@@ -118,6 +118,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [systemInfo, setSystemInfo] = useState<SystemInfo>();
   const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
   const [writeHistory, setWriteHistory] = useState(true);
+  const [cacheClearing, setCacheClearing] = useState(false);
 
   useEffect(() => {
     listProviders().then(setProviders);
@@ -252,6 +253,20 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     } catch (error) {
       setWriteHistory(previous);
       onNotice(error instanceof Error ? error.message : '写前历史设置保存失败');
+    }
+  };
+
+  const clearRuntimeCaches = async () => {
+    if (cacheClearing) return;
+    setCacheClearing(true);
+    try {
+      const storage = await clearRuntimeCache();
+      setSystemInfo((current) => current ? {...current, storage} : current);
+      onNotice('运行缓存已清理；数据库、标签历史和音乐文件未被修改');
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '运行缓存清理失败');
+    } finally {
+      setCacheClearing(false);
     }
   };
 
@@ -715,6 +730,22 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <label className="system-select"><span>每文件</span><select aria-label="历史保留次数" value={historyRetention} onChange={(event) => void updateHistoryRetention(Number(event.target.value) as HistoryRetention)}>
                     {historyRetentionOptions.map((value) => <option key={value} value={value}>最近 {value} 次</option>)}
                   </select></label>
+                </section>
+                <section className="system-storage-section">
+                  <div className="system-icon"><Database size={19} /></div>
+                  <div><strong>运行数据占用</strong><p>统计 Tagger 数据库与运行缓存；清理只会删除可重新生成的远程查询与封面缓存。</p></div>
+                  <div className="system-storage-panel">
+                    <div className="system-storage-stats">
+                      <span><small>总占用</small><strong>{formatBytes(systemInfo?.storage?.totalBytes ?? 0)}</strong></span>
+                      <span><small>SQLite 数据库</small><strong>{formatBytes(systemInfo?.storage?.databaseBytes ?? 0)}</strong></span>
+                      <span><small>封面缓存</small><strong>{formatBytes(systemInfo?.storage?.artworkCacheBytes ?? 0)}</strong></span>
+                      <span><small>远程缓存条目</small><strong>{(systemInfo?.storage?.providerCacheEntries ?? 0) + (systemInfo?.storage?.artworkReferenceEntries ?? 0)}</strong></span>
+                    </div>
+                    <button className="secondary-button" type="button" disabled={cacheClearing} onClick={() => void clearRuntimeCaches()}>
+                      {cacheClearing ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}
+                      {cacheClearing ? '清理中…' : '清理运行缓存'}
+                    </button>
+                  </div>
                 </section>
                 <section>
                   <div className="system-icon"><ImagePlus size={19} /></div>

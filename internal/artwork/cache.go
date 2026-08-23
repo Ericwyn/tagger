@@ -24,6 +24,14 @@ const (
 	cacheFileSuffix = ".img"
 )
 
+// CacheStats describes the files owned by the runtime artwork cache. Only
+// validated image files and temporary files created by this package are
+// included; unrelated files in the data directory are left untouched.
+type CacheStats struct {
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+}
+
 // Cache stores validated provider artwork outside the SQLite database. The
 // cache key is derived from the URL with query parameters and fragments
 // removed, so size/format hints cannot cause a burst of duplicate downloads.
@@ -80,6 +88,31 @@ func (c *Cache) Start(ctx context.Context, interval time.Duration) {
 			}
 		}
 	}()
+}
+
+// Dir returns the cache directory used by this instance.
+func (c *Cache) Dir() string {
+	if c == nil {
+		return ""
+	}
+	return c.dir
+}
+
+// Stats returns the current size of cache-owned files.
+func (c *Cache) Stats(ctx context.Context) (CacheStats, error) {
+	return c.scan(ctx, false)
+}
+
+// Clear removes all cache-owned images and temporary files and returns the
+// amount of data removed. It intentionally does not remove the directory so
+// subsequent provider requests can continue to use the cache immediately.
+func (c *Cache) Clear(ctx context.Context) (CacheStats, error) {
+	if c == nil {
+		return CacheStats{}, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scanLocked(ctx, true)
 }
 
 // NormalizeURL removes query parameters and fragments while preserving the
@@ -255,4 +288,53 @@ func (c *Cache) Cleanup(ctx context.Context) error {
 		}
 	}
 	return cleanupErr
+}
+
+func (c *Cache) scan(ctx context.Context, remove bool) (CacheStats, error) {
+	if c == nil {
+		return CacheStats{}, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.scanLocked(ctx, remove)
+}
+
+func (c *Cache) scanLocked(ctx context.Context, remove bool) (CacheStats, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return CacheStats{}, nil
+		}
+		return CacheStats{}, err
+	}
+	var result CacheStats
+	var scanErr error
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, cacheFileSuffix) && !strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			scanErr = errors.Join(scanErr, infoErr)
+			continue
+		}
+		result.Files++
+		result.Bytes += info.Size()
+		if remove {
+			if removeErr := os.Remove(filepath.Join(c.dir, name)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				scanErr = errors.Join(scanErr, removeErr)
+			}
+		}
+	}
+	return result, scanErr
 }

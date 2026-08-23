@@ -34,7 +34,7 @@ import {
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import type {BatchArtworkInput, CandidateSearchQuery, FolderNode, LibrarySummary, MatchCandidate, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
+import type {BatchArtworkInput, CandidateSearchQuery, FolderNode, LibrarySummary, MatchCandidate, RestoreDraftRequest, Track, TrackFormat, TrackPatch, UpdateProvenance} from '@/types';
 
 interface LyricsSaveOptions {
   writeTag?: boolean;
@@ -49,6 +49,9 @@ interface LibraryPageProps {
   onPlayTrack: (track: Track) => void;
   onTogglePlayer: () => void;
   showGeneratedCovers?: boolean;
+  restoreDraft?: RestoreDraftRequest;
+  onRestoreDraftConsumed?: () => void;
+  onDiscardRestoreDraft?: () => void;
 }
 
 const filterLabels: Record<SidebarFilter, string> = {
@@ -132,7 +135,7 @@ function firstTrackInScope(tracks: Track[], folders: FolderNode[], folderId: str
   return tracks.find((track) => (!folderIds || folderIds.has(track.folderId)) && (health === 'all' || track.health === health));
 }
 
-export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false}: LibraryPageProps) {
+export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false, restoreDraft, onRestoreDraftConsumed, onDiscardRestoreDraft}: LibraryPageProps) {
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -192,7 +195,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         setActiveFilter('all');
         setSelectedIds(new Set());
       }
-      setActiveTrackId((current) => preserveSelection && nextTracks.some((track) => track.id === current)
+      setActiveTrackId((current) => restoreDraft && nextTracks.some((track) => track.id === restoreDraft.trackId)
+        ? restoreDraft.trackId
+        : preserveSelection && nextTracks.some((track) => track.id === current)
         ? current
         : firstTrackInScope(nextTracks, nextLibrary.folders, nextFolder, nextFolderPath, nextIncludeSubfolders, preserveSelection ? activeFilter : 'all')?.id ?? nextTracks[0]?.id);
     } catch (error) {
@@ -284,9 +289,10 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
     setSaving(true);
     let updated = activeTrack;
-    try {
+	  try {
 	  updated = await updateTrack(activeTrack.id, patch, provenance);
 	  setTracks((current) => current.map((item) => item.id === updated.id ? updated : item));
+	  if (restoreDraft?.trackId === updated.id) onRestoreDraftConsumed?.();
 	  onNotice(notice);
 	  return updated;
 	} catch (error) {
@@ -681,7 +687,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		mobileOpen={mobileInspector}
 		onCloseMobile={() => setMobileInspector(false)}
 		onSearch={openCandidateSearch}
-		onSave={async (patch, options) => { await saveTrack(patch, options); }}
+		onSave={async (patch, options) => { await saveTrack(patch, options, undefined, restoreDraft ? {restoreRevisionId: restoreDraft.revisionId} : undefined); }}
 		onArtworkChange={changeArtwork}
 		onRescan={refreshActiveTrack}
 		playerTrackId={playerTrackId}
@@ -689,7 +695,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		onPlayTrack={onPlayTrack}
 		onTogglePlayer={onTogglePlayer}
 		onNotice={onNotice}
-		showGeneratedCovers={showGeneratedCovers}
+        showGeneratedCovers={showGeneratedCovers}
+        restoreDraft={restoreDraft}
+        onDiscardRestoreDraft={onDiscardRestoreDraft}
       />
 
       {selectedIds.size > 0 && (

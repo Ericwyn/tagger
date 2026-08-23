@@ -9,6 +9,63 @@ import (
 	"time"
 )
 
+type RuntimeCacheStats struct {
+	ProviderCacheEntries    int `json:"providerCacheEntries"`
+	ArtworkReferenceEntries int `json:"artworkReferenceEntries"`
+}
+
+type RuntimeCacheClearResult struct {
+	ProviderCacheEntries    int `json:"providerCacheEntries"`
+	ArtworkReferenceEntries int `json:"artworkReferenceEntries"`
+}
+
+// RuntimeCacheStats reports the two SQLite tables that are safe to discard at
+// runtime. Provider settings, indexed tracks, revisions and artwork blobs are
+// deliberately not part of this cache surface.
+func (s *Store) RuntimeCacheStats(ctx context.Context) (RuntimeCacheStats, error) {
+	var result RuntimeCacheStats
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM provider_cache`).Scan(&result.ProviderCacheEntries); err != nil {
+		return RuntimeCacheStats{}, err
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM provider_artwork_refs`).Scan(&result.ArtworkReferenceEntries); err != nil {
+		return RuntimeCacheStats{}, err
+	}
+	return result, nil
+}
+
+// ClearRuntimeCaches removes provider search responses and candidate artwork
+// references. It never touches user-authored tags or revision history.
+func (s *Store) ClearRuntimeCaches(ctx context.Context) (RuntimeCacheClearResult, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RuntimeCacheClearResult{}, err
+	}
+	defer tx.Rollback()
+	var result RuntimeCacheClearResult
+	if result.ProviderCacheEntries, err = deleteCount(ctx, tx, `DELETE FROM provider_cache`); err != nil {
+		return RuntimeCacheClearResult{}, err
+	}
+	if result.ArtworkReferenceEntries, err = deleteCount(ctx, tx, `DELETE FROM provider_artwork_refs`); err != nil {
+		return RuntimeCacheClearResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return RuntimeCacheClearResult{}, err
+	}
+	return result, nil
+}
+
+func deleteCount(ctx context.Context, tx *sql.Tx, query string) (int, error) {
+	result, err := tx.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 func (s *Store) LoadProviderCache(ctx context.Context, key string) ([]byte, bool, error) {
 	var payload []byte
 	err := s.db.QueryRowContext(ctx, `SELECT payload_json FROM provider_cache WHERE cache_key=? AND expires_at>?`, key, formatTime(s.now().UTC())).Scan(&payload)

@@ -364,7 +364,28 @@ export interface LyricsSidecarWriteResult {
 }
 
 export interface UpdateProvenance {
-  providerId: string;
+  providerId?: string;
+  restoreRevisionId?: string;
+}
+
+export interface RevisionSnapshot {
+  revisionId: string;
+  trackId: string;
+  target: 'before' | 'after';
+  baseRevision: string;
+  currentRevision: string;
+  hasTagSnapshot: boolean;
+  tags: Record<string, string[]>;
+  artwork?: ArtworkAsset;
+  sidecar?: SidecarInfo;
+}
+
+export interface RestoreDraftRequest {
+  key: string;
+  revisionId: string;
+  trackId: string;
+  patch?: TrackPatch;
+  label: string;
 }
 
 export interface RestorePreview {

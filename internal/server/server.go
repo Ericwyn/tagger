@@ -121,6 +121,7 @@ func (s *Server) routes() {
 	api := s.h.Group("/api/v1")
 	api.Use(s.requireAuth)
 	api.GET("/system", s.handleSystem)
+	api.POST("/system/cache/clear", s.handleSystemCacheClear)
 	api.PATCH("/system/settings", s.handleSystemSettings)
 	api.GET("/libraries", s.handleLibraries)
 	api.POST("/libraries", s.handleLibraryRegister)
@@ -161,6 +162,7 @@ func (s *Server) routes() {
 	api.GET("/jobs/:id/batch-edit-items", s.handleBatchEditItems)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
+	api.POST("/revisions/:id/snapshot", s.handleRevisionSnapshot)
 	api.POST("/revisions/:id/restore-preview", s.handleRevisionRestorePreview)
 	api.POST("/revisions/:id/restore", s.handleRevisionRestore)
 
@@ -216,12 +218,98 @@ func (s *Server) handleSystem(ctx context.Context, c *app.RequestContext) {
 		historyRetention = s.store.HistoryRetention(ctx)
 		writeHistory = s.store.WriteHistory(ctx)
 	}
-	s.writeData(c, map[string]any{
+	response := map[string]any{
 		"version":          s.version,
 		"tag_engine":       s.tagEngineInfo,
 		"listen":           s.listen,
 		"historyRetention": historyRetention,
 		"writeHistory":     writeHistory,
+	}
+	if storage, err := s.systemStorage(ctx); err == nil {
+		response["storage"] = storage
+	}
+	s.writeData(c, response)
+}
+
+type systemStorageResponse struct {
+	DataDir                 string `json:"dataDir,omitempty"`
+	DatabaseBytes           int64  `json:"databaseBytes"`
+	ArtworkCacheBytes       int64  `json:"artworkCacheBytes"`
+	ProviderCacheEntries    int    `json:"providerCacheEntries"`
+	ArtworkReferenceEntries int    `json:"artworkReferenceEntries"`
+	TotalBytes              int64  `json:"totalBytes"`
+}
+
+func (s *Server) systemStorage(ctx context.Context) (systemStorageResponse, error) {
+	var response systemStorageResponse
+	if s.store == nil {
+		return response, nil
+	}
+	response.DataDir = filepath.Dir(s.store.Path())
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		info, err := os.Stat(s.store.Path() + suffix)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return systemStorageResponse{}, err
+		}
+		if !info.IsDir() {
+			response.DatabaseBytes += info.Size()
+		}
+	}
+	if s.artworkCache != nil {
+		stats, err := s.artworkCache.Stats(ctx)
+		if err != nil {
+			return systemStorageResponse{}, err
+		}
+		response.ArtworkCacheBytes = stats.Bytes
+	}
+	cacheStats, err := s.store.RuntimeCacheStats(ctx)
+	if err != nil {
+		return systemStorageResponse{}, err
+	}
+	response.ProviderCacheEntries = cacheStats.ProviderCacheEntries
+	response.ArtworkReferenceEntries = cacheStats.ArtworkReferenceEntries
+	response.TotalBytes = response.DatabaseBytes + response.ArtworkCacheBytes
+	return response, nil
+}
+
+func (s *Server) handleSystemCacheClear(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "cache_unavailable", "运行缓存存储尚未初始化")
+		return
+	}
+	var removed artwork.CacheStats
+	var err error
+	if s.artworkCache != nil {
+		removed, err = s.artworkCache.Clear(ctx)
+		if err != nil {
+			s.writeError(c, consts.StatusInternalServerError, "cache_clear_failed", err.Error())
+			return
+		}
+	}
+	cleared, err := s.store.ClearRuntimeCaches(ctx)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "cache_clear_failed", err.Error())
+		return
+	}
+	if s.providers != nil {
+		s.providers.ClearArtworkReferences()
+	}
+	storage, err := s.systemStorage(ctx)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "cache_stats_failed", err.Error())
+		return
+	}
+	s.writeData(c, map[string]any{
+		"storage": storage,
+		"cleared": map[string]any{
+			"artworkCacheFiles":       removed.Files,
+			"artworkCacheBytes":       removed.Bytes,
+			"providerCacheEntries":    cleared.ProviderCacheEntries,
+			"artworkReferenceEntries": cleared.ArtworkReferenceEntries,
+		},
 	})
 }
 
@@ -1549,7 +1637,8 @@ type tagWriteRequest struct {
 	Patch        domain.TagPatch `json:"patch"`
 	DryRun       bool            `json:"dryRun"`
 	Provenance   *struct {
-		ProviderID string `json:"providerId"`
+		ProviderID        string `json:"providerId"`
+		RestoreRevisionID string `json:"restoreRevisionId"`
 	} `json:"provenance,omitempty"`
 }
 
@@ -1573,15 +1662,28 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 	}
 	action, source := "修改标签", "手工编辑"
 	if request.Provenance != nil {
-		descriptor, found := providers.Descriptor{}, false
-		if s.providers != nil {
-			descriptor, found = s.providers.Descriptor(strings.TrimSpace(request.Provenance.ProviderID))
+		if restoreID := strings.TrimSpace(request.Provenance.RestoreRevisionID); restoreID != "" {
+			if s.store == nil {
+				s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "历史修订不可用")
+				return
+			}
+			revision, revisionErr := s.store.Revision(ctx, restoreID)
+			if errors.Is(revisionErr, sql.ErrNoRows) || revisionErr != nil || revision.TrackID != c.Param("id") || revision.LibraryID != s.library.Library().ID {
+				s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "历史修订与当前曲目不匹配")
+				return
+			}
+			action, source = "编辑后恢复快照", "历史修订 "+restoreID
+		} else {
+			descriptor, found := providers.Descriptor{}, false
+			if s.providers != nil {
+				descriptor, found = s.providers.Descriptor(strings.TrimSpace(request.Provenance.ProviderID))
+			}
+			if !found {
+				s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "数据来源未注册")
+				return
+			}
+			action, source = "采用数据源元数据", descriptor.Name
 		}
-		if !found {
-			s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "数据来源未注册")
-			return
-		}
-		action, source = "采用数据源元数据", descriptor.Name
 	}
 	ref, err := s.library.FileRef(c.Param("id"))
 	if errors.Is(err, library.ErrTrackNotFound) {
@@ -1711,6 +1813,115 @@ func (s *Server) handleRevision(ctx context.Context, c *app.RequestContext) {
 	s.writeData(c, toRevisionResponse(revision, s.trackRevision(revision.TrackID)))
 }
 
+type revisionSnapshotResponse struct {
+	RevisionID      string                   `json:"revisionId"`
+	TrackID         string                   `json:"trackId"`
+	Target          string                   `json:"target"`
+	BaseRevision    string                   `json:"baseRevision"`
+	CurrentRevision string                   `json:"currentRevision"`
+	HasTagSnapshot  bool                     `json:"hasTagSnapshot"`
+	Tags            map[string][]string      `json:"tags"`
+	Artwork         *artworkSnapshotResponse `json:"artwork,omitempty"`
+	Sidecar         *sidecarResponse         `json:"sidecar,omitempty"`
+}
+
+type artworkSnapshotResponse struct {
+	MIME   string `json:"mime"`
+	Format string `json:"format"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+	Size   int    `json:"size"`
+	Hash   string `json:"hash"`
+}
+
+func (s *Server) handleRevisionSnapshot(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "snapshot_unavailable", "历史快照服务尚未启用")
+		return
+	}
+	var request revisionRestoreRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
+		return
+	}
+	headerRevision := strings.Trim(strings.TrimSpace(string(c.Request.Header.Peek("If-Match"))), `"`)
+	if request.BaseRevision == "" {
+		request.BaseRevision = headerRevision
+	}
+	if request.BaseRevision == "" || (headerRevision != "" && headerRevision != request.BaseRevision) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "baseRevision 与 If-Match 必须一致且不能为空")
+		return
+	}
+	if request.Target == "" {
+		request.Target = "before"
+	}
+	if request.Target != "before" && request.Target != "after" {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "target 必须是 before 或 after")
+		return
+	}
+	revision, err := s.store.Revision(ctx, c.Param("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "history_failed", err.Error())
+		return
+	}
+	if revision.LibraryID != s.library.Library().ID {
+		s.writeError(c, consts.StatusNotFound, "revision_not_found", "修订记录不存在")
+		return
+	}
+	track, err := s.library.Track(revision.TrackID)
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", "修订对应的曲目不存在")
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	if track.Revision != request.BaseRevision {
+		c.JSON(consts.StatusConflict, map[string]any{
+			"error": map[string]any{
+				"code": "revision_conflict", "message": "文件已被其他操作修改",
+				"details": map[string]string{"current_revision": track.Revision},
+			},
+		})
+		return
+	}
+	tags := revision.BeforeTags
+	artworkSnapshot := revision.BeforeArtwork
+	sidecarSnapshot := revision.BeforeSidecar
+	if request.Target == "after" {
+		tags = revision.AfterTags
+		artworkSnapshot = revision.AfterArtwork
+		sidecarSnapshot = revision.AfterSidecar
+	}
+	response := revisionSnapshotResponse{
+		RevisionID: revision.ID, TrackID: revision.TrackID, Target: request.Target,
+		BaseRevision: request.BaseRevision, CurrentRevision: track.Revision,
+		HasTagSnapshot: hasRestorableTagFields(revision.Fields) && len(tags) > 0, Tags: cloneTags(tags),
+		Sidecar: toSidecarResponse(sidecarSnapshot),
+	}
+	if artworkSnapshot != nil {
+		response.Artwork = &artworkSnapshotResponse{
+			MIME: artworkSnapshot.MIME, Format: artworkSnapshot.Format,
+			Width: artworkSnapshot.Width, Height: artworkSnapshot.Height,
+			Size: artworkSnapshot.Size, Hash: artworkSnapshot.Hash,
+		}
+	}
+	s.writeData(c, response)
+}
+
+func cloneTags(tags map[string][]string) map[string][]string {
+	result := make(map[string][]string, len(tags))
+	for key, values := range tags {
+		result[key] = append([]string(nil), values...)
+	}
+	return result
+}
+
 func toRevisionResponse(revision domain.Revision, currentRevision string) revisionResponse {
 	fields := revision.Fields
 	if fields == nil {
@@ -1806,11 +2017,11 @@ func (s *Server) handleRevisionRestoreRequest(ctx context.Context, c *app.Reques
 		return
 	}
 	var result filewrite.Result
-	if hasRestorableTagFields(revision.Fields) {
-		targetTags := revision.BeforeTags
-		if request.Target == "after" {
-			targetTags = revision.AfterTags
-		}
+	targetTags := revision.BeforeTags
+	if request.Target == "after" {
+		targetTags = revision.AfterTags
+	}
+	if hasRestorableTagFields(revision.Fields) && len(targetTags) > 0 {
 		result, err = s.writer.Restore(ctx, ref, request.BaseRevision, targetTags, dryRun)
 		if err != nil {
 			s.handleWriteError(c, err)
@@ -1925,7 +2136,7 @@ func revisionArtworkTarget(revision domain.Revision, target string) (*artwork.As
 func hasRestorableTagFields(fields []string) bool {
 	for _, field := range fields {
 		switch field {
-		case "title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics":
+		case "title", "artists", "album", "albumArtists", "trackNumber", "trackTotal", "discNumber", "discTotal", "year", "genres", "lyrics", "comment", "composers", "conductor", "lyricists", "copyright", "bpm", "isrc", "musicbrainzTrackId", "musicbrainzReleaseId", "musicbrainzArtistIds", "acoustidId", "acoustidFingerprint":
 			return true
 		}
 	}

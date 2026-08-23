@@ -1840,6 +1840,48 @@ button:disabled {
   background: var(--warning);
 }
 
+.restore-draft-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--paper));
+}
+
+.restore-draft-banner > div {
+  min-width: 0;
+}
+
+.restore-draft-banner strong,
+.restore-draft-banner span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restore-draft-banner strong {
+  color: var(--accent-2);
+  font-size: 12px;
+}
+
+.restore-draft-banner span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.restore-draft-banner button {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .inspector-scroll {
   min-height: 0;
   overflow-y: auto;
@@ -5130,6 +5172,25 @@ button:disabled {
   justify-content: center;
 }
 
+.restore-draft-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 10px;
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.restore-draft-note strong {
+  font-size: 12px;
+}
+
+.restore-draft-note span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .revision-diff-head,
 .revision-diff > div {
   display: grid;
@@ -6242,6 +6303,45 @@ button:disabled {
   justify-self: stretch;
 }
 
+.system-storage-panel {
+  display: grid;
+  gap: 10px;
+  justify-self: stretch;
+  min-width: 0;
+}
+
+.system-storage-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.system-storage-stats span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper-2);
+}
+
+.system-storage-stats small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.system-storage-stats strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.system-storage-panel > button {
+  justify-self: end;
+}
+
 .theme-settings-controls {
   display: grid;
   gap: 10px;
@@ -7166,6 +7266,14 @@ button:disabled {
 
   .system-settings > section > :last-child {
     grid-column: 1 / -1;
+  }
+
+  .system-storage-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .system-storage-panel > button {
+    width: 100%;
   }
 
   .toast {

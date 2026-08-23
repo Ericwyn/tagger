@@ -974,6 +974,14 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	if detail.Code != 200 || !containsJSON(detail.Body.Bytes(), `"resultRevision":"after"`) {
 		t.Fatalf("revision detail = %d %s", detail.Code, detail.Body.String())
 	}
+	snapshotBody := []byte(`{"baseRevision":"` + track.Revision + `","target":"before"}`)
+	snapshot := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/revisions/"+created.ID+"/snapshot",
+		&ut.Body{Body: bytes.NewReader(snapshotBody), Len: len(snapshotBody)},
+		ut.Header{Key: "content-type", Value: "application/json"},
+		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
+	if snapshot.Code != 200 || !containsJSON(snapshot.Body.Bytes(), `"hasTagSnapshot":true`) || !containsJSON(snapshot.Body.Bytes(), `"TITLE":["Old"]`) {
+		t.Fatalf("revision snapshot = %d %s", snapshot.Code, snapshot.Body.String())
+	}
 	missing := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/revisions/missing", nil)
 	if missing.Code != 404 || !containsJSON(missing.Body.Bytes(), `"code":"revision_not_found"`) {
 		t.Fatalf("missing revision = %d %s", missing.Code, missing.Body.String())
@@ -985,6 +993,24 @@ func TestRevisionHistoryAPI(t *testing.T) {
 		ut.Header{Key: "If-Match", Value: `"` + track.Revision + `"`})
 	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `"code":"invalid_request"`) {
 		t.Fatalf("invalid restore target = %d %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestSystemStorageStatsAndRuntimeCacheClear(t *testing.T) {
+	s := newTestServer(t)
+	if err := s.store.SaveProviderCache(context.Background(), "test-cache", "test-provider", []byte(`{"result":true}`), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SaveArtworkReference(context.Background(), "candidate-cache", "test-provider", "https://cdn.example/cover.jpg", time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	stats := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/system", nil)
+	if stats.Code != 200 || !containsJSON(stats.Body.Bytes(), `"databaseBytes":`) || !containsJSON(stats.Body.Bytes(), `"providerCacheEntries":1`) || !containsJSON(stats.Body.Bytes(), `"artworkReferenceEntries":1`) {
+		t.Fatalf("system storage = %d %s", stats.Code, stats.Body.String())
+	}
+	clear := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/system/cache/clear", nil)
+	if clear.Code != 200 || !containsJSON(clear.Body.Bytes(), `"providerCacheEntries":0`) || !containsJSON(clear.Body.Bytes(), `"artworkReferenceEntries":0`) {
+		t.Fatalf("clear runtime cache = %d %s", clear.Code, clear.Body.String())
 	}
 }
 

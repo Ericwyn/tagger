@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
   getSystem: vi.fn(),
+  clearRuntimeCache: vi.fn(),
   updateSystemSettings: vi.fn(),
   candidateArtworkURL: vi.fn(() => undefined),
 }));
@@ -45,6 +46,11 @@ const candidate = {
   lyrics: {value: '[00:01.00] 第一行歌词\n[00:05.00] 第二行歌词', source: 'MusicBrainz'},
 } as MatchCandidate;
 
+async function openProviderTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', {name: /数据源/}));
+  await screen.findByRole('heading', {name: '音乐数据源'});
+}
+
 describe('SettingsPage provider diagnostics', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,7 +65,8 @@ describe('SettingsPage provider diagnostics', () => {
     api.switchLibrary.mockResolvedValue({id: 'job-switch', state: 'waiting', kind: 'scan', title: '切换曲库', detail: '等待', processed: 0, total: 24, succeeded: 0, failed: 0, startedAt: '刚刚'});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
-    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true});
+    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
+    api.clearRuntimeCache.mockResolvedValue({databaseBytes: 1024 * 1024, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 1024 * 1024});
     api.updateSystemSettings.mockResolvedValue({historyRetention: 20, writeHistory: true});
     api.testProvider.mockResolvedValue({
       provider,
@@ -73,7 +80,7 @@ describe('SettingsPage provider diagnostics', () => {
     const user = userEvent.setup();
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
 
-    expect(await screen.findByRole('heading', {name: '音乐数据源'})).toBeInTheDocument();
+    await openProviderTab(user);
     await user.click(await screen.findByRole('button', {name: '测试查询'}));
     expect(screen.getByRole('dialog', {name: '数据源搜索测试'})).toBeInTheDocument();
     await user.clear(screen.getByRole('textbox', {name: '测试歌曲名'}));
@@ -95,6 +102,7 @@ describe('SettingsPage provider diagnostics', () => {
   it('uses the Chinese default query and remembers later test input', async () => {
     const user = userEvent.setup();
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
     await user.click(await screen.findByRole('button', {name: '测试查询'}));
     expect(screen.getByRole('textbox', {name: '测试歌曲名'})).toHaveValue('最佳歌手');
     expect(screen.getByRole('textbox', {name: '测试歌手'})).toHaveValue('许嵩');
@@ -112,6 +120,7 @@ describe('SettingsPage provider diagnostics', () => {
       logs: [{level: 'error', stage: 'search', message: '数据源搜索失败', details: {error: 'provider HTTP 503: upstream busy', retryable: true, retryAfterMs: 1500}}],
     });
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
     await user.click(await screen.findByRole('button', {name: '测试查询'}));
     await user.click(screen.getByRole('button', {name: '执行查询并探测封面'}));
     expect(await screen.findByText('查询异常')).toBeInTheDocument();
@@ -125,6 +134,7 @@ describe('SettingsPage provider diagnostics', () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
     render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
     await user.click(await screen.findByRole('button', {name: '配置'}));
     expect(screen.getByRole('dialog', {name: '数据源配置'})).toBeInTheDocument();
     const baseURL = screen.getByRole('textbox', {name: 'API Base URL'});
@@ -139,6 +149,7 @@ describe('SettingsPage provider diagnostics', () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
     render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
     await user.click(await screen.findByRole('button', {name: '配置'}));
     const resetButton = screen.getByRole('button', {name: '恢复默认配置'});
     expect(resetButton).toHaveClass('provider-config-reset-button');
@@ -214,5 +225,8 @@ describe('SettingsPage provider diagnostics', () => {
     await user.click(historySwitch);
     await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith({writeHistory: false}));
     expect(historySwitch).not.toBeChecked();
+    expect(screen.getByText('运行数据占用')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: '清理运行缓存'}));
+    await waitFor(() => expect(api.clearRuntimeCache).toHaveBeenCalledTimes(1));
   });
 });

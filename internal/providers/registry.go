@@ -312,6 +312,18 @@ func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error
 	return reference, nil
 }
 
+// ClearArtworkReferences drops the in-memory mirror after the persistence
+// layer has been cleared. The next candidate artwork lookup will repopulate it
+// with a fresh, validated provider URL.
+func (r *Registry) ClearArtworkReferences() {
+	if r == nil {
+		return
+	}
+	r.artworkMu.Lock()
+	r.artworks = make(map[string]ArtworkReference)
+	r.artworkMu.Unlock()
+}
+
 func (r *Registry) rememberArtwork(ctx context.Context, candidateID, providerID, artworkURL string) {
 	if artworkURL == "" {
 		return

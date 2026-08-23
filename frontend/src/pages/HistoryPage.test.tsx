@@ -2,13 +2,12 @@ import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {HistoryPage} from '@/pages/HistoryPage';
-import {listRevisions, previewRevisionRestore, restoreRevision} from '@/api';
-import type {RestorePreview, Revision, Track} from '@/types';
+import {getRevisionSnapshot, listRevisions} from '@/api';
+import type {Revision, RevisionSnapshot} from '@/types';
 
 vi.mock('@/api', () => ({
+  getRevisionSnapshot: vi.fn(),
   listRevisions: vi.fn(),
-  previewRevisionRestore: vi.fn(),
-  restoreRevision: vi.fn(),
 }));
 
 const revision: Revision = {
@@ -28,95 +27,76 @@ const oldRevision: Revision = {
   time: '2025-01-01 12:00',
 };
 
-const preview: RestorePreview = {
-  revisionId: revision.id, trackId: revision.trackId, target: 'before',
-  preview: {
-    baseRevision: 'current-revision', currentRevision: 'current-revision', dryRun: true, changed: true,
-    diff: [{field: 'title', operation: 'set', before: 'New title', after: 'Old title'}],
-    warnings: ['仅恢复标准字段'],
+const snapshot: RevisionSnapshot = {
+  revisionId: revision.id,
+  trackId: revision.trackId,
+  target: 'before',
+  baseRevision: 'current-revision',
+  currentRevision: 'current-revision',
+  hasTagSnapshot: true,
+  tags: {
+    TITLE: ['Old title'], ARTIST: ['Original artist'], ALBUM: ['Original album'],
+    TRACKNUMBER: ['2/10'], DATE: ['2020-01-01'], GENRE: ['Pop'], LYRICS: ['[00:01.00] old'],
   },
 };
 
-describe('HistoryPage restore flow', () => {
+describe('HistoryPage snapshot loading', () => {
   beforeEach(() => {
-	vi.clearAllMocks();
+    vi.clearAllMocks();
     vi.mocked(listRevisions).mockResolvedValue([revision, oldRevision]);
-    vi.mocked(previewRevisionRestore).mockResolvedValue(preview);
-    vi.mocked(restoreRevision).mockResolvedValue({
-      track: {id: revision.trackId, title: 'Old title'} as Track,
-      write: {...preview.preview, dryRun: false},
-      restoredRevisionId: revision.id,
-      target: 'before',
-    });
+    vi.mocked(getRevisionSnapshot).mockResolvedValue(snapshot);
   });
 
-  it('requires a preview before confirming the restore', async () => {
+  it('loads a historical tag snapshot into the editor without writing', async () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
-    render(<HistoryPage onNotice={onNotice} />);
+    const onLoadSnapshot = vi.fn();
+    render(<HistoryPage onNotice={onNotice} onLoadSnapshot={onLoadSnapshot} />);
 
-    await user.click(await screen.findByRole('button', {name: '恢复到修改前…'}));
-    await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(revision));
-    expect(screen.getByText('将当前文件恢复到这次修改之前')).toBeInTheDocument();
-    expect(screen.getByText('仅恢复标准字段')).toBeInTheDocument();
-    expect(screen.getByRole('insertion')).toHaveTextContent('Old title');
-
-    await user.click(screen.getByRole('button', {name: '确认恢复'}));
-    await waitFor(() => expect(restoreRevision).toHaveBeenCalledWith(revision, preview));
-    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('生成新的审计记录'));
+    await user.click(await screen.findByRole('button', {name: '加载快照到曲目编辑器'}));
+    await waitFor(() => expect(getRevisionSnapshot).toHaveBeenCalledWith(revision));
+    expect(onLoadSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      revisionId: revision.id,
+      trackId: revision.trackId,
+      label: `历史修订 ${revision.id}`,
+      patch: expect.objectContaining({title: 'Old title', trackNumber: 2, trackTotal: 10, year: 2020}),
+    }));
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('已加载到曲目编辑器'));
   });
 
-  it('previews artwork-only revisions now that binary blobs are persisted', async () => {
-	const artworkRevision: Revision = {
-	  ...revision,
-	  action: '替换封面',
-	  fields: ['artwork'],
-	  diff: [{
-		field: 'artwork', operation: 'set',
-		before: {format: 'JPEG', width: 1200, height: 1200, size: 500000, hash: 'a'.repeat(64)},
-		after: {format: 'JPEG', width: 600, height: 600, size: 90000, hash: 'b'.repeat(64)},
-	  }],
-	};
-	const artworkPreview = {...preview, revisionId: artworkRevision.id, trackId: artworkRevision.trackId, preview: {...preview.preview, diff: [{field: 'artwork', operation: 'set' as const, before: artworkRevision.diff![0].after, after: artworkRevision.diff![0].before}]}};
-	vi.mocked(listRevisions).mockResolvedValue([artworkRevision]);
-	vi.mocked(previewRevisionRestore).mockResolvedValue(artworkPreview);
-	render(<HistoryPage onNotice={vi.fn()} />);
+  it('opens artwork-only revisions without turning an empty tag snapshot into deletes', async () => {
+    const user = userEvent.setup();
+    const artworkRevision: Revision = {...revision, fields: ['artwork'], diff: [{
+      field: 'artwork', operation: 'set',
+      before: {format: 'JPEG', width: 1200, height: 1200, size: 500000, hash: 'a'.repeat(64)},
+      after: {format: 'JPEG', width: 600, height: 600, size: 90000, hash: 'b'.repeat(64)},
+    }]};
+    vi.mocked(listRevisions).mockResolvedValue([artworkRevision]);
+    vi.mocked(getRevisionSnapshot).mockResolvedValue({
+      ...snapshot, revisionId: artworkRevision.id, hasTagSnapshot: false, tags: {}, artwork: {mime: 'image/jpeg', format: 'JPEG', width: 1200, height: 1200, size: 500000, hash: 'a'.repeat(64)},
+    });
+    const onLoadSnapshot = vi.fn();
+    render(<HistoryPage onNotice={vi.fn()} onLoadSnapshot={onLoadSnapshot} />);
 
-	const restoreButton = await screen.findByRole('button', {name: '恢复到修改前…'});
-	expect(restoreButton).toBeEnabled();
-	await userEvent.setup().click(restoreButton);
-	await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(artworkRevision));
-	expect(screen.getByRole('deletion')).toHaveTextContent('JPEG · 600×600');
-    expect(screen.getByRole('insertion')).toHaveTextContent('JPEG · 1200×1200');
+    await user.click(await screen.findByRole('button', {name: '加载快照到曲目编辑器'}));
+    await waitFor(() => expect(getRevisionSnapshot).toHaveBeenCalledWith(artworkRevision));
+    expect(onLoadSnapshot).toHaveBeenCalledWith(expect.objectContaining({patch: undefined}));
   });
 
-  it('keeps legacy restore previews with null optional arrays renderable', async () => {
-    const legacyPreview = {
-      ...preview,
-      preview: {
-        ...preview.preview,
-        diff: null as unknown as RestorePreview['preview']['diff'],
-        warnings: null as unknown as RestorePreview['preview']['warnings'],
-      },
-    };
+  it('keeps legacy revisions with null optional arrays renderable', async () => {
     vi.mocked(listRevisions).mockResolvedValue([{
       ...revision,
       fields: ['artwork'],
       diff: null as unknown as Revision['diff'],
     }]);
-    vi.mocked(previewRevisionRestore).mockResolvedValue(legacyPreview);
-    const user = userEvent.setup();
-    render(<HistoryPage onNotice={vi.fn()} />);
-
-    await user.click(await screen.findByRole('button', {name: '恢复到修改前…'}));
-    await waitFor(() => expect(previewRevisionRestore).toHaveBeenCalledWith(expect.objectContaining({id: revision.id})));
-    expect(screen.getByText('将当前文件恢复到这次修改之前')).toBeInTheDocument();
+    render(<HistoryPage onNotice={vi.fn()} onLoadSnapshot={vi.fn()} />);
+    expect(await screen.findByRole('heading', {name: '修改标签'})).toBeInTheDocument();
     expect(screen.queryByText('null')).not.toBeInTheDocument();
   });
 
   it('filters revisions by source and recent date', async () => {
     const user = userEvent.setup();
-    render(<HistoryPage onNotice={vi.fn()} />);
+    render(<HistoryPage onNotice={vi.fn()} onLoadSnapshot={vi.fn()} />);
 
     expect(await screen.findByRole('button', {name: /Old song/})).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', {name: '历史来源筛选'}), '批量编辑');
@@ -124,7 +104,7 @@ describe('HistoryPage restore flow', () => {
     expect(screen.queryByRole('button', {name: /New title/})).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByRole('combobox', {name: '历史时间筛选'}), '30d');
-    expect(screen.queryByRole('button', {name: /Old song/})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: /Old song/ })).not.toBeInTheDocument();
     expect(screen.getByText('没有匹配的修订')).toBeInTheDocument();
   });
 });

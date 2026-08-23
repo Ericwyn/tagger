@@ -7,9 +7,10 @@ import type {
   MatchCandidate,
 	MatchItem,
 	ProviderConfig,
-	ProviderTestResponse,
+	  ProviderTestResponse,
   RestorePreview,
-  RestoreResult,
+	RestoreResult,
+	RevisionSnapshot,
 	Revision,
 	RawTagsResponse,
 	LyricsSidecarResponse,
@@ -61,7 +62,12 @@ export async function switchLibrary(libraryId: string, path: string): Promise<Jo
 }
 
 export function getSystem(): Promise<SystemInfo> {
-  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20, writeHistory: true}) : real.getSystem();
+  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20, writeHistory: true, storage: {databaseBytes: 0, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 0}}) : real.getSystem();
+}
+
+export function clearRuntimeCache(): Promise<NonNullable<SystemInfo['storage']>> {
+  if (apiReadMode === 'mock') return Promise.resolve({databaseBytes: 0, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 0});
+  return real.clearRuntimeCache();
 }
 
 export function updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
@@ -280,6 +286,13 @@ export function restoreRevision(revision: Revision, preview: RestorePreview): Pr
     return Promise.reject(new Error('历史恢复仅在真实后端模式可用'));
   }
   return real.restoreRevision(revision.id, preview.preview.currentRevision);
+}
+
+export function getRevisionSnapshot(revision: Revision): Promise<RevisionSnapshot> {
+  if (apiReadMode === 'mock' || !revision.currentRevision) {
+    return Promise.reject(new Error('历史快照仅在真实后端模式可用'));
+  }
+  return real.getRevisionSnapshot(revision.id, revision.currentRevision);
 }
 
 export function artworkURL(track: Track): string | undefined {

@@ -5,10 +5,11 @@ import type {
   MatchCandidate,
 	MatchItem,
   ArtworkWriteResult,
-	ProviderConfig,
-	ProviderTestResponse,
+  ProviderConfig,
+  ProviderTestResponse,
   RestorePreview,
 	RestoreResult,
+	RevisionSnapshot,
 	Revision,
 	RevisionDiff,
 	RawTagsResponse,
@@ -64,6 +65,16 @@ export interface SystemInfo {
   listen?: string;
   historyRetention?: number;
   writeHistory?: boolean;
+  storage?: SystemStorageInfo;
+}
+
+export interface SystemStorageInfo {
+  dataDir?: string;
+  databaseBytes: number;
+  artworkCacheBytes: number;
+  providerCacheEntries: number;
+  artworkReferenceEntries: number;
+  totalBytes: number;
 }
 
 interface FieldOperation<T> {
@@ -185,6 +196,16 @@ function normalizeRestorePreview(value: RestorePreview): RestorePreview {
   };
 }
 
+function normalizeRevisionSnapshot(value: RevisionSnapshot): RevisionSnapshot {
+  const raw = value as RevisionSnapshot & Record<string, unknown>;
+  const tags = raw.tags && typeof raw.tags === 'object' ? raw.tags as Record<string, unknown> : {};
+  return {
+    ...value,
+    hasTagSnapshot: Boolean(raw.hasTagSnapshot),
+    tags: Object.fromEntries(Object.entries(tags).map(([key, values]) => [key, stringArray(values)])),
+  };
+}
+
 function normalizeTrackResult<T extends {track: Track}>(result: T): T {
   return {...result, track: normalizeTrack(result.track)};
 }
@@ -214,6 +235,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
   return {
     getSystem(): Promise<SystemInfo> {
       return request<SystemInfo>('/api/v1/system');
+    },
+
+    clearRuntimeCache(): Promise<SystemStorageInfo> {
+      return request<{storage: SystemStorageInfo}>('/api/v1/system/cache/clear', {method: 'POST'}).then((result) => result.storage);
     },
 
     updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
@@ -445,12 +470,20 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       }).then(normalizeRestorePreview);
     },
 
-    restoreRevision(revisionId: string, baseRevision: string): Promise<RestoreResult> {
+	    restoreRevision(revisionId: string, baseRevision: string): Promise<RestoreResult> {
       return request<RestoreResult>(`/api/v1/revisions/${encodeURIComponent(revisionId)}/restore`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
         body: JSON.stringify({baseRevision, target: 'before'}),
       }).then(normalizeTrackResult);
+	    },
+
+    getRevisionSnapshot(revisionId: string, baseRevision: string): Promise<RevisionSnapshot> {
+      return request<RevisionSnapshot>(`/api/v1/revisions/${encodeURIComponent(revisionId)}/snapshot`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'If-Match': `"${baseRevision}"`},
+        body: JSON.stringify({baseRevision, target: 'before'}),
+      }).then(normalizeRevisionSnapshot);
     },
 
 	writeArtwork(track: Track, file: File, maxSize = 0): Promise<ArtworkWriteResult> {

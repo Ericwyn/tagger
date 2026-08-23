@@ -8,15 +8,15 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
-  X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {cn} from '@/lib/utils';
-import {listRevisions, previewRevisionRestore, restoreRevision} from '@/api';
-import {historyRetentionOptions, type HistoryRetention, type RestorePreview, type Revision} from '@/types';
+import {getRevisionSnapshot, listRevisions} from '@/api';
+import {historyRetentionOptions, type HistoryRetention, type RestoreDraftRequest, type Revision, type TrackPatch} from '@/types';
 
 interface HistoryPageProps {
   onNotice: (message: string) => void;
+  onLoadSnapshot?: (request: RestoreDraftRequest) => void;
   showGeneratedCovers?: boolean;
 }
 
@@ -28,16 +28,15 @@ function readHistoryRetention(): HistoryRetention {
   return historyRetentionOptions.includes(value as HistoryRetention) ? value as HistoryRetention : 20;
 }
 
-export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPageProps) {
+export function HistoryPage({onNotice, onLoadSnapshot = () => undefined, showGeneratedCovers = false}: HistoryPageProps) {
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState<HistoryDateFilter>('all');
-  const [restorePreview, setRestorePreview] = useState<RestorePreview>();
-  const [restoreState, setRestoreState] = useState<'idle' | 'previewing' | 'restoring'>('idle');
-  const [restoreError, setRestoreError] = useState('');
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
+  const [snapshotError, setSnapshotError] = useState('');
   const [historyRetention] = useState<HistoryRetention>(readHistoryRetention);
 
   const reload = async () => {
@@ -52,9 +51,7 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
   }, []);
 
   useEffect(() => {
-	setRestorePreview(undefined);
-	setRestoreState('idle');
-	setRestoreError('');
+    setSnapshotError('');
   }, [activeId]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -71,38 +68,26 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
 	const recordedDiff = active?.diff?.length
     ? active.diff
 	    : activeFields.map((field) => ({field, operation: 'set' as const, before: undefined, after: undefined}));
-	const activeDiff = Array.isArray(restorePreview?.preview?.diff) ? restorePreview.preview.diff : recordedDiff;
-	const restoreWarnings = Array.isArray(restorePreview?.preview?.warnings) ? restorePreview.preview.warnings : [];
-	const hasRestorableFields = activeFields.length > 0;
-
-	const buildRestorePreview = async () => {
-	  if (!active) return;
-	  setRestoreState('previewing');
-	  setRestoreError('');
+	const activeDiff = recordedDiff;
+	const loadSnapshot = async () => {
+	  if (!active?.currentRevision) return;
+	  setSnapshotLoading(true);
+	  setSnapshotError('');
 	  try {
-		setRestorePreview(await previewRevisionRestore(active));
+		const snapshot = await getRevisionSnapshot(active);
+		const patch = snapshot.hasTagSnapshot ? patchFromRawTags(snapshot.tags) : undefined;
+		onLoadSnapshot({
+		  key: `${snapshot.revisionId}:${snapshot.currentRevision}:${snapshot.target}`,
+		  revisionId: snapshot.revisionId,
+		  trackId: snapshot.trackId,
+		  patch,
+		  label: `历史修订 ${snapshot.revisionId}`,
+		});
+		onNotice(patch ? '历史标签快照已加载到曲目编辑器，请确认后再保存' : '该修订没有标签字段，已打开曲目编辑器供你确认');
 	  } catch (error) {
-		setRestoreError(error instanceof Error ? error.message : '恢复预览失败');
+		setSnapshotError(error instanceof Error ? error.message : '历史快照加载失败');
 	  } finally {
-		setRestoreState('idle');
-	  }
-	};
-
-	const confirmRestore = async () => {
-	  if (!active || !restorePreview) return;
-	  setRestoreState('restoring');
-	  setRestoreError('');
-	  try {
-		const result = await restoreRevision(active, restorePreview);
-		onNotice(result.write.changed
-		  ? `已将「${result.track.title}」恢复到该修订修改前，并生成新的审计记录`
-		  : `「${result.track.title}」当前已是目标版本`);
-		setRestorePreview(undefined);
-		await reload();
-	  } catch (error) {
-		setRestoreError(error instanceof Error ? error.message : '恢复失败');
-	  } finally {
-		setRestoreState('idle');
+		setSnapshotLoading(false);
 	  }
 	};
 
@@ -187,14 +172,7 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
               <div><FileClock size={15} /><span>修改来源</span><strong>{active.source}</strong></div>
             </div>
             <div className="revision-diff">
-			  {restorePreview && (
-				<div className="restore-preview-banner">
-				  <span>RESTORE PREVIEW</span>
-				  <strong>将当前文件恢复到这次修改之前</strong>
-				  <small>以下是相对当前磁盘标签即将发生的变化，尚未写入。</small>
-				</div>
-			  )}
-			  <div className="revision-diff-head"><span>字段</span><span>{restorePreview ? '当前值' : '修改前'}</span><span /><span>{restorePreview ? '恢复后' : '修改后'}</span></div>
+			  <div className="revision-diff-head"><span>字段</span><span>修改前</span><span /><span>修改后</span></div>
               {activeDiff.map((diff) => (
                 <div key={diff.field}>
                   <strong>{fieldLabel(diff.field)}</strong>
@@ -204,8 +182,7 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
                 </div>
               ))}
             </div>
-			{restoreWarnings.map((warning) => <p className="restore-warning" key={warning}>{warning}</p>)}
-			{restoreError && <p className="restore-error">{restoreError}</p>}
+			{snapshotError && <p className="restore-error">{snapshotError}</p>}
             <div className="integrity-note">
               <Check size={15} />
               <span>
@@ -213,29 +190,18 @@ export function HistoryPage({onNotice, showGeneratedCovers = false}: HistoryPage
                 <small>文件容器、时长与音频属性保持一致</small>
               </span>
             </div>
-			{restorePreview ? (
-			  <div className="restore-actions">
-				<button className="secondary-button" disabled={restoreState !== 'idle'} onClick={() => setRestorePreview(undefined)}>
-				  <X size={15} /> 取消
-				</button>
-				<button
-				  className="primary-button"
-				  disabled={restoreState !== 'idle' || !restorePreview.preview.changed}
-				  onClick={() => void confirmRestore()}
-				>
-				  <RotateCcw size={15} /> {restoreState === 'restoring' ? '恢复中…' : restorePreview.preview.changed ? '确认恢复' : '当前已是目标版本'}
-				</button>
-			  </div>
-			) : (
-			  <button
-				className="secondary-button full-button"
-				disabled={restoreState !== 'idle' || !active.currentRevision || !hasRestorableFields}
-				title={!hasRestorableFields ? '当前修订没有可恢复字段' : active.currentRevision ? '先生成相对当前文件的恢复预览' : '对应曲目不存在或当前处于 Mock 模式'}
-				onClick={() => void buildRestorePreview()}
-			>
-				<RotateCcw size={15} /> {restoreState === 'previewing' ? '生成预览中…' : '恢复到修改前…'}
-			  </button>
-			)}
+            <div className="restore-draft-note">
+              <strong>恢复是一个可确认的编辑草稿</strong>
+              <span>快照只会加载到曲目编辑器，不会直接修改音乐文件；你可以继续调整字段，再由编辑器的安全写入流程保存。</span>
+            </div>
+            <button
+              className="secondary-button full-button"
+              disabled={snapshotLoading || !active.currentRevision}
+              title={active.currentRevision ? '加载快照并打开曲目编辑器' : '对应曲目不存在或当前处于 Mock 模式'}
+              onClick={() => void loadSnapshot()}
+            >
+              <RotateCcw size={15} /> {snapshotLoading ? '加载快照中…' : '加载快照到曲目编辑器'}
+            </button>
           </aside>
         )}
         {!active && state === 'ready' && (
@@ -287,4 +253,61 @@ function fullDiffValue(value: unknown): string {
 function formatDiffValue(value: unknown): string {
   const text = fullDiffValue(value).replace(/\s+/g, ' ').trim();
   return text.length > 72 ? `${text.slice(0, 69)}…` : text;
+}
+
+function rawValues(tags: Record<string, string[]>, ...keys: string[]): string[] {
+  for (const key of keys) {
+    const exact = tags[key];
+    if (Array.isArray(exact)) return exact.filter((value) => typeof value === 'string');
+    const normalized = Object.entries(tags).find(([candidate]) => candidate.toUpperCase() === key.toUpperCase())?.[1];
+    if (Array.isArray(normalized)) return normalized.filter((value) => typeof value === 'string');
+  }
+  return [];
+}
+
+function rawFirst(tags: Record<string, string[]>, ...keys: string[]): string {
+  return rawValues(tags, ...keys)[0]?.trim() ?? '';
+}
+
+function rawNumber(tags: Record<string, string[]>, ...keys: string[]): number | undefined {
+  const value = Number.parseInt(rawFirst(tags, ...keys), 10);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function rawIndex(tags: Record<string, string[]>, valueKeys: string[], totalKeys: string[]): [number | undefined, number | undefined] {
+  const value = rawFirst(tags, ...valueKeys);
+  const [index, total] = value.split('/', 2).map((part) => Number.parseInt(part.trim(), 10));
+  return [Number.isFinite(index) ? index : undefined, Number.isFinite(total) ? total : rawNumber(tags, ...totalKeys)];
+}
+
+function patchFromRawTags(tags: Record<string, string[]>): TrackPatch {
+  const [trackNumber, trackTotal] = rawIndex(tags, ['TRACKNUMBER'], ['TRACKTOTAL', 'TOTALTRACKS']);
+  const [discNumber, discTotal] = rawIndex(tags, ['DISCNUMBER'], ['DISCTOTAL', 'TOTALDISCS']);
+  const yearValue = rawFirst(tags, 'DATE', 'YEAR', 'RELEASEDATE');
+  const year = yearValue ? Number.parseInt(yearValue.slice(0, 4), 10) : undefined;
+  return {
+    title: rawFirst(tags, 'TITLE', 'SUBTITLE'),
+    artists: rawValues(tags, 'ARTIST', 'ARTISTS'),
+    album: rawFirst(tags, 'ALBUM'),
+    albumArtists: rawValues(tags, 'ALBUMARTIST', 'ALBUM ARTIST'),
+    trackNumber,
+    trackTotal,
+    discNumber,
+    discTotal,
+    year: Number.isFinite(year) ? year : undefined,
+    genres: rawValues(tags, 'GENRE'),
+    lyrics: rawFirst(tags, 'LYRICS', 'UNSYNCEDLYRICS', 'UNSYNCED LYRICS'),
+    comment: rawFirst(tags, 'COMMENT', 'DESCRIPTION'),
+    composers: rawValues(tags, 'COMPOSER', 'COMPOSERS'),
+    conductor: rawFirst(tags, 'CONDUCTOR'),
+    lyricists: rawValues(tags, 'LYRICIST', 'LYRICISTS'),
+    copyright: rawFirst(tags, 'COPYRIGHT'),
+    bpm: rawNumber(tags, 'BPM', 'TBPM'),
+    isrc: rawFirst(tags, 'ISRC'),
+    musicbrainzTrackId: rawFirst(tags, 'MUSICBRAINZ_TRACKID', 'MUSICBRAINZ_TRACK_ID'),
+    musicbrainzReleaseId: rawFirst(tags, 'MUSICBRAINZ_ALBUMID', 'MUSICBRAINZ_RELEASEID', 'MUSICBRAINZ_RELEASE_ID'),
+    musicbrainzArtistIds: rawValues(tags, 'MUSICBRAINZ_ARTISTID', 'MUSICBRAINZ_ARTIST_ID'),
+    acoustidId: rawFirst(tags, 'ACOUSTID_ID', 'ACOUSTID'),
+    acoustidFingerprint: rawFirst(tags, 'ACOUSTID_FINGERPRINT'),
+  };
 }
