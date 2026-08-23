@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -882,6 +884,43 @@ func TestCandidateArtworkPreviewUsesShortLivedProviderReference(t *testing.T) {
 	response := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/matches/candidates/"+result.Candidates[0].ID+"/artwork", nil)
 	if response.Code != 200 || response.Body.String() != "preview-image" || response.Result().Header.Get("Content-Type") != "image/png" || response.Result().Header.Get("Cache-Control") != "private, max-age=300" {
 		t.Fatalf("candidate preview = %d type=%q cache=%q body=%q", response.Code, response.Result().Header.Get("Content-Type"), response.Result().Header.Get("Cache-Control"), response.Body.String())
+	}
+}
+
+func TestFetchArtworkUsesDiskCacheAcrossURLQueryVariants(t *testing.T) {
+	cache, err := artwork.NewCache(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var imageData bytes.Buffer
+	if err := png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := artwork.Validate(imageData.Bytes(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	s := &Server{
+		artworkCache: cache,
+	}
+	s.downloadArtwork = func(_ context.Context, _ providers.ArtworkReference) (artwork.Asset, error) {
+		calls++
+		return asset, nil
+	}
+	first, err := s.fetchArtwork(context.Background(), providers.ArtworkReference{URL: "https://cdn.example.test/cover.jpg?size=500"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.fetchArtwork(context.Background(), providers.ArtworkReference{URL: "https://cdn.example.test/cover.jpg?size=1000"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected one remote artwork request, got %d", calls)
+	}
+	if first.Hash != asset.Hash || second.Hash != asset.Hash {
+		t.Fatalf("cached artwork hash mismatch: first=%s second=%s expected=%s", first.Hash, second.Hash, asset.Hash)
 	}
 }
 
