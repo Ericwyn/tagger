@@ -27,6 +27,13 @@ describe('ReviewPage field selection', () => {
 	expect(artworkSize).toHaveValue('500');
 	});
 
+  it('defaults a fetched cover on when the local track has no artwork', async () => {
+    render(<ReviewPage trackIds={['trk-004']} onBack={vi.fn()} onComplete={vi.fn()} />);
+
+    expect(await screen.findByRole('heading', {name: '我是不是你最疼爱的人'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: '取消采用替换封面'})).toHaveClass('is-checked');
+  });
+
   it('opens every candidate and lets the reviewer choose a specific source', async () => {
     const user = userEvent.setup();
     render(<ReviewPage trackIds={['trk-001', 'trk-002']} onBack={vi.fn()} onComplete={vi.fn()} />);

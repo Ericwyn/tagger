@@ -4007,13 +4007,17 @@ button:disabled {
 
 /* Review */
 .review-page {
-  grid-template-rows: auto 53px minmax(0, 1fr) auto;
+  grid-template-rows: auto 58px minmax(0, 1fr);
+  padding-bottom: 14px;
 }
 
 .review-header {
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr) auto;
   gap: 18px;
+  min-height: 96px;
+  padding-top: 12px;
+  padding-bottom: 14px;
 }
 
 .back-button {
@@ -4056,12 +4060,36 @@ button:disabled {
 }
 
 .review-toolbar {
+  position: sticky;
+  z-index: 8;
+  top: 0;
+  min-height: 58px;
   padding-right: 0;
   padding-left: 0;
+  background: var(--paper);
 }
 
 .review-toolbar > span {
   flex: 1;
+}
+
+.review-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.review-toolbar-actions > button {
+  white-space: nowrap;
+}
+
+.review-write-error {
+  max-width: 210px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.35;
 }
 
 .review-empty-filter {
@@ -4128,13 +4156,24 @@ button:disabled {
   text-align: left;
 }
 
-.review-row:hover,
-.review-row.is-active {
+.review-row:hover {
   background: var(--paper-2);
 }
 
 .review-row.is-active {
-  box-shadow: inset 3px 0 var(--accent);
+  position: relative;
+  z-index: 1;
+  background: color-mix(in srgb, var(--accent) 13%, var(--paper-2));
+  box-shadow: inset 5px 0 var(--accent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.review-row.is-active .review-track-copy strong,
+.review-row.is-active .review-candidate-copy strong {
+  color: var(--ink);
+}
+
+.review-row.is-active .review-state {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .review-track-copy,
@@ -4185,8 +4224,43 @@ button:disabled {
 .review-state.is-skipped { color: var(--muted); }
 
 .review-detail {
-  padding: 20px;
+  padding: 0 20px 22px;
   background: var(--paper);
+}
+
+.review-detail-action-bar {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.review-detail-action-bar > span {
+  min-width: 0;
+}
+
+.review-detail-action-bar > span strong,
+.review-detail-action-bar > span small {
+  display: block;
+}
+
+.review-detail-action-bar > span strong {
+  font-family: var(--display);
+  font-size: 13px;
+}
+
+.review-detail-action-bar > span small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .review-detail-head {
@@ -4489,34 +4563,15 @@ button:disabled {
   align-items: center;
   justify-content: flex-end;
   gap: 7px;
-  margin-top: 15px;
+  flex: 0 0 auto;
 }
 
 .review-detail-actions .danger-quiet {
   width: auto;
-  margin: 0 auto 0 0;
-}
-
-.review-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 65px;
-  padding: 10px 0 0;
-}
-
-.review-footer > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.review-footer strong {
-  color: var(--ink);
-  font-family: var(--display);
-  font-size: 16px;
+  margin: 0;
+  padding-right: 8px;
+  padding-left: 8px;
+  white-space: nowrap;
 }
 
 /* Jobs */
@@ -6519,6 +6574,10 @@ button:disabled {
     overflow: visible;
   }
 
+  .review-detail-action-bar {
+    position: static;
+  }
+
   .jobs-layout,
   .history-layout {
     grid-template-columns: 1fr;
@@ -6961,6 +7020,50 @@ button:disabled {
     padding: 14px;
   }
 
+  .review-toolbar {
+    flex-wrap: wrap;
+    min-height: auto;
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  .review-toolbar-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .review-toolbar-actions > button {
+    min-width: 0;
+    padding-right: 7px;
+    padding-left: 7px;
+    font-size: 11px;
+  }
+
+  .review-write-error {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
+
+  .review-detail-action-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .review-detail-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .review-detail-actions > button {
+    min-width: 0;
+    padding-right: 6px;
+    padding-left: 6px;
+    font-size: 11px;
+  }
+
   .record-comparison .cover-md:last-child,
   .comparison-line {
     display: none;
@@ -6974,17 +7077,6 @@ button:disabled {
   .review-diff-head > *:last-child,
   .review-diff-row > *:last-child {
     display: none;
-  }
-
-  .review-footer {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 7px;
-  }
-
-  .review-footer > div:last-child {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
   }
 
   .jobs-layout,

@@ -37,6 +37,7 @@ interface ReviewItem {
   state: ReviewState;
   fields: string[];
   includeArtwork: boolean;
+  artworkTouched: boolean;
   artworkMaxSize: number;
   error?: string;
 }
@@ -178,8 +179,9 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const [query, setQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('all');
 	const [sourceFilter, setSourceFilter] = useState('all');
-  const [rematching, setRematching] = useState(false);
+	const [rematching, setRematching] = useState(false);
 	const [rematchError, setRematchError] = useState('');
+	const [writeError, setWriteError] = useState('');
 	const [job, setJob] = useState<Job>();
 	const [candidatePickerOpen, setCandidatePickerOpen] = useState(false);
 	const [assetPreview, setAssetPreview] = useState<ReviewAssetPreview>();
@@ -197,6 +199,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       let selectedCandidateByTrack = new Map<string, string>();
 	  let reviewFieldsByTrack = new Map<string, string[] | null | undefined>();
 	  let reviewArtworkByTrack = new Map<string, boolean>();
+	  let reviewArtworkTouchedByTrack = new Map<string, boolean>();
 	  let reviewArtworkMaxSizeByTrack = new Map<string, number>();
       if (apiReadMode === 'real') {
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
@@ -232,6 +235,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
             .map((item) => [item.trackId, item.selectedCandidateId!] as const));
 		  reviewFieldsByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewFields] as const));
 		  reviewArtworkByTrack = new Map(matchItems.map((item) => [item.trackId, Boolean(item.reviewArtwork)] as const));
+		  reviewArtworkTouchedByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewFields != null || Boolean(item.reviewArtwork) || (item.reviewArtworkMaxSize ?? 0) > 0] as const));
 		  reviewArtworkMaxSizeByTrack = new Map(matchItems.map((item) => [item.trackId, item.reviewArtworkMaxSize ?? 0] as const));
         }
       }
@@ -241,12 +245,15 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
         const candidate = candidates.find((item) => item.id === selectedCandidateByTrack.get(track.id)) ?? candidates[0];
         const noMatch = !candidate || itemState === 'no_match' || itemState === 'failed';
         const persistedFields = reviewFieldsByTrack.get(track.id);
+        const artworkTouched = reviewArtworkTouchedByTrack.get(track.id) ?? false;
+        const defaultIncludeArtwork = Boolean(candidate?.hasArtwork && track.artworkCount === 0);
         return {
           track,
           candidate,
           candidates,
           fields: candidate ? (persistedFields == null ? changedFields(track, candidate) : persistedFields) : [],
-          includeArtwork: reviewArtworkByTrack.get(track.id) ?? false,
+	      artworkTouched,
+          includeArtwork: artworkTouched ? (reviewArtworkByTrack.get(track.id) ?? false) : defaultIncludeArtwork,
 		  artworkMaxSize: reviewArtworkMaxSizeByTrack.get(track.id) ?? 0,
           error: errorByTrack.get(track.id),
           state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 ? 'accepted' as const : 'review' as const,
@@ -355,10 +362,14 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const selectCandidate = (trackId: string, nextCandidate: MatchCandidate) => {
     const item = items.find((entry) => entry.track.id === trackId);
     if (!item) return;
+    const includeArtwork = item.artworkTouched
+      ? item.includeArtwork && nextCandidate.hasArtwork
+      : Boolean(nextCandidate.hasArtwork && item.track.artworkCount === 0);
+    const nextFields = changedFields(item.track, nextCandidate);
     setItems((current) => current.map((entry) => entry.track.id === trackId
-      ? {...entry, candidate: nextCandidate, fields: changedFields(entry.track, nextCandidate), state: 'review'}
+      ? {...entry, candidate: nextCandidate, fields: nextFields, includeArtwork, state: 'review'}
       : entry));
-    persistReviewState(trackId, 'review', nextCandidate.id, changedFields(item.track, nextCandidate), false, 0);
+	 persistReviewState(trackId, 'review', nextCandidate.id, nextFields, includeArtwork, includeArtwork ? item.artworkMaxSize : 0);
 	setCandidatePickerOpen(false);
   };
 
@@ -367,14 +378,14 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     if (!item) return;
     const includeArtwork = !item.includeArtwork;
     const artworkMaxSize = includeArtwork ? item.artworkMaxSize : 0;
-    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, includeArtwork, artworkMaxSize} : entry));
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, includeArtwork, artworkTouched: true, artworkMaxSize} : entry));
     persistReviewState(trackId, item.state, item.candidate?.id, item.fields, includeArtwork, artworkMaxSize);
   };
 
   const setArtworkMaxSize = (trackId: string, artworkMaxSize: number) => {
     const item = items.find((entry) => entry.track.id === trackId);
     if (!item || !item.includeArtwork) return;
-    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, artworkMaxSize} : entry));
+    setItems((current) => current.map((entry) => entry.track.id === trackId ? {...entry, artworkTouched: true, artworkMaxSize} : entry));
     persistReviewState(trackId, item.state, item.candidate?.id, item.fields, true, artworkMaxSize);
   };
 
@@ -393,7 +404,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           candidate,
           candidates,
           fields: candidate ? changedFields(active.track, candidate) : [],
-          includeArtwork: false,
+          includeArtwork: Boolean(candidate?.hasArtwork && active.track.artworkCount === 0),
+          artworkTouched: false,
           artworkMaxSize: 0,
           state: candidate ? 'review' : 'skipped',
           error: result.error,
@@ -405,6 +417,43 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       setRematchError(error instanceof Error ? error.message : '重新匹配失败');
     } finally {
       setRematching(false);
+    }
+  };
+
+  const skipCurrent = () => {
+    if (!active) return;
+    setItemState(active.track.id, 'skipped');
+    persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0);
+    moveToNext(active.track.id);
+  };
+
+  const acceptCurrent = () => {
+    if (!active?.candidate) return;
+    setItemState(active.track.id, 'accepted');
+    persistReviewState(active.track.id, 'accepted', active.candidate.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0);
+    moveToNext(active.track.id);
+  };
+
+  const confirmWrite = async () => {
+    if (accepted === 0 || applying) return;
+    setApplying(true);
+    setWriteError('');
+    try {
+      if (apiReadMode === 'real' && job) {
+        await createWriteJob(job.id, items.filter((item) => item.state === 'accepted' && item.candidate).map((item) => ({
+          trackId: item.track.id, candidateId: item.candidate!.id, baseRevision: item.track.revision,
+          fields: item.fields,
+          artwork: item.includeArtwork,
+          artworkMaxSize: item.includeArtwork ? item.artworkMaxSize : 0,
+        })));
+      } else {
+        await new Promise((resolve) => window.setTimeout(resolve, 700));
+      }
+      onComplete();
+    } catch (error) {
+      setWriteError(error instanceof Error ? error.message : '写入任务创建失败');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -461,16 +510,24 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           </select>
         </label>
         <span />
-        <button
-          className="secondary-button"
-          onClick={() => {
-            const highConfidence = items.filter((item) => item.candidate && item.candidate.score >= 0.92);
-            setItems((current) => current.map((item) => item.candidate && item.candidate.score >= 0.92 ? {...item, state: 'accepted'} : item));
-            highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0));
-          }}
-        >
-          <Check size={15} /> 接受所有高置信
-        </button>
+        <div className="review-toolbar-actions">
+          <button
+            className="secondary-button"
+            onClick={() => {
+              const highConfidence = items.filter((item) => item.candidate && item.candidate.score >= 0.92);
+              setItems((current) => current.map((item) => item.candidate && item.candidate.score >= 0.92 ? {...item, state: 'accepted'} : item));
+              highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0));
+            }}
+          >
+            <Check size={15} /> 接受所有高置信
+          </button>
+          <button className="secondary-button" onClick={onBack} disabled={applying}>保存草稿并返回</button>
+          <button className="primary-button" disabled={accepted === 0 || applying} onClick={() => void confirmWrite()}>
+            {applying ? <LoaderCircle className="spin" size={15} /> : <FileCheck2 size={15} />}
+            确认并创建写入任务
+          </button>
+          {writeError && <small className="review-write-error">{writeError}</small>}
+        </div>
       </div>
 
       <div className="review-layout">
@@ -522,6 +579,14 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
         {active && active.candidate && (
           <section className="review-detail">
+            <div className="review-detail-action-bar">
+              <span><strong>当前曲目操作</strong><small>{active.state === 'accepted' ? '已接受，可继续调整字段' : active.state === 'skipped' ? '已跳过，可重新选择' : '确认字段后进入下一首'}</small></span>
+              <div className="review-detail-actions">
+                <button className="danger-quiet" onClick={skipCurrent}><X size={15} /> 跳过此曲</button>
+                <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => setCandidatePickerOpen((value) => !value)}><ChevronRight size={15} /> 更换候选</button>
+                <button className="primary-button" onClick={acceptCurrent}><Check size={15} /> 接受候选</button>
+              </div>
+            </div>
             <div className="review-detail-head">
               <div className="record-comparison">
                 <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} imageUrl={artworkURL(active.track)} blankOnImageError={!showGeneratedCovers} size="md" />
@@ -611,11 +676,6 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               </div>
             )}
 
-            <div className="review-detail-actions">
-              <button className="danger-quiet" onClick={() => { setItemState(active.track.id, 'skipped'); persistReviewState(active.track.id, 'skipped', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><X size={15} /> 跳过此曲</button>
-              <button className="secondary-button" disabled={active.candidates.length < 2} onClick={() => setCandidatePickerOpen((value) => !value)}><ChevronRight size={15} /> 更换候选</button>
-              <button className="primary-button" onClick={() => { setItemState(active.track.id, 'accepted'); persistReviewState(active.track.id, 'accepted', active.candidate?.id, active.fields, active.includeArtwork, active.includeArtwork ? active.artworkMaxSize : 0); moveToNext(active.track.id); }}><Check size={15} /> 接受候选</button>
-            </div>
           </section>
         )}
 		{active && !active.candidate && (
@@ -698,36 +758,6 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 		  </div>,
 		  document.body,
 		)}
-
-      <footer className="review-footer">
-        <div>
-          <strong>{accepted}</strong> 首将写入，<strong>{needsReview}</strong> 首仍需确认，<strong>{skipped}</strong> 首跳过
-        </div>
-        <div>
-          <button className="secondary-button" onClick={onBack}>保存草稿并返回</button>
-          <button
-            className="primary-button"
-            disabled={accepted === 0 || applying}
-			onClick={async () => {
-			  setApplying(true);
-			  if (apiReadMode === 'real' && job) {
-				await createWriteJob(job.id, items.filter((item) => item.state === 'accepted').map((item) => ({
-				  trackId: item.track.id, candidateId: item.candidate!.id, baseRevision: item.track.revision,
-				  fields: item.fields,
-                  artwork: item.includeArtwork,
-                  artworkMaxSize: item.includeArtwork ? item.artworkMaxSize : 0,
-				})));
-			  } else {
-				await new Promise((resolve) => window.setTimeout(resolve, 700));
-			  }
-			  onComplete();
-			}}
-          >
-            {applying ? <LoaderCircle className="spin" size={15} /> : <FileCheck2 size={15} />}
-            确认并创建写入任务
-          </button>
-        </div>
-      </footer>
     </div>
   );
 }
