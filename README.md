@@ -1,138 +1,245 @@
 # Tagger
 
-Tagger 是一个使用 Go 实现的本地音乐元数据工作台。它扫描指定音乐目录，读取 MP3、FLAC、WAV 的标签和技术参数，并通过嵌入式 React 前端浏览、检查和编辑元数据。正式构建只有一个可执行文件，不要求目标机器安装 Node.js、FFmpeg 或系统 TagLib。
+> 面向个人音乐档案的本地元数据工作台：浏览、匹配、审核，然后安全地写回音乐文件。
 
-## 当前实现状态
+<p align="center">
+  <strong>Local-first · Review-first · One binary</strong>
+</p>
 
-已经可用：
+![Go](https://img.shields.io/badge/Go-1.25%2B-00ADD8?logo=go&logoColor=white)
+![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
+![Status](https://img.shields.io/badge/status-active%20development-orange)
 
-- React 19 + TypeScript + Vite + Tailwind CSS 4 完整交互原型。
-- Go/Hertz HTTP 服务和嵌入式前端，`make build` 产出单二进制。
-- 使用 go-taglib（TagLib-WASM）并发扫描 MP3、FLAC、WAV。
-- 读取标题、艺术家、专辑、音轨/光盘号、年份、风格、歌词、封面数量、时长、码率、采样率、位深和声道。
-- 忽略隐藏/系统目录，不跟随符号链接；单文件解析失败不会终止整次扫描。
-- 曲库、曲目列表、曲目详情、搜索筛选和重新扫描 API。
-- revision 冲突检查、显式字段 patch、临时副本、写后重读验证和原子替换。
-- 前端标签表单已经接通真实安全写入 API。
-- MusicBrainz、LRCLIB、Apple/iTunes 官方数据源策略、统一候选评分和多源失败隔离。
-- 前端数据源设置、候选搜索、字段选择和 LRCLIB 歌词采用已经接通真实 Go API。
-- SQLite WAL 持久化曲库索引；重启后可直接恢复最近一次扫描结果，并支持显式重新扫描和在设置页排队切换活动曲库。
-- 每次成功标签写入都会记录字段 diff、写入前后标签快照和 revision，历史页已经接通真实 API。
-- 历史页支持先预览、再确认恢复到某次修改前；恢复使用相同的 revision 冲突检查、原子替换与写后验证，并生成新的审计修订。
-- 可读取并真实展示嵌入封面；支持 JPEG/PNG/WebP 上传、二次确认删除、10 MiB/40MP 安全校验、原子写入和封面操作审计，MP3/FLAC/WAV 均已验证。
-- 曲目检查器和匹配详情展示封面像素尺寸/字节数；上传或采用远程封面前可选择保留原图，或居中裁剪缩小到 1000×1000 / 500×500。
-- 候选抽屉可采用 MusicBrainz/Apple 封面；远程 URL 只保留在后端短期引用中，并经过 HTTPS、来源域名、重定向、DNS 公网地址、大小和解码校验。
-- 快速扫描使用 SQLite 持久化任务队列，HTTP 立即返回任务 ID；worker 原子领取，重启恢复等待任务，任务中心展示真实进度和结果。
-- Provider 搜索结果按规范化查询写入 SQLite TTL 缓存，重启后仍可命中；设置页的数据源启停状态实时持久化，并提供真实连接测试。
-- 批量匹配审核和批量安全写入已接入同一 SQLite jobs 队列；每项使用候选 ID 与基准 revision，失败项独立记录并支持 partial 结果。
-- 审核页的字段 checkbox 会真实映射到写入 patch；后端无匹配项不会回退到 mock 候选，而是明确显示并安全跳过。
-- 批量任务的取消、失败项重试和单任务 SSE 已接入；任务事件丢失时以前端 GET 快照恢复。
-- 批量审核中的候选封面可显式勾选并进入安全写入任务；封面失败会独立标记并支持只重试封面。
-- 封面历史使用 SQLite 内容寻址 blob 去重，历史页支持预览并恢复标签与嵌入封面。
-- 网易云与酷我已接入独立 experimental strategy，默认关闭；酷我候选会优先读取当前 JSON 同步歌词接口并回退旧 lyric key 接口；所有实验性请求通过统一限流/缓存/失败隔离进入候选流，接口不稳定时不会影响官方来源。
-- 可选接入 LrcApi 聚合策略（默认关闭）；通过 `TAGGER_LRCAPI_URL`、`TAGGER_LRCAPI_COVER_URL` 和可选 `TAGGER_LRCAPI_AUTH` 指向自托管或公开兼容接口，用于补充歌词/封面，不参与文件写入。
-- 前端生产构建和任务页面均读取真实 Go API；高级筛选、导出和更多批量规则仍保留在路线图中。
-- 曲库多选后的批量编辑面板已可设置/追加/删除公共字段、按选中顺序生成音轨号，并展示前 20 条差异预览。
-- 真实模式下批量编辑进入持久化 `batch_edit` job，逐文件记录 diff/失败项，任务重启后可恢复并按失败项重试；Mock 模式保留即时原型流程。
-- 曲目 Inspector 的试听按钮已接入真实 `/api/v1/tracks/:id/audio` Range 流，支持 MP3/FLAC/WAV、ETag 缓存和断点请求；Mock 模式仍使用本地预览。
-- 任务中心会轮询并展示批量编辑的逐文件状态、失败原因和字段 diff；任务快照仍是重启和 SSE 断线后的事实来源。
-- Inspector 可以通过 `/api/v1/tracks/:id/raw-tags` 读取并展开 TagLib 原始 PropertyMap，保留多值和格式专有键用于诊断；Mock 模式提供规范化预览。
-- Inspector 的歌词页“查找歌词”会打开 Provider 候选并默认勾选歌词资产；仍由用户确认后写入，不会因打开搜索而自动改文件。
-- 同名 `.lrc` 歌词 sidecar 已支持安全读取、按需查看、revision 冲突保护、原子创建/替换/删除和 1 MiB 大小限制；音频内嵌歌词优先展示，sidecar 作为独立文件资产管理。
-- 曲库试听已提升为跨页面全局播放器；切换任务、历史或设置页面时保持播放状态。
-- 任务中心状态 Tab、审核接受/跳过/更换候选状态持久化、候选封面安全预览已接通真实 API；远程封面预览失败时默认保持空白。
-- 内嵌元数据已扩展到注释、作曲家、指挥、作词家、版权、BPM、ISRC、MusicBrainz 和 AcoustID 标识；Inspector、候选审核和批量编辑均按字段策略处理。
-- 支持可选单用户访问令牌；配置 `--auth-token` 或 `TAGGER_AUTH_TOKEN` 后 API 使用 Bearer 令牌保护，未配置时不启用鉴权。
-- 启动时可以不提供音乐目录；设置页支持探测、添加和切换多个本地曲库，侧栏目录按树状结构按需展开。
-- 如果上次活动目录已失效，程序会保留旧索引但进入明确的“未配置活动曲库”状态，不会误把旧目录显示成当前曲库。
-- 候选字段选择支持“全选 / 全不选”切换，重复点击不会意外持续采用所有字段。
+Tagger 是一个使用 Go 构建的本地音乐元数据管理工具。它把音乐文件当作事实源，在浏览器中读取和编辑 MP3、FLAC、WAV 的标签、歌词、封面和技术信息；需要补全时，再通过可插拔的数据源策略查询候选结果，并在逐字段审核后写回文件。
 
-后续可选增强：
+它不是音乐下载器，也不是面向公网的音乐流媒体服务。Tagger 的目标很简单：让个人音乐库的整理工作可解释、可恢复、可审计，并且在一台机器上用一个二进制文件启动。
 
-- 增加文件系统监听与定时对账策略，减少手动重新扫描的频率。
-- 增加自定义 Provider 的 schema 编辑器；当前内置 Provider 已支持运行时配置和加密持久化。
-- 继续细化批量写入事件、审计展示和跨文件部分失败恢复。
-- 根据实际使用反馈补充更多内嵌标签字段和格式专有字段映射。
+## 为什么做 Tagger
 
-写标签会直接修改曲库中的音乐文件。首次使用前请确认音乐目录有独立备份；revision 冲突和写后验证不能代替文件系统备份。
+音乐元数据整理通常同时面对三个问题：文件格式不统一、在线数据源不稳定、批量写入一旦出错就很难回退。Tagger 围绕这三个问题建立了几条明确的原则：
+
+- **本地优先**：音频文件留在你的音乐目录中，SQLite 只保存可重建的索引、任务和标签级历史。
+- **先审核再写入**：候选结果不是授权。标题、艺术家、专辑、歌词和封面都可以逐项选择，低置信度结果不会静默覆盖文件。
+- **安全写入**：写入前检查 revision，使用临时副本、写后重读校验和原子替换；每次成功修改都留下差异和历史。
+- **策略隔离**：MusicBrainz、LRCLIB、Apple/iTunes、网易云、酷我、酷狗和 LrcApi 都通过统一策略接口接入，单个来源失败不会阻断其他来源。
+
+## 亮点一览
+
+| 方向 | Tagger 提供的能力 |
+| --- | --- |
+| 音乐文件 | MP3、FLAC、WAV 的常用标签、原始 PropertyMap、时长、码率、采样率、位深、声道和嵌入封面 |
+| 标签编辑 | 标题、艺术家、专辑、专辑艺术家、音轨/光盘号、年份、风格、歌词，以及注释、作曲家、指挥、作词家、版权、BPM、ISRC、MusicBrainz/AcoustID 标识 |
+| 封面管理 | 读取、预览、上传、删除、远程候选预览；支持 JPEG/PNG/WebP 校验和 500×500 / 1000×1000 居中裁剪 |
+| 数据补全 | 候选搜索、统一评分、来源筛选、歌词/封面独立采用、候选差异审核和单曲重新匹配 |
+| 批量任务 | 扫描、抓取、审核、写入和批量编辑使用 SQLite 持久化队列，支持进度、SSE 更新、取消、失败项重试和服务重启恢复 |
+| 多曲库 | 启动时可以不提供音乐目录；设置页可添加、探测、切换多个本地曲库，目录以可折叠树状结构浏览 |
+| 使用体验 | 跨页面全局播放器、浏览器路由、历史记录、主题/字体切换、无效封面默认留白、单用户可选访问令牌 |
+| 部署 | React 生产构建嵌入 Go 服务，运行时不需要 Node.js、FFmpeg 或系统 TagLib |
+
+## 一次典型的整理流程
+
+```mermaid
+flowchart LR
+    A[添加或选择音乐库] --> B[扫描并浏览文件]
+    B --> C[查看标签 / 技术信息 / 封面 / 歌词]
+    C --> D{需要补全?}
+    D -->|否| E[直接编辑并保存]
+    D -->|是| F[多数据源查询候选]
+    F --> G[差异审核与字段选择]
+    G --> H[创建安全写入任务]
+    H --> I[写后重读校验]
+    I --> J[历史记录与可恢复版本]
+```
+
+### 主要界面
+
+- **曲库**：左侧曲库和目录树，顶部搜索/格式/状态/递归过滤，中间曲目列表，右侧 Inspector 查看和编辑元数据。
+- **审核抓取结果**：本地值与候选值对比，支持字段级全选/取消、候选来源切换、歌词/封面详情预览、封面写入尺寸和连续审核。
+- **任务中心**：扫描、抓取、写入和批量编辑的持久化状态；显示处理进度、失败原因、取消和重试入口。
+- **历史**：按曲目查看字段 diff、标签快照和封面 blob，先预览再恢复，恢复本身也会产生新的审计记录。
+- **设置**：曲库注册与切换、数据源启用/配置/测试、主题字体、历史保留策略、封面占位和安全写入开关。
+
+## 数据源策略
+
+数据源是可配置的策略，而不是散落在页面里的特殊分支。每个策略可以声明自己的 API 地址、User-Agent、限流间隔和可选鉴权字段；敏感配置会在本地加密保存，界面返回时自动脱敏。
+
+| 数据源 | 主要用途 | 默认状态 |
+| --- | --- | --- |
+| [MusicBrainz](https://musicbrainz.org/) | 结构化歌曲、专辑、发行和外部 ID | 开启 |
+| [LRCLIB](https://lrclib.net/) | 普通歌词和同步 LRC 歌词 | 开启 |
+| Apple / iTunes | 目录搜索、版本信息和封面 | 可用，按需配置 |
+| 网易云音乐 | 中文曲库、歌词和封面补充 | 实验性，默认关闭 |
+| 酷我音乐 | 中文曲库、同步歌词和封面补充 | 实验性，默认关闭 |
+| 酷狗音乐 | 中文曲库、LRC 歌词和封面补充 | 实验性，默认关闭 |
+| [LrcApi](https://github.com/HisAtri/LrcApi) | 可自托管的歌词/封面聚合接口 | 实验性，默认关闭 |
+
+所有远程封面都会经过安全代理、MIME/尺寸校验和短期磁盘缓存；来源没有可用封面时，界面默认显示空白，不使用自动生成图片干扰审核。网易云、酷我、酷狗等非官方接口可能随时变化，是否启用由用户自己决定。
+
+## 安全写入模型
+
+Tagger 把“查询”和“写入”明确分开。一次批量补全不会直接修改文件，而是经过以下状态：
+
+1. 数据源返回候选并计算匹配度。
+2. 用户查看当前值与候选值的差异，逐字段选择要采用的内容。
+3. 用户明确确认后创建写入任务；歌词和封面可以独立选择。
+4. 写入前检查文件 revision，防止外部程序修改后覆盖新内容。
+5. 在临时副本上写入并重读验证，通过后原子替换原文件。
+6. 记录字段 diff、前后标签快照、封面信息和来源，失败项独立保留。
+
+因此，**请把 Tagger 当作会修改文件的工具使用，并在首次批量操作前备份音乐目录**。安全写入和历史恢复降低了风险，但不能替代文件系统备份。
 
 ## 快速开始
 
-要求 Go 1.25.7+、Node.js 20+ 和 npm。构建时需要 Node.js，运行生成的二进制不需要。
+### 构建要求
+
+- Go `1.25.7` 或更高版本
+- Node.js `20+` 和 npm（仅构建前端时需要）
+- 运行已构建的二进制不需要 Node.js、FFmpeg 或外部 TagLib
+
+### 构建并启动
 
 ```bash
 make build
-./dist/tagger --music-dir /path/to/music --data-dir /path/to/tagger-data
+./dist/tagger \
+  --music-dir /path/to/music \
+  --data-dir /path/to/tagger-data
 ```
 
-首次启动需要提供一次 `--music-dir`（或 `TAGGER_MUSIC_DIR`）。之后可以在设置页切换活动曲库；如果省略该参数，程序会从 `tagger.db` 恢复上次选择的目录。
+默认监听 `127.0.0.1:8080`，打开 <http://127.0.0.1:8080> 即可使用。生产构建必须使用 `make build`，它会先编译 React，再把 `frontend/dist` 复制到 `web/dist`，最后嵌入 Go 二进制。
 
-默认监听 `127.0.0.1:8080`，浏览器打开 <http://127.0.0.1:8080>。
-
-本项目开发时可直接使用现有测试曲库：
+如果不想在启动时指定音乐目录，也可以直接启动：
 
 ```bash
-./dist/tagger --music-dir /home/ericwyn/Downloads/TestMusic --data-dir ./data
+./dist/tagger --data-dir ./data
 ```
 
-也可以用环境变量配置：
+然后在设置页探测并添加音乐库。配置过的活动曲库会保存在 SQLite 中，后续启动时自动恢复；如果目录已经失效，Tagger 会保留旧索引并明确显示“未配置活动曲库”。
+
+### 启用单用户访问令牌
+
+默认不启用鉴权。需要时可以在启动参数或环境变量中配置一个实例级令牌：
 
 ```bash
-TAGGER_MUSIC_DIR=/path/to/music TAGGER_DATA_DIR=/path/to/tagger-data TAGGER_LISTEN=0.0.0.0:8080 ./dist/tagger
+./dist/tagger \
+  --music-dir /path/to/music \
+  --auth-token 'replace-with-a-long-random-token'
+
+# 或
+TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' \
+  ./dist/tagger --music-dir /path/to/music
 ```
 
-如果需要单用户访问保护，可以在启动时配置令牌；不配置时不会要求鉴权：
+这是单用户令牌，不包含管理员账号、角色、设备管理或多租户会话。浏览器首次输入后通过同源 HttpOnly cookie 保持登录；API 客户端使用 `Authorization: Bearer <token>`。健康检查和嵌入式静态资源保持公开。
 
-```bash
-./dist/tagger --music-dir /path/to/music --auth-token 'replace-with-a-long-random-token'
-# 或：TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' ./dist/tagger --music-dir /path/to/music
-```
+## 配置参考
 
-配置令牌后，浏览器会在首次打开时显示令牌输入页；API 客户端使用
-`Authorization: Bearer <token>`（也兼容 `X-Tagger-Token`）。这是单用户实例级 admin token，不提供账号、角色、设备或复杂会话管理；浏览器成功验证后仅通过同源 HttpOnly cookie 免去重复输入，因此封面、音频和任务 SSE 也能正常加载。健康检查和嵌入式静态资源保持公开。
+| CLI 参数 | 环境变量 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `--listen` | `TAGGER_LISTEN` | `127.0.0.1:8080` | 启动时的 HTTP 监听地址；运行后不在设置页修改 |
+| `--music-dir` | `TAGGER_MUSIC_DIR` | 空 | 初始音乐根目录；也可以启动后从设置页添加 |
+| `--data-dir` | `TAGGER_DATA_DIR` | `./data` | SQLite、密钥、缓存和运行数据目录 |
+| `--library-name` | `TAGGER_LIBRARY_NAME` | 空 | 初始曲库显示名称 |
+| `--auth-token` | `TAGGER_AUTH_TOKEN` | 空 | 可选单用户访问令牌 |
+| `--scan-workers` | `TAGGER_SCAN_WORKERS` | `min(CPU, 8)` | 并行扫描 worker，范围 `1–32` |
 
-`TAGGER_DATA_DIR` 默认是当前工作目录下的 `./data`，其中保存 `tagger.db`、WAL 和后续缓存。音乐文件仍是标签事实源；SQLite 是可重建的索引与标签级历史，不是音频文件备份。外部程序修改文件后需要在界面执行重新扫描。
+LrcApi 也可以在启动时通过 `TAGGER_LRCAPI_URL`、`TAGGER_LRCAPI_COVER_URL` 和 `TAGGER_LRCAPI_AUTH` 提供初始地址/鉴权；其他数据源优先在设置页配置。数据目录中可能包含 `.tagger-secrets.key`，请将整个数据目录视为敏感配置并限制访问权限。
 
 ## 开发
 
-分别启动后端和 Vite：
+分别启动 Go 后端和 Vite 前端：
 
 ```bash
-make dev-backend MUSIC_DIR=/home/ericwyn/Downloads/TestMusic
+make dev-backend MUSIC_DIR=/path/to/music
 make dev-frontend
 ```
 
-Vite 会把 `/api`、`/healthz`、`/readyz` 代理到 `127.0.0.1:8080`。如需只查看不依赖后端的原型：
+Vite 会把 `/api`、`/healthz` 和 `/readyz` 代理到 `127.0.0.1:8080`。只想查看前端交互时，可以使用不依赖真实后端的 Mock 模式：
 
 ```bash
 make dev-frontend-mock
 ```
 
-## 测试
+常用命令：
+
+```bash
+make build                 # 前端构建 + Go 单二进制
+make test                  # Go + 前端测试
+make lint                  # go vet + TypeScript 类型检查
+make test-integration MUSIC_DIR=/path/to/TestMusic
+make clean
+```
+
+真实音频只作为本地集成语料，不提交到仓库。写入测试会把 MP3/FLAC 复制到临时目录，WAV 测试现场生成短 PCM 文件，不修改原始测试曲库。
+
+## 项目结构
+
+```text
+cmd/tagger/          程序入口、依赖组装和任务 worker
+internal/domain/     前后端共用的领域模型
+internal/scanner/    文件发现、并发扫描和元数据读取
+internal/tags/       标签引擎接口与 TagLib-WASM 适配器
+internal/filewrite/  revision、临时副本、原子替换和写后校验
+internal/providers/  数据源策略、评分、缓存和封面安全代理
+internal/jobs/       SQLite 持久化队列、worker、SSE 事件
+internal/library/    曲库索引、目录切换和曲目查询
+internal/store/      SQLite migration、历史、配置和任务快照
+internal/server/     HTTP API、鉴权、健康检查和 SPA fallback
+frontend/            React 19 + TypeScript + Vite 工作台
+web/                 go:embed 静态资源入口
+docs/                前期设计、实现记录和持续任务列表
+```
+
+```mermaid
+flowchart TB
+    UI[React 工作台] --> API[Go / Hertz API]
+    API --> Library[Library Service]
+    API --> Jobs[SQLite Durable Jobs]
+    Jobs --> Scanner[Scanner + TagLib-WASM]
+    Jobs --> Writer[Safe File Writer]
+    Jobs --> Providers[Provider Strategy Registry]
+    Library --> SQLite[(SQLite WAL)]
+    Writer --> Files[(本地音乐文件)]
+    Providers --> Remote[MusicBrainz / LRCLIB / Apple / 实验性来源]
+```
+
+前后端不是两个需要分别部署的服务：生产构建时，Vite 的 `dist` 会被 `go:embed` 嵌入 Go 服务，最终只发布一个可执行文件。
+
+## 路线图
+
+当前主线已经覆盖“读取 → 匹配 → 审核 → 安全写入 → 历史恢复”。后续会优先考虑：
+
+- 文件系统监听与定时对账，减少大型曲库的手动扫描次数。
+- 更多容器/标签格式的兼容性验证，例如 M4A、OGG/Opus 和格式专有字段。
+- 更丰富的候选合并、来源健康度和批量审核辅助信息。
+- 发布包、跨平台构建和自动化 CI 的完善。
+
+明确不在当前目标内：下载或破解音乐内容、自动整理/重命名整座曲库、公开互联网 SaaS、多租户账号系统和未经确认的全库覆盖。
+
+## 灵感与参考
+
+Tagger 的产品边界和实现思路参考了以下开源项目与标准，但没有复制它们的页面资产或业务代码：
+
+- [music-tag-web](https://github.com/xhongc/music-tag-web)：文件树、候选搜索和标签工作台的产品启发
+- [Navidrome](https://github.com/navidrome/navidrome)：大型曲库扫描、索引和文件变化处理思路
+- [MusicBrainz Picard](https://picard.musicbrainz.org/)：候选匹配、审核后保存的工作流
+- [beets](https://github.com/beetbox/beets)：匹配评分和可选数据源设计
+- [TagLib](https://taglib.org/) / [go-taglib](https://github.com/sentriz/go-taglib)：跨格式元数据读写能力
+- [LrcApi](https://github.com/HisAtri/LrcApi)：歌词与封面聚合策略的参考
+
+## 参与贡献
+
+欢迎提交 Issue、复现步骤、数据源诊断日志和可验证的改进建议。涉及真实文件写入时，请同时说明文件格式、标签字段、当前 revision 和是否可以提供脱敏样本。
+
+提交代码前建议运行：
 
 ```bash
 make test
 make lint
-make test-integration MUSIC_DIR=/home/ericwyn/Downloads/TestMusic
 ```
 
-真实音频只作为本地集成语料，不会提交到仓库。写入测试会先把 MP3/FLAC 复制到临时目录；WAV 测试会现场生成一个短 PCM 文件。原始 `TestMusic` 文件不会被修改。
+数据源适配器应遵循 `internal/providers` 中的策略接口，不能绕过统一限流、缓存、来源记录和封面安全校验。任何写入相关改动都应补充“写入后重读”或 revision 冲突测试。
 
-## 目录
+## 许可证说明
 
-```text
-cmd/tagger/          进程入口
-internal/config/     flags 与环境变量
-internal/domain/     前后端统一领域模型
-internal/scanner/    文件发现、并发提取和归一化
-internal/tags/       标签引擎接口与 TagLib-WASM 适配器
-internal/library/    线程安全的曲库查询服务
-internal/store/      SQLite migration、曲库索引和修订历史
-internal/providers/  抓取策略、统一评分和官方数据源客户端
-internal/server/     REST API、健康检查和 SPA 静态资源
-frontend/            React 工作台
-web/                 嵌入式前端资源
-docs/前期设计/       产品、架构、API 与路线图设计
-docs/实现记录/       已完成里程碑的验证记录
-docs/任务列表.md     已实现与未实现任务的持续清单
-```
+仓库当前尚未提交正式的根目录 `LICENSE` 文件。若要进行二次分发，请先核对本项目依赖和 TagLib-WASM 的许可证要求；正式公开发行前会补充项目许可证和第三方 NOTICE。
