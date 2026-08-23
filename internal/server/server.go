@@ -29,6 +29,7 @@ import (
 	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/store"
 )
 
@@ -128,7 +129,10 @@ func (s *Server) routes() {
 	api.POST("/libraries/probe", s.handleLibraryProbe)
 	api.POST("/libraries/:id/switch", s.handleLibrarySwitch)
 	api.POST("/libraries/:id/scans", s.handleRescan)
+	api.DELETE("/libraries/:id", s.handleLibraryDelete)
+	api.POST("/libraries/:id/missing/purge", s.handlePurgeMissing)
 	api.GET("/tracks", s.handleTracks)
+	api.POST("/tracks/resolve", s.handleTrackResolve)
 	api.POST("/tracks/:id/scan", s.handleTrackScan)
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
@@ -422,7 +426,7 @@ func (s *Server) handleLibraryRegister(ctx context.Context, c *app.RequestContex
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "添加曲库 JSON 无效")
 		return
 	}
-	probe, err := library.ProbeRoot(request.Path)
+	probe, err := library.ValidateRoot(request.Path)
 	if err != nil {
 		s.writeError(c, consts.StatusUnprocessableEntity, "directory_probe_failed", err.Error())
 		return
@@ -484,7 +488,7 @@ func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext)
 	if strings.TrimSpace(request.Path) == "" {
 		request.Path = targetRoot
 	}
-	probe, err := library.ProbeRoot(request.Path)
+	probe, err := library.ValidateRoot(request.Path)
 	if err != nil {
 		s.writeError(c, consts.StatusUnprocessableEntity, "directory_probe_failed", err.Error())
 		return
@@ -501,16 +505,92 @@ func (s *Server) handleLibrarySwitch(ctx context.Context, c *app.RequestContext)
 	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job), "probe": probe})
 }
 
+func (s *Server) handleLibraryDelete(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "libraries_unavailable", "曲库存储尚未初始化")
+		return
+	}
+	if s.rejectLibraryMutation(ctx, c) {
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	current := s.library.Library()
+	if id == current.ID {
+		s.writeError(c, consts.StatusConflict, "library_active", "请先切换到其他曲库后再删除")
+		return
+	}
+	_, _, found, err := s.store.LibraryByID(ctx, id)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "libraries_failed", err.Error())
+		return
+	}
+	if !found {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	if err := s.store.DeleteLibrary(ctx, id); err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "library_delete_failed", err.Error())
+		return
+	}
+	s.writeData(c, map[string]any{"id": id, "deleted": true})
+}
+
+func (s *Server) handlePurgeMissing(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "libraries_unavailable", "曲库存储尚未初始化")
+		return
+	}
+	id := strings.TrimSpace(c.Param("id"))
+	if id != s.library.Library().ID {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	if s.rejectLibraryMutation(ctx, c) {
+		return
+	}
+	removed, err := s.store.PurgeMissing(ctx, id)
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "missing_purge_failed", err.Error())
+		return
+	}
+	s.library.RemoveMissing()
+	s.writeData(c, map[string]any{"removed": removed})
+}
+
+type scanRequest struct {
+	Mode    scanner.ScanMode `json:"mode"`
+	Targets []string         `json:"targets"`
+}
+
 func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {
 	librarySummary := s.library.Library()
 	if c.Param("id") != librarySummary.ID {
 		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
 		return
 	}
+	var request scanRequest
+	if len(c.Request.Body()) > 0 {
+		if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "扫描请求 JSON 无效")
+			return
+		}
+	}
+	if request.Mode == "" {
+		request.Mode = scanner.ScanQuick
+	}
+	if request.Mode != scanner.ScanQuick && request.Mode != scanner.ScanFull && request.Mode != scanner.ScanTarget {
+		s.writeError(c, consts.StatusBadRequest, "invalid_scan_mode", "扫描模式必须是 quick、full 或 targeted")
+		return
+	}
 	if s.jobs != nil {
+		payload, _ := json.Marshal(request)
+		title := librarySummary.Name + " 快速扫描"
+		if request.Mode == scanner.ScanFull {
+			title = librarySummary.Name + " 完整扫描"
+		}
 		job, err := s.jobs.Enqueue(ctx, domain.Job{
-			Kind: domain.JobScan, LibraryID: librarySummary.ID, Title: librarySummary.Name + " 曲库扫描",
-			Detail: "等待扫描 worker", Total: librarySummary.TrackCount,
+			Kind: domain.JobScan, LibraryID: librarySummary.ID, Title: title,
+			Detail: "等待扫描 worker", Total: librarySummary.TrackCount, Payload: string(payload),
 		})
 		if err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
@@ -519,8 +599,14 @@ func (s *Server) handleRescan(ctx context.Context, c *app.RequestContext) {
 		c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
 		return
 	}
-	if err := s.library.Rescan(ctx); err != nil {
-		s.writeError(c, consts.StatusInternalServerError, "scan_failed", err.Error())
+	var scanErr error
+	if request.Mode == scanner.ScanFull {
+		scanErr = s.library.Rescan(ctx)
+	} else {
+		scanErr = s.library.QuickScan(ctx, request.Targets)
+	}
+	if scanErr != nil {
+		s.writeError(c, consts.StatusInternalServerError, "scan_failed", scanErr.Error())
 		return
 	}
 	s.writeData(c, map[string]any{
@@ -1144,17 +1230,113 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 }
 
 func (s *Server) handleTracks(_ context.Context, c *app.RequestContext) {
-	filter := library.TrackFilter{
-		FolderID: c.Query("folder_id"),
-		Query:    c.Query("q"),
-		Health:   domain.TrackHealth(c.Query("health")),
-		Format:   domain.TrackFormat(c.Query("format")),
+	query, limit, err := parseTrackQuery(c)
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_query", err.Error())
+		return
 	}
-	tracks := s.library.ListTracks(filter)
-	s.writeData(c, map[string]any{
-		"tracks": tracks,
-		"total":  len(tracks),
-	})
+	page, err := s.library.ListTrackPage(query, c.Query("cursor"), limit)
+	if errors.Is(err, library.ErrStaleTrackCursor) {
+		s.writeError(c, consts.StatusConflict, "track_cursor_stale", "曲库索引已更新，请从第一页重新加载")
+		return
+	}
+	if errors.Is(err, library.ErrInvalidTrackCursor) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_cursor", err.Error())
+		return
+	}
+	if errors.Is(err, library.ErrInvalidTrackQuery) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_query", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "tracks_failed", err.Error())
+		return
+	}
+	s.writeData(c, page)
+}
+
+type trackResolveRequest struct {
+	IDs   []string            `json:"ids"`
+	Query *library.TrackQuery `json:"query"`
+}
+
+func (s *Server) handleTrackResolve(ctx context.Context, c *app.RequestContext) {
+	var request trackResolveRequest
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_resolve", "曲目解析请求 JSON 无效")
+		return
+	}
+	hasIDs := len(request.IDs) > 0
+	hasQuery := request.Query != nil
+	if hasIDs == hasQuery {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_resolve", "ids 和 query 必须且只能提供一个")
+		return
+	}
+	var tracks []domain.Track
+	total := 0
+	var err error
+	if hasIDs {
+		requestedCount := len(request.IDs)
+		tracks, err = s.library.ResolveTracksByIDs(request.IDs)
+		if err != nil && errors.Is(err, library.ErrTrackSelectionLarge) {
+			total = requestedCount
+		} else {
+			total = len(tracks)
+		}
+	} else {
+		tracks, total, err = s.library.ResolveTracksByQuery(*request.Query)
+	}
+	if errors.Is(err, library.ErrTrackSelectionLarge) {
+		s.writeError(c, consts.StatusBadRequest, "track_selection_too_large", fmt.Sprintf("当前结果有 %d 首，单次最多处理 %d 首", total, library.MaxTrackResolveSize))
+		return
+	}
+	if errors.Is(err, library.ErrTrackNotFound) {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", err.Error())
+		return
+	}
+	if errors.Is(err, library.ErrInvalidTrackQuery) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_track_query", err.Error())
+		return
+	}
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "tracks_resolve_failed", err.Error())
+		return
+	}
+	s.writeData(c, map[string]any{"tracks": tracks, "total": total})
+}
+
+func parseTrackQuery(c *app.RequestContext) (library.TrackQuery, int, error) {
+	limit := 0
+	if raw := strings.TrimSpace(c.Query("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return library.TrackQuery{}, 0, fmt.Errorf("limit 必须是整数")
+		}
+		limit = parsed
+	}
+	includeSubfolders := false
+	if raw := strings.TrimSpace(c.Query("include_subfolders")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			if raw == "1" {
+				parsed = true
+			} else if raw == "0" {
+				parsed = false
+			} else {
+				return library.TrackQuery{}, 0, fmt.Errorf("include_subfolders 必须是布尔值")
+			}
+		}
+		includeSubfolders = parsed
+	}
+	return library.TrackQuery{
+		Query:             c.Query("q"),
+		FolderID:          c.Query("folder_id"),
+		FolderPath:        c.Query("folder_path"),
+		IncludeSubfolders: includeSubfolders,
+		Health:            domain.TrackHealth(c.Query("health")),
+		Format:            domain.TrackFormat(c.Query("format")),
+		Sort:              library.TrackSort(c.Query("sort")),
+	}, limit, nil
 }
 
 func (s *Server) handleTrackScan(ctx context.Context, c *app.RequestContext) {
@@ -2767,7 +2949,7 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 			"durationSeconds": query.DurationSeconds,
 		})
 		// Search remains successful even if the optional audit trail cannot be persisted.
-		_, _ = s.store.AddMatchQueryHistory(ctx, request.FileID, queryPayload, request.ProviderIDs, len(result.Candidates))
+		_, _ = s.store.AddLibraryMatchQueryHistory(ctx, s.library.Library().ID, request.FileID, queryPayload, request.ProviderIDs, len(result.Candidates))
 	}
 	s.writeData(c, result)
 }
@@ -2786,7 +2968,7 @@ func (s *Server) handleMatchQueryHistory(ctx context.Context, c *app.RequestCont
 		return
 	}
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	history, err := s.store.ListMatchQueryHistory(ctx, trackID, limit)
+	history, err := s.store.ListLibraryMatchQueryHistory(ctx, s.library.Library().ID, trackID, limit)
 	if err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "match_history_failed", err.Error())
 		return

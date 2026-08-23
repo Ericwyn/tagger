@@ -136,10 +136,10 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 	statement, err := tx.PrepareContext(ctx, `
         INSERT INTO tracks(
             id, library_id, relative_path, folder_id, format, title, artists_text,
-            album, health, revision, payload_json, scan_token, updated_at
-        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            library_id=excluded.library_id,
+            album, health, revision, payload_json, scan_token, updated_at,
+            file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns, missing, missing_since
+        ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(library_id, id) DO UPDATE SET
             relative_path=excluded.relative_path,
             folder_id=excluded.folder_id,
             format=excluded.format,
@@ -150,7 +150,13 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
             revision=excluded.revision,
             payload_json=excluded.payload_json,
             scan_token=excluded.scan_token,
-            updated_at=excluded.updated_at`)
+            updated_at=excluded.updated_at,
+            file_size=excluded.file_size,
+            file_mtime_ns=excluded.file_mtime_ns,
+            sidecar_size=excluded.sidecar_size,
+            sidecar_mtime_ns=excluded.sidecar_mtime_ns,
+            missing=excluded.missing,
+            missing_since=excluded.missing_since`)
 	if err != nil {
 		return fmt.Errorf("prepare track upsert: %w", err)
 	}
@@ -163,7 +169,10 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 		if _, err := statement.ExecContext(ctx,
 			track.ID, result.Library.ID, track.RelativePath, track.FolderID, track.Format,
 			track.Title, strings.Join(track.Artists, "\x1f"), track.Album, track.Health,
-			track.Revision, payload, token, now.Format(time.RFC3339Nano)); err != nil {
+			track.Revision, payload, token, now.Format(time.RFC3339Nano),
+			track.FileFingerprint.SizeBytes, track.FileFingerprint.ModifiedUnixNano,
+			track.FileFingerprint.SidecarSize, track.FileFingerprint.SidecarUnixNano,
+			boolToInt(track.Missing), track.MissingSince); err != nil {
 			return fmt.Errorf("upsert track %s: %w", track.ID, err)
 		}
 	}
@@ -172,6 +181,82 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit scan: %w", err)
+	}
+	return nil
+}
+
+// SaveScanDelta updates only changed tracks and the library summary. It is
+// deliberately separate from SaveScan so quick scans never rewrite every row
+// in a large library.
+func (s *Store) SaveScanDelta(ctx context.Context, root string, result scanner.Result, changed []domain.Track) error {
+	return s.saveTrackDelta(ctx, root, result, changed)
+}
+
+func (s *Store) SaveTrackUpdates(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error {
+	return s.saveTrackDelta(ctx, root, result, tracks)
+}
+
+func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error {
+	summaryJSON, err := json.Marshal(result.Library)
+	if err != nil {
+		return fmt.Errorf("encode library summary: %w", err)
+	}
+	reportJSON, err := json.Marshal(result.Report)
+	if err != nil {
+		return fmt.Errorf("encode scan report: %w", err)
+	}
+	now := s.now().UTC()
+	token := fmt.Sprintf("delta-%d", now.UnixNano())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO libraries(id, root_path, name, summary_json, report_json, scan_token, updated_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET root_path=excluded.root_path, name=excluded.name,
+		 summary_json=excluded.summary_json, report_json=excluded.report_json,
+		 scan_token=excluded.scan_token, updated_at=excluded.updated_at`,
+		result.Library.ID, root, result.Library.Name, summaryJSON, reportJSON, token, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("upsert library delta: %w", err)
+	}
+	statement, err := tx.PrepareContext(ctx, `
+		INSERT INTO tracks(
+			id, library_id, relative_path, folder_id, format, title, artists_text,
+			album, health, revision, payload_json, scan_token, updated_at,
+			file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns, missing, missing_since
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(library_id, id) DO UPDATE SET relative_path=excluded.relative_path,
+		 folder_id=excluded.folder_id, format=excluded.format, title=excluded.title,
+		 artists_text=excluded.artists_text, album=excluded.album, health=excluded.health,
+		 revision=excluded.revision, payload_json=excluded.payload_json,
+		 scan_token=excluded.scan_token, updated_at=excluded.updated_at,
+		 file_size=excluded.file_size, file_mtime_ns=excluded.file_mtime_ns,
+		 sidecar_size=excluded.sidecar_size, sidecar_mtime_ns=excluded.sidecar_mtime_ns,
+		 missing=excluded.missing, missing_since=excluded.missing_since`)
+	if err != nil {
+		return fmt.Errorf("prepare track delta upsert: %w", err)
+	}
+	defer statement.Close()
+	for _, track := range tracks {
+		payload, marshalErr := json.Marshal(track)
+		if marshalErr != nil {
+			return fmt.Errorf("encode track %s: %w", track.ID, marshalErr)
+		}
+		if _, execErr := statement.ExecContext(ctx,
+			track.ID, result.Library.ID, track.RelativePath, track.FolderID, track.Format,
+			track.Title, strings.Join(track.Artists, "\x1f"), track.Album, track.Health,
+			track.Revision, payload, token, now.Format(time.RFC3339Nano),
+			track.FileFingerprint.SizeBytes, track.FileFingerprint.ModifiedUnixNano,
+			track.FileFingerprint.SidecarSize, track.FileFingerprint.SidecarUnixNano,
+			boolToInt(track.Missing), track.MissingSince); execErr != nil {
+			return fmt.Errorf("upsert track delta %s: %w", track.ID, execErr)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit track delta: %w", err)
 	}
 	return nil
 }
@@ -194,7 +279,7 @@ func (s *Store) LoadScan(ctx context.Context, root string) (scanner.Result, bool
 	if err := json.Unmarshal(reportJSON, &result.Report); err != nil {
 		return scanner.Result{}, false, fmt.Errorf("decode scan report: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload_json FROM tracks WHERE library_id = ? ORDER BY relative_path`, libraryID)
+	rows, err := s.db.QueryContext(ctx, `SELECT payload_json, file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns, missing, missing_since FROM tracks WHERE library_id = ? ORDER BY relative_path`, libraryID)
 	if err != nil {
 		return scanner.Result{}, false, fmt.Errorf("load tracks: %w", err)
 	}
@@ -202,12 +287,21 @@ func (s *Store) LoadScan(ctx context.Context, root string) (scanner.Result, bool
 	result.Tracks = make([]domain.Track, 0, result.Library.TrackCount)
 	for rows.Next() {
 		var payload []byte
-		if err := rows.Scan(&payload); err != nil {
+		var size, mtime, sidecarSize, sidecarMtime int64
+		var missing int
+		var missingSince string
+		if err := rows.Scan(&payload, &size, &mtime, &sidecarSize, &sidecarMtime, &missing, &missingSince); err != nil {
 			return scanner.Result{}, false, err
 		}
 		var track domain.Track
 		if err := json.Unmarshal(payload, &track); err != nil {
 			return scanner.Result{}, false, fmt.Errorf("decode track: %w", err)
+		}
+		track.FileFingerprint = domain.FileFingerprint{SizeBytes: size, ModifiedUnixNano: mtime, SidecarSize: sidecarSize, SidecarUnixNano: sidecarMtime}
+		track.Missing = missing != 0
+		track.MissingSince = missingSince
+		if track.Missing {
+			track.Health = domain.HealthMissing
 		}
 		result.Tracks = append(result.Tracks, track)
 	}

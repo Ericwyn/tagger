@@ -24,6 +24,9 @@ import type {
 	MatchQueryHistory,
 	LyricsSidecarResponse,
 	LyricsSidecarWriteResult,
+	ScanMode,
+	TrackPage,
+	TrackQuery,
 } from '@/types';
 
 export interface BatchArtworkPayload {
@@ -63,8 +66,8 @@ export interface SystemInfo {
   version: string;
   tag_engine: string;
   listen?: string;
-  historyRetention?: number;
-  writeHistory?: boolean;
+	historyRetention?: number;
+	writeHistory?: boolean;
   storage?: SystemStorageInfo;
 }
 
@@ -210,6 +213,21 @@ function normalizeTrackResult<T extends {track: Track}>(result: T): T {
   return {...result, track: normalizeTrack(result.track)};
 }
 
+function trackQueryParams(query: TrackQuery, cursor = '', limit = 100): string {
+  const params = new URLSearchParams();
+  if (limit > 0) params.set('limit', String(limit));
+  if (cursor) params.set('cursor', cursor);
+  if (query.q?.trim()) params.set('q', query.q.trim());
+  if (query.folderId) params.set('folder_id', query.folderId);
+  if (query.folderPath) params.set('folder_path', query.folderPath);
+  if (query.includeSubfolders) params.set('include_subfolders', 'true');
+  if (query.health) params.set('health', query.health);
+  if (query.format) params.set('format', query.format);
+  if (query.sort) params.set('sort', query.sort);
+  const encoded = params.toString();
+  return encoded ? `?${encoded}` : '';
+}
+
 export function createRealAPI(fetcher: typeof fetch = fetch) {
   async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const token = storedAuthToken();
@@ -242,7 +260,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
     },
 
     updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
-      return request<{historyRetention: number; writeHistory: boolean}>('/api/v1/system/settings', {
+	  return request<{historyRetention: number; writeHistory: boolean}>('/api/v1/system/settings', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(settings),
@@ -278,18 +296,42 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       });
     },
 
+	async listTrackPage(query: TrackQuery = {}, cursor = '', limit = 100, signal?: AbortSignal): Promise<TrackPage> {
+	  const result = await request<TrackPage>(`/api/v1/tracks${trackQueryParams(query, cursor, limit)}`, {signal});
+	  return {...result, tracks: (result.tracks ?? []).map(normalizeTrack)};
+	},
+
 	async listTracks(): Promise<Track[]> {
-	  const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks');
-	  return (result.tracks ?? []).map(normalizeTrack);
+	  return (await this.listTrackPage({}, '', 100)).tracks;
+	},
+
+	async resolveTracks(resolveRequest: {ids?: string[]; query?: TrackQuery}): Promise<{tracks: Track[]; total: number}> {
+	  const result = await request<{tracks: Track[]; total: number}>('/api/v1/tracks/resolve', {
+	    method: 'POST',
+	    headers: {'Content-Type': 'application/json'},
+	    body: JSON.stringify(resolveRequest),
+	  });
+	  return {...result, tracks: (result.tracks ?? []).map(normalizeTrack)};
 	},
 
 	rescanTrack(trackId: string): Promise<Track> {
 	  return request<Track>(`/api/v1/tracks/${encodeURIComponent(trackId)}/scan`, {method: 'POST'}).then(normalizeTrack);
 	},
 
-	async rescanLibrary(libraryId: string): Promise<Job> {
-	  return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {method: 'POST'});
-    },
+	async rescanLibrary(libraryId: string, mode: ScanMode = 'quick', targets: string[] = []): Promise<Job> {
+	  return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {
+	    method: 'POST', headers: {'Content-Type': 'application/json'},
+	    body: JSON.stringify({mode, targets}),
+	  });
+	},
+
+	async deleteLibrary(libraryId: string): Promise<{id: string; deleted: boolean}> {
+	  return request<{id: string; deleted: boolean}>(`/api/v1/libraries/${encodeURIComponent(libraryId)}`, {method: 'DELETE'});
+	},
+
+	async purgeMissing(libraryId: string): Promise<{removed: number}> {
+	  return request<{removed: number}>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/missing/purge`, {method: 'POST'});
+	    },
 
 	listJobs(): Promise<Job[]> {
 	  return request<Job[]>('/api/v1/jobs');

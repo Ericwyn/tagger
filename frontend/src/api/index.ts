@@ -24,6 +24,9 @@ import type {
 	BatchArtworkInput,
 	CandidateSearchQuery,
 	MatchQueryHistory,
+	ScanMode,
+	TrackPage,
+	TrackQuery,
 } from '@/types';
 import type {BatchArtworkPayload} from '@/api/real';
 import type {SystemInfo} from '@/api/real';
@@ -86,6 +89,20 @@ export async function listTracks(): Promise<Track[]> {
   return tracks;
 }
 
+export async function listTrackPage(query: TrackQuery = {}, cursor = '', limit = 100, signal?: AbortSignal): Promise<TrackPage> {
+  if (apiReadMode === 'mock') return mock.listTrackPage(query, cursor, limit);
+  const page = await real.listTrackPage(query, cursor, limit, signal);
+  page.tracks.forEach((track) => realTrackCache.set(track.id, track));
+  return page;
+}
+
+export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery}): Promise<{tracks: Track[]; total: number}> {
+  if (apiReadMode === 'mock') return mock.resolveTracks(request);
+  const result = await real.resolveTracks(request);
+  result.tracks.forEach((track) => realTrackCache.set(track.id, track));
+  return result;
+}
+
 export async function rescanTrack(trackId: string): Promise<Track> {
   if (apiReadMode === 'mock') {
     const tracks = await mock.listTracks();
@@ -98,12 +115,24 @@ export async function rescanTrack(trackId: string): Promise<Track> {
   return track;
 }
 
-export async function rescanLibrary(libraryId: string): Promise<Job | null> {
+export async function rescanLibrary(libraryId: string, mode: ScanMode = 'quick', targets: string[] = []): Promise<Job | null> {
   if (apiReadMode === 'mock') {
     await mock.getLibrary();
     return null;
   }
-  return real.rescanLibrary(libraryId);
+  return mode === 'quick' && targets.length === 0
+    ? real.rescanLibrary(libraryId)
+    : real.rescanLibrary(libraryId, mode, targets);
+}
+
+export async function deleteLibrary(libraryId: string): Promise<{id: string; deleted: boolean}> {
+  if (apiReadMode === 'mock') return {id: libraryId, deleted: true};
+  return real.deleteLibrary(libraryId);
+}
+
+export async function purgeMissing(libraryId: string): Promise<{removed: number}> {
+  if (apiReadMode === 'mock') return {removed: 0};
+  return real.purgeMissing(libraryId);
 }
 
 export async function waitForJob(jobId: string, timeoutMs = 5 * 60_000): Promise<Job> {

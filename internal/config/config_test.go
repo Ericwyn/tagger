@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseUsesEnvironmentAndFlags(t *testing.T) {
@@ -20,6 +21,12 @@ func TestParseUsesEnvironmentAndFlags(t *testing.T) {
 	}
 	if cfg.Listen != "0.0.0.0:9000" || cfg.MusicDir != "/music/from-flag" || cfg.DataDir != "/var/lib/tagger" || cfg.LibraryName != "Archive" || cfg.AuthToken != "secret" || cfg.ScanWorkers != 3 {
 		t.Fatalf("unexpected config: %#v", cfg)
+	}
+	if cfg.WatcherWait != 5*time.Second {
+		t.Fatalf("watcher wait = %s, want 5s", cfg.WatcherWait)
+	}
+	if cfg.ReconcileInterval != 0 {
+		t.Fatalf("reconcile interval = %s, want disabled by default", cfg.ReconcileInterval)
 	}
 }
 
@@ -51,5 +58,47 @@ func TestParseRejectsEmptyDataDirectory(t *testing.T) {
 	_, err := Parse([]string{"--music-dir", "/music", "--data-dir", "  "}, nil)
 	if err == nil || !strings.Contains(err.Error(), "data directory cannot be empty") {
 		t.Fatalf("error = %v, want empty data directory", err)
+	}
+}
+
+func TestParseWatcherWaitFromEnvironmentAndRejectsInvalidValues(t *testing.T) {
+	cfg, err := Parse(nil, func(key string) string {
+		if key == "TAGGER_WATCHER_WAIT" {
+			return "12s"
+		}
+		return ""
+	})
+	if err != nil || cfg.WatcherWait != 12*time.Second {
+		t.Fatalf("config=%#v err=%v", cfg, err)
+	}
+	_, err = Parse(nil, func(key string) string {
+		if key == "TAGGER_WATCHER_WAIT" {
+			return "not-a-duration"
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), "TAGGER_WATCHER_WAIT") {
+		t.Fatalf("invalid watcher wait error=%v", err)
+	}
+}
+
+func TestParseReconcileInterval(t *testing.T) {
+	cfg, err := Parse(nil, func(key string) string {
+		if key == "TAGGER_RECONCILE_INTERVAL" {
+			return "24h"
+		}
+		return ""
+	})
+	if err != nil || cfg.ReconcileInterval != 24*time.Hour {
+		t.Fatalf("config=%#v err=%v", cfg, err)
+	}
+	_, err = Parse(nil, func(key string) string {
+		if key == "TAGGER_RECONCILE_INTERVAL" {
+			return "800h"
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), "reconcile interval") {
+		t.Fatalf("out of range reconcile interval error=%v", err)
 	}
 }

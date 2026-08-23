@@ -880,6 +880,7 @@ button:disabled {
 .library-sidebar {
   overflow-y: auto;
   border-right: 1px solid var(--line-strong);
+  background: var(--paper-2);
 }
 
 .sidebar-mobile-head,
@@ -1227,6 +1228,72 @@ button:disabled {
   display: flex;
   gap: 8px;
   margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.workspace-actions-inline {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.workspace-actions-inline > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.workspace-actions-menu {
+  position: relative;
+  display: none;
+}
+
+.workspace-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper-2);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.workspace-actions-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.workspace-actions-trigger:hover,
+.workspace-actions-menu[open] .workspace-actions-trigger {
+  border-color: var(--ink);
+  background: var(--paper-3);
+}
+
+.workspace-actions-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  min-width: 180px;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+}
+
+.workspace-actions-popover > button {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
 }
 
 .mobile-panel-button {
@@ -1282,17 +1349,46 @@ button:disabled {
   background: transparent;
 }
 
-.search-box kbd {
-  padding: 2px 5px;
-  border: 1px solid var(--line);
-  border-radius: 2px;
-  color: var(--muted);
-  font-family: var(--mono);
-  font-size: 11px;
-}
-
 .toolbar-spacer {
   flex: 1;
+}
+
+.track-filter-shell {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.track-filter-trigger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.track-filter-trigger:hover,
+.track-filter-trigger.has-active,
+.track-filter-shell.is-open .track-filter-trigger {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-2);
+}
+
+.track-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .toolbar-button {
@@ -1302,6 +1398,8 @@ button:disabled {
   background: transparent;
   color: var(--muted);
   font-size: 11px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .toolbar-filter {
@@ -1315,6 +1413,8 @@ button:disabled {
   background: transparent;
   color: var(--muted);
   font-size: 11px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .toolbar-filter select {
@@ -1339,6 +1439,7 @@ button:disabled {
   color: var(--muted);
   font-size: 11px;
   font-weight: 650;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -1421,6 +1522,14 @@ button:disabled {
 
 .track-virtuoso {
   height: 100%;
+}
+
+.track-list-footer {
+  padding: 12px 16px 18px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
 }
 
 .track-row {
@@ -6262,6 +6371,12 @@ button:disabled {
   white-space: nowrap;
 }
 
+.registered-library-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .empty-library-state {
   display: flex;
   align-items: center;
@@ -6489,6 +6604,70 @@ button:disabled {
     padding-left: 9px;
   }
 
+  .track-toolbar {
+    position: relative;
+    flex-wrap: nowrap;
+    min-height: 54px;
+    overflow: visible;
+  }
+
+  .track-toolbar .toolbar-spacer {
+    display: none;
+  }
+
+  .track-toolbar .search-box {
+    flex: 1 1 auto;
+    order: 0;
+    min-width: 0;
+  }
+
+  .track-filter-shell {
+    display: block;
+  }
+
+  .track-filter-trigger {
+    display: inline-flex;
+  }
+
+  .track-filter-controls {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 8px);
+    right: 0;
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    min-width: min(360px, calc(100vw - 28px));
+    padding: 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: var(--paper-2);
+    box-shadow: var(--shadow);
+  }
+
+  .track-filter-shell.is-open .track-filter-controls {
+    display: grid;
+  }
+
+  .track-filter-controls > * {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .track-filter-controls .toolbar-button {
+    justify-content: flex-start;
+  }
+
+  .track-filter-controls .toolbar-filter select {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .track-filter-controls .toolbar-toggle {
+    justify-content: flex-start;
+  }
+
   .inspector-hero {
     grid-template-columns: 92px minmax(0, 1fr) 24px;
     gap: 12px;
@@ -6531,6 +6710,7 @@ button:disabled {
     bottom: 0;
     left: 0;
     width: 285px;
+    background: var(--paper-2);
     box-shadow: var(--shadow);
     transform: translateX(-102%);
     transition: transform 220ms ease;
@@ -6538,6 +6718,22 @@ button:disabled {
 
   .library-sidebar.is-mobile-open {
     transform: translateX(0);
+  }
+
+  .workspace-actions-inline {
+    display: none;
+  }
+
+  .workspace-actions-menu {
+    display: block;
+  }
+
+  .track-inspector {
+    grid-template-rows: auto auto 43px minmax(0, 1fr) 54px;
+  }
+
+  .track-inspector.has-restore-draft {
+    grid-template-rows: auto auto 43px auto minmax(0, 1fr) 54px;
   }
 
   .sidebar-mobile-head,
@@ -6656,7 +6852,7 @@ button:disabled {
     font-size: 28px;
   }
 
-  .workspace-actions .secondary-button {
+  .workspace-actions-inline .secondary-button {
     display: none;
   }
 
@@ -6666,17 +6862,7 @@ button:disabled {
   }
 
   .track-toolbar {
-    flex-wrap: wrap;
-    min-height: 92px;
-  }
-
-  .track-toolbar .toolbar-spacer {
-    display: none;
-  }
-
-  .track-toolbar .search-box {
-    flex: 1 1 100%;
-    order: -1;
+    min-height: 54px;
   }
 
   .candidate-layout {
@@ -6900,10 +7086,19 @@ button:disabled {
     display: none;
   }
 
-  .workspace-actions .primary-button {
+  .workspace-actions-inline .primary-button {
     width: 36px;
     padding: 0;
     font-size: 0;
+  }
+
+  .workspace-actions-trigger {
+    width: 36px;
+    padding: 0;
+  }
+
+  .workspace-actions-trigger span {
+    display: none;
   }
 
   .track-toolbar {
@@ -6912,11 +7107,6 @@ button:disabled {
 
   .search-box {
     min-width: 0;
-  }
-
-  .search-box kbd,
-  .toolbar-button {
-    display: none;
   }
 
   .track-head,

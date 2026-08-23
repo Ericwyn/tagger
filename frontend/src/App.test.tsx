@@ -1,12 +1,22 @@
 import {render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {App} from '@/App';
 import {resetMockState} from '@/mock/api';
+import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 describe('Tagger app prototype', () => {
+  beforeEach(() => {
+    resetMockState();
+    clearLibraryViewSnapshots();
+    localStorage.clear();
+    window.history.replaceState({}, '', '/');
+  });
+
   afterEach(() => {
     resetMockState();
+    clearLibraryViewSnapshots();
+    localStorage.clear();
     window.history.replaceState({}, '', '/');
   });
 
@@ -14,8 +24,8 @@ describe('Tagger app prototype', () => {
     render(<App />);
     expect(screen.getByText('无播放歌曲')).toBeInTheDocument();
     expect(await screen.findByRole('heading', {name: '全部音乐'})).toBeInTheDocument();
-    expect(await screen.findByRole('heading', {name: '再回首'})).toBeInTheDocument();
-    expect(screen.getByText('24 首曲目 · 15 首无损音频')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', {name: '愛上一個不回家的人'})).toBeInTheDocument();
+    expect(screen.getByText('24')).toBeInTheDocument();
     expect(screen.queryByTitle('全局搜索快捷键')).not.toBeInTheDocument();
     expect(screen.queryByTitle('查看通知')).not.toBeInTheDocument();
     expect(screen.queryByTitle('账户与系统信息')).not.toBeInTheDocument();
@@ -75,7 +85,7 @@ describe('Tagger app prototype', () => {
   it('keeps the global player mounted while changing pages', async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByRole('heading', {name: '再回首'});
+    await screen.findByRole('heading', {name: '愛上一個不回家的人'});
 
     await user.click(screen.getByTitle('试听'));
     expect(screen.getByRole('region', {name: '全局播放器'})).toBeInTheDocument();
@@ -92,7 +102,7 @@ describe('Tagger app prototype', () => {
   it('searches metadata candidates for the active track', async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByRole('heading', {name: '再回首'});
+    await screen.findByRole('heading', {name: '愛上一個不回家的人'});
 
     await user.click(screen.getByRole('button', {name: /从数据源补全/}));
     expect(screen.getByText('正在查询已启用数据源')).toBeInTheDocument();
@@ -115,7 +125,7 @@ describe('Tagger app prototype', () => {
     await screen.findByRole('heading', {name: '全部音乐'});
 
     await user.selectOptions(screen.getByRole('combobox', {name: '曲目格式筛选'}), 'flac');
-    expect(screen.getByText('显示 15 / 24 首')).toBeInTheDocument();
+    expect(await screen.findByText('已加载 15 / 共 15 首')).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', {name: '曲目排序'}), 'title');
     expect(screen.getByRole('combobox', {name: '曲目排序'})).toHaveValue('title');
   });

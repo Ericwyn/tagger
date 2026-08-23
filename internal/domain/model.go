@@ -17,6 +17,7 @@ const (
 	HealthMissingLyrics  TrackHealth = "missing-lyrics"
 	HealthNeedsReview    TrackHealth = "needs-review"
 	HealthParseError     TrackHealth = "parse-error"
+	HealthMissing        TrackHealth = "missing"
 )
 
 type CoverTone string
@@ -84,6 +85,18 @@ type Track struct {
 	Revision             string          `json:"revision"`
 	ModifiedAt           string          `json:"modifiedAt"`
 	ParseError           string          `json:"parseError,omitempty"`
+	Missing              bool            `json:"missing,omitempty"`
+	MissingSince         string          `json:"missingSince,omitempty"`
+	// FileFingerprint is persisted by the store but intentionally omitted from
+	// API JSON. It lets quick scans skip unchanged media without reading tags.
+	FileFingerprint FileFingerprint `json:"-"`
+}
+
+type FileFingerprint struct {
+	SizeBytes        int64
+	ModifiedUnixNano int64
+	SidecarSize      int64
+	SidecarUnixNano  int64
 }
 
 type FolderNode struct {
@@ -113,6 +126,11 @@ type ScanReport struct {
 	Discovered   int      `json:"discovered"`
 	Parsed       int      `json:"parsed"`
 	Failed       int      `json:"failed"`
+	Changed      int      `json:"changed"`
+	Unchanged    int      `json:"unchanged"`
+	Added        int      `json:"added"`
+	Missing      int      `json:"missing"`
+	Mode         string   `json:"mode,omitempty"`
 	WarningCount int      `json:"warningCount"`
 	Warnings     []string `json:"warnings,omitempty"`
 }

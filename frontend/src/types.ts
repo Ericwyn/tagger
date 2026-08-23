@@ -2,7 +2,7 @@ export type PageID = 'library' | 'review' | 'jobs' | 'history' | 'settings';
 export type InspectorTab = 'tags' | 'artwork' | 'lyrics' | 'technical' | 'history';
 export type TrackFormat = 'flac' | 'mp3' | 'wav';
 export type CoverTone = 'vermilion' | 'moss' | 'cobalt' | 'sand' | 'charcoal' | 'jade';
-export type TrackHealth = 'complete' | 'missing-artwork' | 'missing-lyrics' | 'needs-review' | 'parse-error';
+export type TrackHealth = 'complete' | 'missing-artwork' | 'missing-lyrics' | 'needs-review' | 'parse-error' | 'missing';
 export const historyRetentionOptions = [3, 5, 10, 20] as const;
 export type HistoryRetention = typeof historyRetentionOptions[number];
 
@@ -65,6 +65,8 @@ export interface Track {
   revision: string;
   modifiedAt: string;
   parseError?: string;
+  missing?: boolean;
+  missingSince?: string;
   syncState?: 'indexed' | 'draft';
 }
 
@@ -87,6 +89,25 @@ export interface LibrarySummary {
   writable: boolean;
   lastScanLabel: string;
   folders: FolderNode[];
+}
+
+export type TrackSort = 'album' | 'title' | 'modified' | 'format';
+
+export interface TrackQuery {
+  q?: string;
+  folderId?: string;
+  folderPath?: string;
+  includeSubfolders?: boolean;
+  health?: TrackHealth;
+  format?: TrackFormat;
+  sort?: TrackSort;
+}
+
+export interface TrackPage {
+  tracks: Track[];
+  total: number;
+  nextCursor?: string;
+  hasMore: boolean;
 }
 
 export interface DirectoryProbe {
@@ -173,6 +194,8 @@ export interface Job {
   startedAt: string;
   error?: string;
 }
+
+export type ScanMode = 'quick' | 'full' | 'targeted';
 
 export interface MatchItem {
   id: string;

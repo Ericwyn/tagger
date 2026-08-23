@@ -4,7 +4,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 const api = vi.hoisted(() => ({
   listJobs: vi.fn(),
   listBatchEditItems: vi.fn(),
-  listTracks: vi.fn(),
+  resolveTracks: vi.fn(),
   subscribeJobEvents: vi.fn(() => () => undefined),
   cancelJob: vi.fn(),
   retryJob: vi.fn(),
@@ -20,7 +20,7 @@ describe('JobsPage', () => {
       id: 'job-edit', kind: 'batch_edit', state: 'partial', title: '批量编辑标签', detail: '1 首失败',
       processed: 2, total: 2, succeeded: 1, failed: 1, startedAt: '刚刚',
     }]);
-    api.listTracks.mockResolvedValue([{id: 'trk-1', fileName: '忽略不计.mp3'}]);
+    api.resolveTracks.mockResolvedValue({tracks: [{id: 'trk-1', fileName: '忽略不计.mp3'}], total: 1});
     api.listBatchEditItems.mockResolvedValue([{
       id: 'item-1', jobId: 'job-edit', trackId: 'trk-1', state: 'failed', error: 'revision conflict',
       diff: [{field: 'genres', operation: 'set', before: ['Pop'], after: ['Live']}],

@@ -1,5 +1,5 @@
 import {candidatesFor, jobs, library, providerConfigs, revisions, seedTracks} from '@/mock/data';
-import type {CandidateSearchQuery, DirectoryProbe, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch} from '@/types';
+import type {CandidateSearchQuery, DirectoryProbe, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch, TrackPage, TrackQuery, TrackSort} from '@/types';
 
 let tracks = structuredClone(seedTracks);
 
@@ -45,6 +45,76 @@ export async function switchLibrary(libraryId: string, path: string): Promise<Jo
 export async function listTracks(): Promise<Track[]> {
   await wait();
   return structuredClone(tracks);
+}
+
+function matchesTrackQuery(track: Track, query: TrackQuery): boolean {
+  if (query.folderId && track.folderId !== query.folderId) return false;
+  if (query.folderPath) {
+    const directory = track.relativePath.split('/').slice(0, -1).join('/');
+    const folderPath = query.folderPath.replaceAll(' · ', '/');
+    if (directory !== folderPath && (!query.includeSubfolders || !directory.startsWith(`${folderPath}/`))) return false;
+  }
+  if (query.health && track.health !== query.health) return false;
+  if (query.format && track.format !== query.format) return false;
+  const needle = query.q?.trim().toLocaleLowerCase() ?? '';
+  if (!needle) return true;
+  return [track.title, track.fileName, track.relativePath, track.album, ...track.artists, ...track.albumArtists, ...track.genres]
+    .some((value) => value.toLocaleLowerCase().includes(needle));
+}
+
+function compareMockTracks(left: Track, right: Track, sort: TrackSort = 'album'): number {
+  const text = (value: string) => value.trim().toLocaleLowerCase();
+  if (sort === 'title') return text(left.title || left.fileName).localeCompare(text(right.title || right.fileName), 'zh-CN') || left.relativePath.localeCompare(right.relativePath);
+  if (sort === 'modified') return right.modifiedAt.localeCompare(left.modifiedAt) || left.relativePath.localeCompare(right.relativePath);
+  if (sort === 'format') return left.format.localeCompare(right.format) || text(left.title).localeCompare(text(right.title), 'zh-CN') || left.relativePath.localeCompare(right.relativePath);
+  return text(left.album).localeCompare(text(right.album), 'zh-CN')
+    || (left.discNumber ?? 0) - (right.discNumber ?? 0)
+    || (left.trackNumber ?? 0) - (right.trackNumber ?? 0)
+    || text(left.title || left.fileName).localeCompare(text(right.title || right.fileName), 'zh-CN')
+    || left.relativePath.localeCompare(right.relativePath);
+}
+
+function filteredMockTracks(query: TrackQuery): Track[] {
+  return tracks.filter((track) => matchesTrackQuery(track, query)).sort((left, right) => compareMockTracks(left, right, query.sort));
+}
+
+export async function listTrackPage(query: TrackQuery = {}, cursor = '', limit = 100): Promise<TrackPage> {
+  await wait();
+  if (limit < 0 || limit > 200) throw new Error('invalid_track_query');
+  if (query.sort && !(['album', 'title', 'modified', 'format'] as TrackSort[]).includes(query.sort)) throw new Error('invalid_track_query');
+  if (query.health && !(['complete', 'missing-artwork', 'missing-lyrics', 'needs-review', 'parse-error', 'missing'] as Track['health'][]).includes(query.health)) throw new Error('invalid_track_query');
+  if (query.format && !(['mp3', 'flac', 'wav'] as Track['format'][]).includes(query.format)) throw new Error('invalid_track_query');
+  const pageSize = Math.max(1, Math.min(limit || 100, 200));
+  if (cursor && !/^\d+$/.test(cursor)) throw new Error('invalid_track_cursor');
+  const offset = cursor ? Number.parseInt(cursor, 10) : 0;
+  const filtered = filteredMockTracks(query);
+  if (offset > filtered.length) throw new Error('invalid_track_cursor');
+  const page = filtered.slice(offset, offset + pageSize);
+  const nextOffset = offset + page.length;
+  return {
+    tracks: structuredClone(page),
+    total: filtered.length,
+    nextCursor: nextOffset < filtered.length ? String(nextOffset) : undefined,
+    hasMore: nextOffset < filtered.length,
+  };
+}
+
+export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery}): Promise<{tracks: Track[]; total: number}> {
+  await wait();
+  const hasIDs = Boolean(request.ids?.length);
+  const hasQuery = request.query != null;
+  if (hasIDs === hasQuery) throw new Error('invalid_track_resolve');
+  if (hasIDs) {
+    const ids = [...new Set((request.ids ?? []).filter(Boolean))];
+    if (ids.length > 1000) throw new Error('当前结果超过 1000 首，请缩小搜索、目录或筛选范围后再操作');
+    const byID = new Map(tracks.map((track) => [track.id, track]));
+    const resolved = ids.map((id) => byID.get(id));
+    if (resolved.some((track) => !track)) throw new Error('track_not_found');
+    return {tracks: structuredClone(resolved as Track[]), total: resolved.length};
+  }
+  const result = filteredMockTracks(request.query ?? {});
+  if (result.length > 1000) throw new Error('当前结果超过 1000 首，请缩小搜索、目录或筛选范围后再操作');
+  return {tracks: structuredClone(result), total: result.length};
 }
 
 export async function updateTrack(trackId: string, patch: TrackPatch): Promise<Track> {

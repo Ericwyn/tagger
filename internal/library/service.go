@@ -36,6 +36,11 @@ type Repository interface {
 	LoadScan(ctx context.Context, root string) (scanner.Result, bool, error)
 }
 
+type DeltaRepository interface {
+	SaveScanDelta(ctx context.Context, root string, result scanner.Result, changed []domain.Track) error
+	SaveTrackUpdates(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error
+}
+
 type RootRepository interface {
 	SetLibraryRoot(context.Context, string) error
 }
@@ -44,16 +49,21 @@ type Service struct {
 	scanner *scanner.Scanner
 	repo    Repository
 
-	scanMu  sync.Mutex
-	mu      sync.RWMutex
+	scanMu sync.Mutex
+	mu     sync.RWMutex
+
 	library domain.LibrarySummary
 	tracks  []domain.Track
 	byID    map[string]domain.Track
 	report  domain.ScanReport
+
+	orderedMu    sync.RWMutex
+	ordered      map[TrackSort][]domain.Track
+	orderVersion uint64
 }
 
 func New(ctx context.Context, scanner *scanner.Scanner, repositories ...Repository) (*Service, error) {
-	service := &Service{scanner: scanner}
+	service := &Service{scanner: scanner, ordered: make(map[TrackSort][]domain.Track), orderVersion: 1}
 	if len(repositories) > 0 {
 		service.repo = repositories[0]
 	}
@@ -77,16 +87,41 @@ func New(ctx context.Context, scanner *scanner.Scanner, repositories ...Reposito
 }
 
 func (s *Service) Rescan(ctx context.Context) error {
+	return s.rescan(ctx, scanner.ScanFull, nil)
+}
+
+func (s *Service) QuickScan(ctx context.Context, targets []string) error {
+	return s.rescan(ctx, scanner.ScanQuick, targets)
+}
+
+func (s *Service) rescan(ctx context.Context, mode scanner.ScanMode, targets []string) error {
 	s.scanMu.Lock()
 	defer s.scanMu.Unlock()
 
 	currentScanner := s.currentScanner()
-	result, err := currentScanner.Scan(ctx)
+	var result scanner.Result
+	var err error
+	s.mu.RLock()
+	existing := cloneTracks(s.tracks)
+	s.mu.RUnlock()
+	if mode == scanner.ScanFull {
+		result, err = currentScanner.Scan(ctx)
+	} else {
+		result, err = currentScanner.ScanIncremental(ctx, existing, targets)
+	}
 	if err != nil {
 		return err
 	}
 	if s.repo != nil {
-		if err := s.repo.SaveScan(ctx, currentScanner.Root(), result); err != nil {
+		if mode != scanner.ScanFull {
+			if deltaRepo, ok := s.repo.(DeltaRepository); ok {
+				if err := deltaRepo.SaveScanDelta(ctx, currentScanner.Root(), result, changedTracks(existing, result.Tracks)); err != nil {
+					return fmt.Errorf("persist incremental scan: %w", err)
+				}
+			} else if err := s.repo.SaveScan(ctx, currentScanner.Root(), result); err != nil {
+				return fmt.Errorf("persist scan: %w", err)
+			}
+		} else if err := s.repo.SaveScan(ctx, currentScanner.Root(), result); err != nil {
 			return fmt.Errorf("persist scan: %w", err)
 		}
 	}
@@ -112,11 +147,71 @@ func (s *Service) RescanTrack(ctx context.Context, id string) (domain.Track, err
 	}
 	s.applyTrack(track)
 	if s.repo != nil {
-		if persistErr := s.repo.SaveScan(ctx, currentScanner.Root(), s.snapshotResult()); persistErr != nil {
+		if deltaRepo, ok := s.repo.(DeltaRepository); ok {
+			if persistErr := deltaRepo.SaveTrackUpdates(ctx, currentScanner.Root(), s.snapshotResult(), []domain.Track{track}); persistErr != nil {
+				return track, fmt.Errorf("persist track scan: %w", persistErr)
+			}
+		} else if persistErr := s.repo.SaveScan(ctx, currentScanner.Root(), s.snapshotResult()); persistErr != nil {
 			return track, fmt.Errorf("persist track scan: %w", persistErr)
 		}
 	}
 	return track, scanErr
+}
+
+func (s *Service) RescanTracks(ctx context.Context, ids []string) ([]domain.Track, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+	currentScanner := s.currentScanner()
+	tracks := make([]domain.Track, 0, len(ids))
+	for _, id := range ids {
+		current, err := s.Track(id)
+		if err != nil {
+			return nil, err
+		}
+		track, scanErr := currentScanner.ScanTrack(ctx, current.RelativePath)
+		if scanErr != nil && track.ID == "" {
+			return nil, scanErr
+		}
+		tracks = append(tracks, track)
+		s.applyTrack(track)
+	}
+	if s.repo != nil && len(tracks) > 0 {
+		if deltaRepo, ok := s.repo.(DeltaRepository); ok {
+			if err := deltaRepo.SaveTrackUpdates(ctx, currentScanner.Root(), s.snapshotResult(), tracks); err != nil {
+				return nil, fmt.Errorf("persist track scans: %w", err)
+			}
+		} else if err := s.repo.SaveScan(ctx, currentScanner.Root(), s.snapshotResult()); err != nil {
+			return nil, fmt.Errorf("persist track scans: %w", err)
+		}
+	}
+	return tracks, nil
+}
+
+func (s *Service) RemoveMissing() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kept := make([]domain.Track, 0, len(s.tracks))
+	for _, track := range s.tracks {
+		if !track.Missing {
+			kept = append(kept, track)
+		}
+	}
+	removed := len(s.tracks) - len(kept)
+	if removed == 0 {
+		return 0
+	}
+	s.tracks = kept
+	s.byID = make(map[string]domain.Track, len(kept))
+	for _, track := range kept {
+		s.byID[track.ID] = cloneTrack(track)
+	}
+	s.library.TrackCount = len(kept)
+	s.library.FolderCount = len(buildFoldersForTracks(kept))
+	s.library.Folders = buildFoldersForTracks(kept)
+	s.report.Missing = 0
+	s.report.CompletedAt = time.Now().UTC().Format(time.RFC3339)
+	s.invalidateTrackOrder()
+	return removed
 }
 
 // SwitchRoot scans or restores a candidate root completely before replacing
@@ -176,6 +271,7 @@ func (s *Service) apply(result scanner.Result) {
 	s.byID = byID
 	s.report = result.Report
 	s.mu.Unlock()
+	s.invalidateTrackOrder()
 }
 
 func (s *Service) applyTrack(track domain.Track) {
@@ -195,6 +291,7 @@ func (s *Service) applyTrack(track domain.Track) {
 	now := time.Now().UTC()
 	s.library.LastScanLabel = now.Format("2006-01-02 15:04")
 	s.report.CompletedAt = now.Format(time.RFC3339)
+	s.invalidateTrackOrder()
 }
 
 func (s *Service) snapshotResult() scanner.Result {
@@ -239,6 +336,149 @@ func (s *Service) ListTracks(filter TrackFilter) []domain.Track {
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].RelativePath < result[j].RelativePath })
 	return result
+}
+
+// ListTrackPage returns a stable, server-side filtered page. The cursor is
+// intentionally opaque so callers cannot depend on the in-memory ordering
+// implementation.
+func (s *Service) ListTrackPage(query TrackQuery, cursor string, limit int) (TrackPage, error) {
+	normalized, err := NormalizeTrackQuery(query)
+	if err != nil {
+		return TrackPage{}, err
+	}
+	pageSize, err := normalizePageSize(limit)
+	if err != nil {
+		return TrackPage{}, err
+	}
+	ordered, generation := s.orderedTracks(normalized.Sort)
+	offset := 0
+	if strings.TrimSpace(cursor) != "" {
+		state, decodeErr := decodeTrackCursor(cursor)
+		if decodeErr != nil {
+			return TrackPage{}, decodeErr
+		}
+		if state.Generation != generation {
+			return TrackPage{}, ErrStaleTrackCursor
+		}
+		if state.QueryHash != queryHash(normalized) {
+			return TrackPage{}, fmt.Errorf("%w: query changed", ErrInvalidTrackCursor)
+		}
+		offset = state.Offset
+	}
+
+	page := make([]domain.Track, 0, pageSize)
+	total, matched := 0, 0
+	for _, track := range ordered {
+		if !trackMatchesQuery(track, normalized) {
+			continue
+		}
+		total++
+		if matched < offset {
+			matched++
+			continue
+		}
+		if len(page) < pageSize {
+			page = append(page, cloneTrack(track))
+		}
+		matched++
+	}
+	if offset > total {
+		return TrackPage{}, fmt.Errorf("%w: offset exceeds result", ErrInvalidTrackCursor)
+	}
+	result := TrackPage{Tracks: page, Total: total}
+	consumed := offset + len(page)
+	if consumed < total {
+		result.HasMore = true
+		result.NextCursor = encodeTrackCursor(trackCursor{Generation: generation, QueryHash: queryHash(normalized), Offset: consumed})
+	}
+	return result, nil
+}
+
+func (s *Service) ResolveTracksByIDs(ids []string) ([]domain.Track, error) {
+	unique := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, found := seen[id]; found {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	if len(unique) == 0 {
+		return []domain.Track{}, nil
+	}
+	if len(unique) > MaxTrackResolveSize {
+		return nil, ErrTrackSelectionLarge
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]domain.Track, 0, len(unique))
+	for _, id := range unique {
+		track, found := s.byID[id]
+		if !found {
+			return nil, fmt.Errorf("%w: %s", ErrTrackNotFound, id)
+		}
+		result = append(result, cloneTrack(track))
+	}
+	return result, nil
+}
+
+func (s *Service) ResolveTracksByQuery(query TrackQuery) ([]domain.Track, int, error) {
+	normalized, err := NormalizeTrackQuery(query)
+	if err != nil {
+		return nil, 0, err
+	}
+	ordered, _ := s.orderedTracks(normalized.Sort)
+	result := make([]domain.Track, 0)
+	total := 0
+	for _, track := range ordered {
+		if !trackMatchesQuery(track, normalized) {
+			continue
+		}
+		total++
+		if total > MaxTrackResolveSize {
+			return nil, total, ErrTrackSelectionLarge
+		}
+		result = append(result, cloneTrack(track))
+	}
+	return result, total, nil
+}
+
+func (s *Service) orderedTracks(mode TrackSort) ([]domain.Track, uint64) {
+	s.orderedMu.RLock()
+	if tracks, found := s.ordered[mode]; found {
+		generation := s.orderVersion
+		s.orderedMu.RUnlock()
+		return tracks, generation
+	}
+	generation := s.orderVersion
+	s.orderedMu.RUnlock()
+
+	s.mu.RLock()
+	snapshot := cloneTracks(s.tracks)
+	s.mu.RUnlock()
+	sortTracks(snapshot, mode)
+
+	s.orderedMu.Lock()
+	if generation == s.orderVersion {
+		s.ordered[mode] = snapshot
+	}
+	s.orderedMu.Unlock()
+	return snapshot, generation
+}
+
+func (s *Service) invalidateTrackOrder() {
+	s.orderedMu.Lock()
+	s.ordered = make(map[TrackSort][]domain.Track)
+	s.orderVersion++
+	if s.orderVersion == 0 {
+		s.orderVersion = 1
+	}
+	s.orderedMu.Unlock()
 }
 
 func (s *Service) Track(id string) (domain.Track, error) {
@@ -318,4 +558,44 @@ func cloneLibrary(library domain.LibrarySummary) domain.LibrarySummary {
 		library.Folders[i].Children = append([]domain.FolderNode(nil), library.Folders[i].Children...)
 	}
 	return library
+}
+
+func changedTracks(previous []domain.Track, current []domain.Track) []domain.Track {
+	old := make(map[string]domain.Track, len(previous))
+	for _, track := range previous {
+		old[track.RelativePath] = track
+	}
+	changed := make([]domain.Track, 0)
+	for _, track := range current {
+		prior, found := old[track.RelativePath]
+		if !found || prior.Revision != track.Revision || prior.Missing != track.Missing || prior.Health != track.Health {
+			changed = append(changed, track)
+		}
+	}
+	return changed
+}
+
+func buildFoldersForTracks(tracks []domain.Track) []domain.FolderNode {
+	// Scanner owns the folder normalization; this small helper preserves the
+	// current in-memory summary after an explicit missing-index purge.
+	counts := make(map[string]domain.FolderNode)
+	for _, track := range tracks {
+		folder := counts[track.FolderID]
+		folder.ID = track.FolderID
+		folder.Count++
+		if folder.Name == "" {
+			directory := filepath.ToSlash(filepath.Dir(track.RelativePath))
+			folder.Name = "根目录单曲"
+			if directory != "." {
+				folder.Name = strings.ReplaceAll(directory, "/", " · ")
+			}
+		}
+		counts[track.FolderID] = folder
+	}
+	result := make([]domain.FolderNode, 0, len(counts))
+	for _, folder := range counts {
+		result = append(result, folder)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
 }

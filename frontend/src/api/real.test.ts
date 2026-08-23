@@ -63,7 +63,19 @@ describe('real API client', () => {
     expect(normalized[0].composers).toEqual([]);
     expect(normalized[0].musicbrainzArtistIds).toEqual([]);
     expect(fetcher).toHaveBeenNthCalledWith(1, '/api/v1/libraries', expect.any(Object));
-    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/v1/tracks', expect.any(Object));
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/v1/tracks?limit=100', expect.any(Object));
+  });
+
+  it('serializes paginated track queries and resolves bounded selections', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: {tracks: [track], total: 1, nextCursor: 'next', hasMore: true}}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: {tracks: [track], total: 1}}), {status: 200}));
+    const api = createRealAPI(fetcher);
+
+    await expect(api.listTrackPage({q: '再回首', folderId: 'folder-1', includeSubfolders: true, health: 'missing-lyrics', format: 'flac', sort: 'title'}, 'cursor', 50)).resolves.toEqual(expect.objectContaining({total: 1, nextCursor: 'next', hasMore: true}));
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/v1/tracks?limit=50&cursor=cursor&q=%E5%86%8D%E5%9B%9E%E9%A6%96&folder_id=folder-1&include_subfolders=true&health=missing-lyrics&format=flac&sort=title', expect.any(Object));
+    await expect(api.resolveTracks({ids: ['trk-1']})).resolves.toEqual({tracks: [expect.objectContaining(track)], total: 1});
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/v1/tracks/resolve', expect.objectContaining({method: 'POST', body: JSON.stringify({ids: ['trk-1']})}));
   });
 
   it('lists registered libraries and queues a new root scan', async () => {

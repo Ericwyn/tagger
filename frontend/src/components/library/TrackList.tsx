@@ -1,5 +1,5 @@
-import {memo} from 'react';
-import {Virtuoso} from 'react-virtuoso';
+import {memo, useEffect, useRef} from 'react';
+import {Virtuoso, type StateSnapshot, type VirtuosoHandle} from 'react-virtuoso';
 import {AlertCircle, Check, ChevronDown, ListFilter, MoreHorizontal} from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {artworkURL} from '@/api';
@@ -14,6 +14,13 @@ interface TrackListProps {
   onSelectTrack: (track: Track) => void;
   onToggleTrack: (trackId: string) => void;
   onToggleAll: () => void;
+  resultSelectionActive?: boolean;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onEndReached?: () => void;
+  restoreStateFrom?: StateSnapshot;
+  initialScrollTop?: number;
+  onViewportState?: (state: StateSnapshot) => void;
 }
 
 const healthLabel: Record<Track['health'], string> = {
@@ -22,6 +29,7 @@ const healthLabel: Record<Track['health'], string> = {
   'missing-lyrics': '无歌词',
   'needs-review': '需确认',
   'parse-error': '解析失败',
+  missing: '文件缺失',
 };
 
 const TrackRow = memo(function TrackRow({
@@ -100,15 +108,28 @@ export function TrackList({
   onSelectTrack,
   onToggleTrack,
   onToggleAll,
+  resultSelectionActive = false,
+  hasMore = false,
+  loadingMore = false,
+  onEndReached,
+  restoreStateFrom,
+  initialScrollTop,
+  onViewportState,
 }: TrackListProps) {
-  const allSelected = tracks.length > 0 && tracks.every((track) => selectedIds.has(track.id));
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const viewportStateRef = useRef(onViewportState);
+  viewportStateRef.current = onViewportState;
+  useEffect(() => () => {
+    virtuosoRef.current?.getState((state) => viewportStateRef.current?.(state));
+  }, []);
+  const allSelected = resultSelectionActive || (tracks.length > 0 && tracks.every((track) => selectedIds.has(track.id)));
 
   return (
     <div className="track-list" role="table" aria-label="音乐文件列表">
       <div className="track-head" role="row">
         <button
           className={cn('square-check', allSelected && 'is-checked')}
-          aria-label={allSelected ? '取消全选' : '全选当前曲目'}
+          aria-label={allSelected ? '取消全选' : '全选当前结果集'}
           onClick={onToggleAll}
         >
           {allSelected && <Check size={12} strokeWidth={3} />}
@@ -126,8 +147,15 @@ export function TrackList({
 
       {tracks.length > 0 ? (
         <Virtuoso
+          ref={virtuosoRef}
           className="track-virtuoso"
           data={tracks}
+          restoreStateFrom={restoreStateFrom}
+          initialScrollTop={restoreStateFrom ? undefined : initialScrollTop}
+          endReached={() => {
+            if (hasMore && !loadingMore) onEndReached?.();
+          }}
+          components={{Footer: () => loadingMore ? <div className="track-list-footer">正在加载更多曲目…</div> : hasMore ? <div className="track-list-footer">继续滚动加载更多</div> : null}}
           itemContent={(_, track) => (
             <TrackRow
               track={track}

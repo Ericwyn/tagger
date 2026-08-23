@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   listLibraries: vi.fn(),
   probeLibrary: vi.fn(),
   switchLibrary: vi.fn(),
+  deleteLibrary: vi.fn(),
+  purgeMissing: vi.fn(),
   rescanLibrary: vi.fn(),
   waitForJob: vi.fn(),
   getSystem: vi.fn(),
@@ -63,6 +65,8 @@ describe('SettingsPage provider diagnostics', () => {
     api.listLibraries.mockResolvedValue([{...library, active: true}]);
     api.probeLibrary.mockResolvedValue({path: '/home/ericwyn/Downloads/TestMusic', name: 'TestMusic', readable: true, writable: true, audioFiles: 24, folders: 3, formats: {mp3: 9, flac: 15, wav: 0}, warnings: []});
     api.switchLibrary.mockResolvedValue({id: 'job-switch', state: 'waiting', kind: 'scan', title: '切换曲库', detail: '等待', processed: 0, total: 24, succeeded: 0, failed: 0, startedAt: '刚刚'});
+    api.deleteLibrary.mockResolvedValue({id: 'lib-archive', deleted: true});
+    api.purgeMissing.mockResolvedValue({removed: 2});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
     api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
@@ -174,6 +178,38 @@ describe('SettingsPage provider diagnostics', () => {
     await waitFor(() => expect(api.rescanLibrary).toHaveBeenCalledWith('lib-test'));
     expect(api.waitForJob).toHaveBeenCalledWith('job-scan');
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('曲库扫描完成'));
+  });
+
+  it('uses an internal confirmation dialog before deleting a registered library', async () => {
+    const user = userEvent.setup();
+    const onNotice = vi.fn();
+    const archived = {...library, id: 'lib-archive', name: 'Archive', active: false};
+    api.listLibraries.mockResolvedValue([{...library, active: true}, archived]);
+    render(<SettingsPage onNotice={onNotice} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', {name: /音乐目录/}));
+    await screen.findByRole('heading', {name: '音乐目录'});
+    await user.click(screen.getByRole('button', {name: '删除'}));
+
+    const dialog = screen.getByRole('dialog', {name: '删除曲库索引？'});
+    expect(dialog).toHaveTextContent('Archive');
+    expect(dialog).toHaveTextContent('本地音乐文件不会被删除或修改');
+    expect(api.deleteLibrary).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', {name: '确认删除'}));
+    await waitFor(() => expect(api.deleteLibrary).toHaveBeenCalledWith('lib-archive'));
+    expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('本地音乐文件未修改'));
+  });
+
+  it('uses an internal confirmation dialog before purging missing indexes', async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', {name: /音乐目录/}));
+    await screen.findByRole('heading', {name: '音乐目录'});
+    await user.click(screen.getByRole('button', {name: '清理缺失索引'}));
+    const dialog = screen.getByRole('dialog', {name: '清理缺失曲目索引？'});
+    expect(dialog).toHaveTextContent('本地音乐文件不会被删除或修改');
+    expect(api.purgeMissing).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', {name: '确认清理'}));
+    await waitFor(() => expect(api.purgeMissing).toHaveBeenCalledWith('lib-test'));
   });
 
   it('probes a directory from the library settings panel', async () => {

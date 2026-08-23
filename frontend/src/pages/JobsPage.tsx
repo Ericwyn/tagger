@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import {cn} from '@/lib/utils';
-import {apiReadMode, cancelJob, listBatchEditItems, listJobs, listTracks, retryJob, subscribeJobEvents} from '@/api';
+import {apiReadMode, cancelJob, listBatchEditItems, listJobs, resolveTracks, retryJob, subscribeJobEvents} from '@/api';
 import {ConfirmDialog} from '@/components/ConfirmDialog';
 import type {BatchEditItem, Job} from '@/types';
 
@@ -142,11 +142,16 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
 		return;
 	  }
 	  let disposed = false;
-	  void listTracks().then((tracks) => {
-		if (!disposed) setTrackNames(new Map(tracks.map((track) => [track.id, track.fileName])));
-	  }).catch(() => undefined);
-	  const loadItems = () => void listBatchEditItems(activeJobId).then((items) => {
-		if (!disposed) setBatchItems(items);
+	  const loadItems = () => void listBatchEditItems(activeJobId).then(async (items) => {
+		if (disposed) return;
+		setBatchItems(items);
+		const ids = [...new Set(items.map((item) => item.trackId).filter(Boolean))];
+		if (ids.length === 0) {
+		  setTrackNames(new Map());
+		  return;
+		}
+		const resolved = await resolveTracks({ids});
+		if (!disposed) setTrackNames(new Map(resolved.tracks.map((track) => [track.id, track.fileName])));
 	  }).catch(() => undefined);
 	  loadItems();
 	  const timer = window.setInterval(loadItems, 1000);

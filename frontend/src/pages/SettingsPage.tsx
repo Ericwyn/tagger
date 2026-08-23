@@ -23,11 +23,13 @@ import {
   X,
 } from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
+import {ConfirmDialog} from '@/components/ConfirmDialog';
 import {cn, formatBytes} from '@/lib/utils';
-import {apiReadMode, candidateArtworkURL, clearRuntimeCache, getSystem, listLibraries, listProviders, probeLibrary, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
+import {apiReadMode, candidateArtworkURL, clearRuntimeCache, deleteLibrary, getSystem, listLibraries, listProviders, probeLibrary, purgeMissing, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
 import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
+import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 interface SettingsPageProps {
   onNotice: (message: string) => void;
@@ -108,6 +110,12 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryScanning, setLibraryScanning] = useState(false);
+  const [libraryDeleting, setLibraryDeleting] = useState(false);
+  const [libraryDeleteTarget, setLibraryDeleteTarget] = useState<LibrarySummary>();
+  const [libraryDeleteError, setLibraryDeleteError] = useState('');
+  const [missingCleanupOpen, setMissingCleanupOpen] = useState(false);
+  const [missingCleaning, setMissingCleaning] = useState(false);
+  const [missingCleanupError, setMissingCleanupError] = useState('');
   const [libraryError, setLibraryError] = useState('');
   const [directoryProbeOpen, setDirectoryProbeOpen] = useState(false);
   const [directoryPath, setDirectoryPath] = useState('');
@@ -189,6 +197,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
           throw new Error(completed.detail || `曲库切换${completed.state}`);
         }
       }
+      clearLibraryViewSnapshots();
       await loadLibrary();
       setDirectoryProbeOpen(false);
       onNotice(`${existing ? '已切换到' : '已添加并切换到'}曲库：${directoryProbe.name}`);
@@ -208,6 +217,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
         const completed = await waitForJob(job.id);
         if (completed.state !== 'succeeded') throw new Error(completed.detail || `曲库切换${completed.state}`);
       }
+      clearLibraryViewSnapshots();
       await loadLibrary();
       onNotice(`已切换到曲库：${target.name}`);
     } catch (error) {
@@ -270,24 +280,71 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     }
   };
 
-  const runLibraryScan = async () => {
+  const runLibraryScan = async (mode: 'quick' | 'full' = 'quick') => {
     if (!library || libraryScanning) return;
     setLibraryScanning(true);
     try {
-      const queued = await rescanLibrary(library.id);
+      const queued = mode === 'quick' ? await rescanLibrary(library.id) : await rescanLibrary(library.id, mode);
       if (queued) {
         const completed = await waitForJob(queued.id);
         onNotice(completed.state === 'succeeded'
-          ? `曲库扫描完成：已索引 ${completed.succeeded || completed.total} 首曲目`
+          ? `曲库扫描完成（${mode === 'full' ? '完整' : '快速'}）：已处理 ${completed.succeeded || completed.total} 首曲目`
           : `曲库扫描结束：${completed.detail || completed.state}`);
       } else {
         onNotice('Mock 曲库扫描完成');
       }
+      clearLibraryViewSnapshots();
       await loadLibrary();
     } catch (error) {
       onNotice(error instanceof Error ? error.message : '曲库扫描失败');
     } finally {
       setLibraryScanning(false);
+    }
+  };
+
+  const removeLibrary = (target: LibrarySummary) => {
+    if (target.active || directorySwitching) return;
+    setLibraryDeleteError('');
+    setLibraryDeleteTarget(target);
+  };
+
+  const confirmRemoveLibrary = async () => {
+    if (!libraryDeleteTarget || libraryDeleting) return;
+    setLibraryDeleting(true);
+    setLibraryDeleteError('');
+    try {
+      await deleteLibrary(libraryDeleteTarget.id);
+      clearLibraryViewSnapshots();
+      await loadLibrary();
+      onNotice(`已删除曲库：${libraryDeleteTarget.name}（本地音乐文件未修改）`);
+      setLibraryDeleteTarget(undefined);
+    } catch (error) {
+      setLibraryDeleteError(error instanceof Error ? error.message : '曲库删除失败');
+    } finally {
+      setLibraryDeleting(false);
+    }
+  };
+
+  const cleanMissing = () => {
+    if (!library || libraryScanning) return;
+    setMissingCleanupError('');
+    setMissingCleanupOpen(true);
+  };
+
+  const confirmCleanMissing = async () => {
+    if (!library || missingCleaning) return;
+    setMissingCleaning(true);
+    setMissingCleanupError('');
+    try {
+      const result = await purgeMissing(library.id);
+      clearLibraryViewSnapshots();
+      await loadLibrary();
+      onNotice(`已清理 ${result.removed} 条缺失索引`);
+      setMissingCleanupOpen(false);
+    } catch (error) {
+      setMissingCleanupError(error instanceof Error ? error.message : '缺失索引清理失败');
+    } finally {
+      setMissingCleaning(false);
     }
   };
 
@@ -650,16 +707,18 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <span><strong>{library?.trackCount ?? '—'}</strong> 首曲目</span>
                   <span><strong>{library?.folderCount ?? '—'}</strong> 个文件夹</span>
                   <span><strong>{library?.lastScanLabel ?? '—'}</strong> 最近扫描</span>
-                  <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void runLibraryScan()}>
+                  <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void runLibraryScan('quick')}>
                     <RefreshCw size={14} className={libraryScanning ? 'spin' : undefined} /> {libraryScanning ? '扫描中…' : '重新扫描'}
                   </button>
+                  <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void runLibraryScan('full')}>完整扫描</button>
+                  <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void cleanMissing()}>清理缺失索引</button>
                 </div>
                 <div className="library-setting-grid">
-                  <label><span>扫描模式</span><select aria-label="扫描模式" value="manual" disabled onChange={() => undefined}><option value="manual">仅手动 / 任务队列</option></select></label>
-                  <label><span>定时对账</span><select aria-label="定时对账" value="off" disabled onChange={() => undefined}><option value="off">未启用</option></select></label>
-                  <label><span>符号链接</span><select aria-label="符号链接" value="off" disabled onChange={() => undefined}><option value="off">不跟随</option></select></label>
+                  <div><span>自动发现变化</span><strong>已启用 · 目录事件合并 5 秒</strong></div>
+                  <div><span>快速扫描</span><strong>仅读取新增或变化文件</strong></div>
+                  <div><span>完整扫描</span><strong>仅手动触发 · 不自动清理缺失索引</strong></div>
                 </div>
-                <div className="ignore-box"><span>默认忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><small>由扫描器固定处理</small></div>
+                <div className="ignore-box"><span>默认忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><small>监听和扫描器使用同一套安全边界；符号链接不跟随</small></div>
               </article>
               <div className="registered-libraries" aria-label="已注册曲库">
                 <div className="registered-libraries-head"><div><h3>已注册曲库</h3><p>切换只会改变当前浏览和写入目标，不会删除其他曲库的索引。</p></div><span>{libraries.length} 个</span></div>
@@ -668,7 +727,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <article className={cn('registered-library-row', item.active && 'is-active')} key={item.id}>
                     <span className="registered-library-icon"><Database size={17} /></span>
                     <div><strong>{item.name}</strong><code>{item.rootPath || item.rootLabel}</code><small>{item.trackCount} 首 · {item.folderCount} 个目录 · {item.lastScanLabel || '尚未扫描'}</small></div>
-                    {item.active ? <span className="registered-library-active"><Check size={13} /> 当前</span> : <button className="secondary-button" disabled={directorySwitching} onClick={() => void switchRegisteredLibrary(item)}>{directorySwitching ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />} 切换</button>}
+                    {item.active ? <span className="registered-library-active"><Check size={13} /> 当前</span> : <div className="registered-library-actions"><button className="secondary-button" disabled={directorySwitching} onClick={() => void switchRegisteredLibrary(item)}>{directorySwitching ? <LoaderCircle size={13} className="spin" /> : <RefreshCw size={13} />} 切换</button><button className="secondary-button" disabled={directorySwitching} onClick={() => void removeLibrary(item)}>删除</button></div>}
                   </article>
                 ))}
               </div>
@@ -761,6 +820,26 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
           )}
         </section>
       </div>
+      <ConfirmDialog
+        open={Boolean(libraryDeleteTarget)}
+        title="删除曲库索引？"
+        description={libraryDeleteTarget ? `将删除“${libraryDeleteTarget.name}”在 Tagger 中的扫描、刮削、任务和历史数据，并解除曲库绑定。本地音乐文件不会被删除或修改。` : ''}
+        confirmLabel="确认删除"
+        busy={libraryDeleting}
+        error={libraryDeleteError}
+        onCancel={() => { if (!libraryDeleting) { setLibraryDeleteTarget(undefined); setLibraryDeleteError(''); } }}
+        onConfirm={() => void confirmRemoveLibrary()}
+      />
+      <ConfirmDialog
+        open={missingCleanupOpen}
+        title="清理缺失曲目索引？"
+        description="将从当前曲库的 Tagger 索引中移除已标记为缺失的曲目及其关联数据。本地音乐文件不会被删除或修改。"
+        confirmLabel="确认清理"
+        busy={missingCleaning}
+        error={missingCleanupError}
+        onCancel={() => { if (!missingCleaning) { setMissingCleanupOpen(false); setMissingCleanupError(''); } }}
+        onConfirm={() => void confirmCleanMissing()}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import {afterEach, describe, expect, it} from 'vitest';
-import {deleteLyricsSidecar, listTracks, resetMockState, updateArtwork, updateTrack, writeLyricsSidecar} from '@/mock/api';
+import {deleteLyricsSidecar, listTrackPage, listTracks, resetMockState, resolveTracks, updateArtwork, updateTrack, writeLyricsSidecar} from '@/mock/api';
 
 describe('mock api', () => {
   afterEach(() => resetMockState());
@@ -62,5 +62,16 @@ describe('mock api', () => {
     expect(removed.artworkCount).toBe(0);
     expect(removed.artworkWidth).toBeUndefined();
     expect(removed.artworkHeight).toBeUndefined();
+  });
+
+  it('filters and paginates tracks with the same bounded resolve contract', async () => {
+    const first = await listTrackPage({format: 'flac', sort: 'title'}, '', 1);
+    expect(first.total).toBe(15);
+    expect(first.tracks).toHaveLength(1);
+    expect(first.hasMore).toBe(true);
+    const second = await listTrackPage({format: 'flac', sort: 'title'}, first.nextCursor, 1);
+    expect(second.tracks[0].id).not.toBe(first.tracks[0].id);
+    await expect(listTrackPage({}, 'not-a-cursor', 1)).rejects.toThrow('invalid_track_cursor');
+    await expect(resolveTracks({ids: [first.tracks[0].id]})).resolves.toEqual({tracks: [expect.objectContaining({id: first.tracks[0].id})], total: 1});
   });
 });

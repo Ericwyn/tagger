@@ -113,6 +113,147 @@ func (s *Store) DeleteLibraryByRoot(ctx context.Context, root string) error {
 	return nil
 }
 
+// DeleteLibrary removes only Tagger-owned database state. It intentionally
+// does not inspect, truncate, or delete anything below the library root.
+func (s *Store) DeleteLibrary(ctx context.Context, id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("library id is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var root string
+	if err := tx.QueryRowContext(ctx, `SELECT root_path FROM libraries WHERE id=?`, id).Scan(&root); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("load library for deletion: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM match_query_history WHERE library_id=? OR (library_id='' AND track_id IN (SELECT id FROM tracks WHERE library_id=?))`, id, id); err != nil {
+		return fmt.Errorf("delete library query history: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM revisions WHERE library_id=?`, id); err != nil {
+		return fmt.Errorf("delete library revisions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM match_items WHERE job_id IN (SELECT id FROM jobs WHERE library_id=?)`, id); err != nil {
+		return fmt.Errorf("delete library match items: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM batch_edit_items WHERE job_id IN (SELECT id FROM jobs WHERE library_id=?)`, id); err != nil {
+		return fmt.Errorf("delete library batch items: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE library_id=?`, id); err != nil {
+		return fmt.Errorf("delete library jobs: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tracks WHERE library_id=?`, id); err != nil {
+		return fmt.Errorf("delete library tracks: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM libraries WHERE id=?`, id); err != nil {
+		return fmt.Errorf("delete library row: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM system_settings WHERE key=? AND value=?`, libraryRootSetting, normalizeRoot(root)); err != nil {
+		return fmt.Errorf("clear deleted library root: %w", err)
+	}
+	// Artwork blobs are content-addressed and shared by revisions. Remove only
+	// blobs no longer referenced by any remaining revision.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM artwork_blobs WHERE hash NOT IN (
+		SELECT before_artwork_hash FROM revisions WHERE before_artwork_hash IS NOT NULL AND before_artwork_hash <> ''
+		UNION SELECT after_artwork_hash FROM revisions WHERE after_artwork_hash IS NOT NULL AND after_artwork_hash <> ''
+	)`); err != nil {
+		return fmt.Errorf("gc artwork blobs: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit library deletion: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) PurgeMissing(ctx context.Context, libraryID string) (int, error) {
+	libraryID = strings.TrimSpace(libraryID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM tracks WHERE library_id=? AND missing=1`, libraryID)
+	if err != nil {
+		return 0, fmt.Errorf("find missing tracks: %w", err)
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM match_query_history WHERE (library_id=? OR library_id='') AND track_id=?`, libraryID, id); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM revisions WHERE library_id=? AND track_id=?`, libraryID, id); err != nil {
+			return 0, err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tracks WHERE library_id=? AND missing=1`, libraryID); err != nil {
+		return 0, fmt.Errorf("purge missing tracks: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM artwork_blobs WHERE hash NOT IN (
+		SELECT before_artwork_hash FROM revisions WHERE before_artwork_hash IS NOT NULL AND before_artwork_hash <> ''
+		UNION SELECT after_artwork_hash FROM revisions WHERE after_artwork_hash IS NOT NULL AND after_artwork_hash <> ''
+	)`); err != nil {
+		return 0, fmt.Errorf("gc missing-track artwork blobs: %w", err)
+	}
+	var summaryJSON []byte
+	if err := tx.QueryRowContext(ctx, `SELECT summary_json FROM libraries WHERE id=?`, libraryID).Scan(&summaryJSON); err == nil {
+		var summary domain.LibrarySummary
+		if json.Unmarshal(summaryJSON, &summary) == nil {
+			var trackCount, folderCount int
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracks WHERE library_id=?`, libraryID).Scan(&trackCount)
+			_ = tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT folder_id) FROM tracks WHERE library_id=?`, libraryID).Scan(&folderCount)
+			folderNames := make(map[string]string, len(summary.Folders))
+			for _, folder := range summary.Folders {
+				folderNames[folder.ID] = folder.Name
+			}
+			folderRows, queryErr := tx.QueryContext(ctx, `SELECT folder_id, COUNT(*) FROM tracks WHERE library_id=? GROUP BY folder_id`, libraryID)
+			if queryErr == nil {
+				folders := make([]domain.FolderNode, 0, folderCount)
+				for folderRows.Next() {
+					var id string
+					var count int
+					if scanErr := folderRows.Scan(&id, &count); scanErr != nil {
+						continue
+					}
+					name := folderNames[id]
+					if name == "" {
+						name = id
+					}
+					folders = append(folders, domain.FolderNode{ID: id, Name: name, Count: count})
+				}
+				_ = folderRows.Close()
+				summary.Folders = folders
+			}
+			summary.TrackCount = trackCount
+			summary.FolderCount = folderCount
+			if encoded, marshalErr := json.Marshal(summary); marshalErr == nil {
+				if _, updateErr := tx.ExecContext(ctx, `UPDATE libraries SET summary_json=? WHERE id=?`, encoded, libraryID); updateErr != nil {
+					return 0, updateErr
+				}
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(ids), nil
+}
+
 func normalizeRoot(root string) string {
 	root = strings.TrimSpace(root)
 	if root == "" {

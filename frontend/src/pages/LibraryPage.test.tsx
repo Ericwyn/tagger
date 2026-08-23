@@ -6,7 +6,8 @@ import type {LibrarySummary, Track} from '@/types';
 
 const api = vi.hoisted(() => ({
   listLibraries: vi.fn(),
-  listTracks: vi.fn(),
+  listTrackPage: vi.fn(),
+  resolveTracks: vi.fn(),
   switchLibrary: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock('@/api', async () => ({
 }));
 
 import {LibraryPage, libraryBrowseStateKey} from '@/pages/LibraryPage';
+import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 const firstLibrary: LibrarySummary = {
   id: 'lib-one', name: 'TestMusic', rootLabel: 'TestMusic', rootPath: '/music/one', active: true,
@@ -41,12 +43,37 @@ const nestedLibrary: LibrarySummary = {
 const folderTrack: Track = {...firstTrack, id: 'trk-folder', relativePath: '艺人/专辑/曲目.flac', fileName: '曲目.flac', folderId: 'folder-album', title: '目录曲目'};
 const childFolderTrack: Track = {...secondTrack, id: 'trk-child', relativePath: '艺人/专辑/Disc 2/子目录曲目.flac', fileName: '子目录曲目.flac', folderId: 'folder-disc', title: '子目录曲目', health: 'missing-lyrics'};
 
+function page(tracks: Track[]) {
+  return {tracks, total: tracks.length, hasMore: false};
+}
+
+function installTrackPageSource(source: Track[]) {
+  api.listTrackPage.mockImplementation(async (query: {q?: string; folderPath?: string; includeSubfolders?: boolean; health?: string; format?: string} = {}) => {
+    const folderPath = query.folderPath?.replaceAll(' · ', '/') ?? '';
+    const filtered = source.filter((track) => {
+      const directory = track.relativePath.split('/').slice(0, -1).join('/');
+      if (folderPath && directory !== folderPath && (!query.includeSubfolders || !directory.startsWith(`${folderPath}/`))) return false;
+      if (query.health && track.health !== query.health) return false;
+      if (query.format && track.format !== query.format) return false;
+      if (query.q && ![track.title, track.fileName, track.album, ...track.artists].some((value) => value.toLocaleLowerCase().includes(query.q!.toLocaleLowerCase()))) return false;
+      return true;
+    });
+    return page(filtered);
+  });
+  api.resolveTracks.mockImplementation(async ({query, ids}: {query?: Parameters<typeof api.listTrackPage>[0]; ids?: string[]}) => {
+    if (ids) return {tracks: source.filter((track) => ids.includes(track.id)), total: ids.length};
+    const result = await api.listTrackPage(query ?? {});
+    return {tracks: result.tracks, total: result.total};
+  });
+}
+
 describe('LibraryPage active library boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem(libraryBrowseStateKey);
+    clearLibraryViewSnapshots();
     api.listLibraries.mockResolvedValue([firstLibrary]);
-    api.listTracks.mockResolvedValue([firstTrack]);
+    installTrackPageSource([firstTrack]);
     api.switchLibrary.mockResolvedValue({id: 'job-switch', kind: 'scan', state: 'succeeded', title: '切换', detail: '完成', processed: 1, total: 1, succeeded: 1, failed: 0, startedAt: '刚刚'});
   });
 
@@ -54,7 +81,8 @@ describe('LibraryPage active library boundary', () => {
     const user = userEvent.setup();
     const onNotice = vi.fn();
     api.listLibraries.mockResolvedValueOnce([firstLibrary, secondLibrary]).mockResolvedValueOnce([{...secondLibrary, active: true}]);
-    api.listTracks.mockResolvedValueOnce([firstTrack]).mockResolvedValueOnce([secondTrack]);
+    api.listTrackPage.mockReset().mockResolvedValueOnce(page([firstTrack])).mockResolvedValueOnce(page([secondTrack]));
+    api.resolveTracks.mockResolvedValue({tracks: [firstTrack], total: 1});
     render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={onNotice} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
 
     expect(await screen.findByRole('heading', {name: '第一首'})).toBeInTheDocument();
@@ -69,7 +97,7 @@ describe('LibraryPage active library boundary', () => {
 
   it('shows the add-library empty state when the backend has no active root', async () => {
     api.listLibraries.mockResolvedValue([]);
-    api.listTracks.mockResolvedValue([]);
+    installTrackPageSource([]);
     const onOpenSettings = vi.fn();
     render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={onOpenSettings} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
 
@@ -81,7 +109,7 @@ describe('LibraryPage active library boundary', () => {
   it('restores the last selected directory after returning to the library page', async () => {
     const user = userEvent.setup();
     api.listLibraries.mockResolvedValue([nestedLibrary]);
-    api.listTracks.mockResolvedValue([folderTrack, childFolderTrack]);
+    installTrackPageSource([folderTrack, childFolderTrack]);
     const firstRender = render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
 
     await screen.findByRole('heading', {name: '目录曲目'});
@@ -98,7 +126,7 @@ describe('LibraryPage active library boundary', () => {
   it('can include tracks from child directories in the selected folder', async () => {
     const user = userEvent.setup();
     api.listLibraries.mockResolvedValue([nestedLibrary]);
-    api.listTracks.mockResolvedValue([folderTrack, childFolderTrack]);
+    installTrackPageSource([folderTrack, childFolderTrack]);
     render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
 
     await screen.findByText('目录曲目');
@@ -107,7 +135,7 @@ describe('LibraryPage active library boundary', () => {
     const recursiveToggle = screen.getByRole('checkbox', {name: '包含子目录'});
     expect(recursiveToggle).toBeEnabled();
     await user.click(recursiveToggle);
-    expect(await screen.findByText('显示 2 / 2 首')).toBeInTheDocument();
+    expect(await screen.findByText('已加载 2 / 共 2 首')).toBeInTheDocument();
   });
 
   it('applies former smart filters from the list toolbar', async () => {
@@ -116,13 +144,30 @@ describe('LibraryPage active library boundary', () => {
     const completeTrack = {...firstTrack, title: '完整曲目', health: 'complete' as const};
     const missingTrack = {...secondTrack, title: '无歌词曲目', health: 'missing-lyrics' as const};
     api.listLibraries.mockResolvedValue([statusLibrary]);
-    api.listTracks.mockResolvedValue([completeTrack, missingTrack]);
+    installTrackPageSource([completeTrack, missingTrack]);
     render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
 
     expect(await screen.findByText('完整曲目')).toBeInTheDocument();
     expect(screen.queryByText('智能筛选')).not.toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', {name: '曲目状态筛选'}), 'missing-lyrics');
     expect(screen.queryByText('完整曲目')).not.toBeInTheDocument();
-    expect(screen.getByText('无歌词曲目')).toBeInTheDocument();
+    expect(await screen.findByText('无歌词曲目')).toBeInTheDocument();
+  });
+
+  it('restores the loaded page and selection from the session view cache', async () => {
+    const user = userEvent.setup();
+    api.listLibraries.mockResolvedValue([firstLibrary]);
+    api.listTrackPage.mockResolvedValue({tracks: [firstTrack], total: 2, nextCursor: 'next-page', hasMore: true});
+    const firstRender = render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+
+    await screen.findByRole('heading', {name: '第一首'});
+    await user.click(screen.getByRole('button', {name: '全选当前结果集'}));
+    firstRender.unmount();
+
+    api.listTrackPage.mockResolvedValue({tracks: [firstTrack], total: 2, nextCursor: 'next-page', hasMore: true});
+    render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+    expect(await screen.findByRole('heading', {name: '第一首'})).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: '取消全选'})).toBeInTheDocument();
+    expect(api.listTrackPage).toHaveBeenCalled();
   });
 });

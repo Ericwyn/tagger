@@ -17,6 +17,14 @@ type MatchQueryHistory struct {
 }
 
 func (s *Store) AddMatchQueryHistory(ctx context.Context, trackID string, query json.RawMessage, providerIDs []string, resultCount int) (MatchQueryHistory, error) {
+	return s.addMatchQueryHistory(ctx, "", trackID, query, providerIDs, resultCount)
+}
+
+func (s *Store) AddLibraryMatchQueryHistory(ctx context.Context, libraryID, trackID string, query json.RawMessage, providerIDs []string, resultCount int) (MatchQueryHistory, error) {
+	return s.addMatchQueryHistory(ctx, libraryID, trackID, query, providerIDs, resultCount)
+}
+
+func (s *Store) addMatchQueryHistory(ctx context.Context, libraryID, trackID string, query json.RawMessage, providerIDs []string, resultCount int) (MatchQueryHistory, error) {
 	if len(query) == 0 {
 		query = []byte("{}")
 	}
@@ -36,13 +44,48 @@ func (s *Store) AddMatchQueryHistory(ctx context.Context, trackID string, query 
 		CreatedAt:   s.now().UTC(),
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO match_query_history(id, track_id, query_json, provider_ids_json, result_count, created_at)
-		VALUES(?, ?, ?, ?, ?, ?)`,
-		history.ID, history.TrackID, history.Query, providersJSON, history.ResultCount, formatTime(history.CreatedAt))
+		INSERT INTO match_query_history(id, library_id, track_id, query_json, provider_ids_json, result_count, created_at)
+		VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		history.ID, libraryID, history.TrackID, history.Query, providersJSON, history.ResultCount, formatTime(history.CreatedAt))
 	if err != nil {
 		return MatchQueryHistory{}, fmt.Errorf("save match query history: %w", err)
 	}
 	return history, nil
+}
+
+func (s *Store) ListLibraryMatchQueryHistory(ctx context.Context, libraryID, trackID string, limit int) ([]MatchQueryHistory, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, track_id, query_json, provider_ids_json, result_count, created_at
+		FROM match_query_history WHERE (library_id=? OR library_id='') AND track_id=? ORDER BY created_at DESC, id DESC LIMIT ?`, libraryID, trackID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]MatchQueryHistory, 0)
+	for rows.Next() {
+		var history MatchQueryHistory
+		var query, providerIDs, createdAt []byte
+		if err := rows.Scan(&history.ID, &history.TrackID, &query, &providerIDs, &history.ResultCount, &createdAt); err != nil {
+			return nil, err
+		}
+		history.Query = append(json.RawMessage(nil), query...)
+		if err := json.Unmarshal(providerIDs, &history.ProviderIDs); err != nil {
+			history.ProviderIDs = []string{}
+		}
+		if history.ProviderIDs == nil {
+			history.ProviderIDs = []string{}
+		}
+		var parseErr error
+		history.CreatedAt, parseErr = time.Parse(time.RFC3339Nano, string(createdAt))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		result = append(result, history)
+	}
+	return result, rows.Err()
 }
 
 func (s *Store) ListMatchQueryHistory(ctx context.Context, trackID string, limit int) ([]MatchQueryHistory, error) {

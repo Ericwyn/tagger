@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -151,6 +152,149 @@ func TestServiceRescanTrackOnlyReadsRequestedFile(t *testing.T) {
 	}
 	if updated.ID != tracks[0].ID || engine.reads.Load() != 3 {
 		t.Fatalf("single scan updated=%#v reads=%d, want one additional read", updated, engine.reads.Load())
+	}
+}
+
+func TestServiceQuickScanSkipsUnchangedFilesAndMarksMissing(t *testing.T) {
+	root := t.TempDir()
+	firstPath := filepath.Join(root, "First.mp3")
+	secondPath := filepath.Join(root, "Second.flac")
+	if err := os.WriteFile(firstPath, []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secondPath, []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := &countingServiceEngine{}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.reads.Load(); got != 2 {
+		t.Fatalf("initial reads=%d, want 2", got)
+	}
+	if err := service.QuickScan(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.reads.Load(); got != 2 {
+		t.Fatalf("unchanged quick scan reads=%d, want 2", got)
+	}
+	if err := os.WriteFile(firstPath, []byte("first changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.QuickScan(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.reads.Load(); got != 3 {
+		t.Fatalf("changed quick scan reads=%d, want 3", got)
+	}
+	if err := os.Remove(secondPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.QuickScan(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	missing := service.ListTracks(TrackFilter{Health: domain.HealthMissing})
+	if len(missing) != 1 || missing[0].RelativePath != "Second.flac" {
+		t.Fatalf("missing tracks=%#v", missing)
+	}
+}
+
+func TestServiceTrackPagesAreStableAndCursorBecomesStaleAfterRefresh(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"01.mp3", "02.mp3", "03.mp3", "04.mp3", "05.mp3"} {
+		if err := os.WriteFile(filepath.Join(root, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	musicScanner, err := scanner.New(serviceEngine{}, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := TrackQuery{Sort: TrackSortTitle}
+	first, err := service.ListTrackPage(query, "", 2)
+	if err != nil || first.Total != 5 || len(first.Tracks) != 2 || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page=%#v err=%v", first, err)
+	}
+	second, err := service.ListTrackPage(query, first.NextCursor, 2)
+	if err != nil || len(second.Tracks) != 2 || !second.HasMore {
+		t.Fatalf("second page=%#v err=%v", second, err)
+	}
+	third, err := service.ListTrackPage(query, second.NextCursor, 2)
+	if err != nil || len(third.Tracks) != 1 || third.HasMore {
+		t.Fatalf("third page=%#v err=%v", third, err)
+	}
+	seen := make(map[string]struct{}, 5)
+	for _, page := range [][]domain.Track{first.Tracks, second.Tracks, third.Tracks} {
+		for _, track := range page {
+			if _, found := seen[track.ID]; found {
+				t.Fatalf("duplicate track across pages: %s", track.ID)
+			}
+			seen[track.ID] = struct{}{}
+		}
+	}
+	if len(seen) != 5 {
+		t.Fatalf("seen=%d, want 5", len(seen))
+	}
+	if err := service.Rescan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ListTrackPage(query, first.NextCursor, 2); err != ErrStaleTrackCursor {
+		t.Fatalf("stale cursor error=%v, want %v", err, ErrStaleTrackCursor)
+	}
+}
+
+func TestServiceTrackPagesCombineFolderHealthFormatAndSearchFilters(t *testing.T) {
+	trackNumber := 1
+	tracks := []domain.Track{
+		{ID: "album-1", FileName: "one.flac", RelativePath: "Artist/Album/one.flac", FolderID: "folder-album", Format: domain.FormatFLAC, Title: "One", Album: "Album", Health: domain.HealthMissingLyrics, TrackNumber: &trackNumber},
+		{ID: "album-2", FileName: "two.mp3", RelativePath: "Artist/Album/two.mp3", FolderID: "folder-album", Format: domain.FormatMP3, Title: "Two", Album: "Album", Health: domain.HealthComplete, TrackNumber: &trackNumber},
+		{ID: "disc-2", FileName: "three.flac", RelativePath: "Artist/Album/Disc 2/three.flac", FolderID: "folder-disc", Format: domain.FormatFLAC, Title: "Three", Album: "Album", Health: domain.HealthComplete, TrackNumber: &trackNumber},
+		{ID: "other", FileName: "four.wav", RelativePath: "Other/four.wav", FolderID: "folder-other", Format: domain.FormatWAV, Title: "Four", Album: "Other", Health: domain.HealthComplete, TrackNumber: &trackNumber},
+	}
+	service := &Service{ordered: make(map[TrackSort][]domain.Track), orderVersion: 1}
+	service.apply(scanner.Result{Library: domain.LibrarySummary{ID: "library"}, Tracks: tracks})
+
+	assertPageTotal := func(query TrackQuery, want int) {
+		t.Helper()
+		page, err := service.ListTrackPage(query, "", 20)
+		if err != nil || page.Total != want || len(page.Tracks) != want {
+			t.Fatalf("query %#v page=%#v err=%v, want %d", query, page, err, want)
+		}
+	}
+	assertPageTotal(TrackQuery{FolderID: "folder-album"}, 2)
+	assertPageTotal(TrackQuery{FolderPath: "Artist · Album", IncludeSubfolders: true}, 3)
+	assertPageTotal(TrackQuery{FolderID: "folder-album", Health: domain.HealthMissingLyrics}, 1)
+	assertPageTotal(TrackQuery{Format: domain.FormatFLAC, Query: "three"}, 1)
+}
+
+func TestServiceResolveTracksByQueryEnforcesBatchLimit(t *testing.T) {
+	root := t.TempDir()
+	for index := 0; index < MaxTrackResolveSize+1; index++ {
+		name := filepath.Join(root, fmt.Sprintf("%04d.mp3", index))
+		if err := os.WriteFile(name, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	musicScanner, err := scanner.New(serviceEngine{}, scanner.Options{Root: root, Workers: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, total, err := service.ResolveTracksByQuery(TrackQuery{Sort: TrackSortTitle})
+	if err != ErrTrackSelectionLarge || total != MaxTrackResolveSize+1 {
+		t.Fatalf("resolve total=%d err=%v, want limit error at %d", total, err, MaxTrackResolveSize+1)
 	}
 }
 

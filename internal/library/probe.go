@@ -27,35 +27,11 @@ type DirectoryProbe struct {
 // active library index. It deliberately counts only the three supported
 // formats and never follows symlinks, matching Scanner's safety boundary.
 func ProbeRoot(root string) (DirectoryProbe, error) {
-	root = strings.TrimSpace(root)
-	if root == "" {
-		return DirectoryProbe{}, fmt.Errorf("directory path is required")
-	}
-	abs, err := filepath.Abs(root)
+	probe, err := ValidateRoot(root)
 	if err != nil {
-		return DirectoryProbe{}, fmt.Errorf("resolve directory path: %w", err)
+		return DirectoryProbe{}, err
 	}
-	info, err := os.Lstat(abs)
-	if err != nil {
-		return DirectoryProbe{}, fmt.Errorf("stat directory: %w", err)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return DirectoryProbe{}, fmt.Errorf("directory root must not be a symlink")
-	}
-	if !info.IsDir() {
-		return DirectoryProbe{}, fmt.Errorf("path is not a directory")
-	}
-	probe := DirectoryProbe{Path: abs, Name: filepath.Base(abs), Formats: map[string]int{string(domain.FormatMP3): 0, string(domain.FormatFLAC): 0, string(domain.FormatWAV): 0}}
-	if file, openErr := os.Open(abs); openErr == nil {
-		probe.Readable = true
-		_ = file.Close()
-	} else {
-		probe.Warnings = append(probe.Warnings, "目录不可读取："+openErr.Error())
-	}
-	probe.Writable = info.Mode().Perm()&0o222 != 0
-	if !probe.Writable {
-		probe.Warnings = append(probe.Warnings, "目录权限位显示为只读")
-	}
+	abs := probe.Path
 	entries := 0
 	err = filepath.WalkDir(abs, func(path string, entry fs.DirEntry, walkErr error) error {
 		entries++
@@ -87,7 +63,7 @@ func ProbeRoot(root string) (DirectoryProbe, error) {
 		case ".flac":
 			probe.AudioFiles++
 			probe.Formats[string(domain.FormatFLAC)]++
-		case ".wav":
+		case ".wav", ".wave":
 			probe.AudioFiles++
 			probe.Formats[string(domain.FormatWAV)]++
 		}
@@ -98,6 +74,42 @@ func ProbeRoot(root string) (DirectoryProbe, error) {
 	}
 	if entries > maxProbeEntries {
 		probe.Warnings = append(probe.Warnings, fmt.Sprintf("目录超过探测上限 %d 项，结果可能不完整", maxProbeEntries))
+	}
+	return probe, nil
+}
+
+// ValidateRoot performs only the cheap safety checks needed before enqueueing
+// a scan. Callers that need counts should use ProbeRoot; registration and
+// switching should avoid traversing a large library twice.
+func ValidateRoot(root string) (DirectoryProbe, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return DirectoryProbe{}, fmt.Errorf("directory path is required")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return DirectoryProbe{}, fmt.Errorf("resolve directory path: %w", err)
+	}
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return DirectoryProbe{}, fmt.Errorf("stat directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return DirectoryProbe{}, fmt.Errorf("directory root must not be a symlink")
+	}
+	if !info.IsDir() {
+		return DirectoryProbe{}, fmt.Errorf("path is not a directory")
+	}
+	probe := DirectoryProbe{Path: abs, Name: filepath.Base(abs), Formats: map[string]int{string(domain.FormatMP3): 0, string(domain.FormatFLAC): 0, string(domain.FormatWAV): 0}}
+	if file, openErr := os.Open(abs); openErr == nil {
+		probe.Readable = true
+		_ = file.Close()
+	} else {
+		probe.Warnings = append(probe.Warnings, "目录不可读取："+openErr.Error())
+	}
+	probe.Writable = info.Mode().Perm()&0o222 != 0
+	if !probe.Writable {
+		probe.Warnings = append(probe.Warnings, "目录权限位显示为只读")
 	}
 	return probe, nil
 }

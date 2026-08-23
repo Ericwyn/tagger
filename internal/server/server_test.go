@@ -153,6 +153,43 @@ func TestLibraryAPIAndFrontendFallback(t *testing.T) {
 	}
 }
 
+func TestTrackPaginationAndResolveAPI(t *testing.T) {
+	s := newTestServer(t)
+	var first struct {
+		Data library.TrackPage `json:"data"`
+	}
+	response := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks?limit=1&sort=title", nil)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &first) != nil {
+		t.Fatalf("first track page = %d %s", response.Code, response.Body.String())
+	}
+	if first.Data.Total != 2 || len(first.Data.Tracks) != 1 || !first.Data.HasMore || first.Data.NextCursor == "" || first.Data.Tracks[0].Title != "Alpha" {
+		t.Fatalf("unexpected first page: %#v", first.Data)
+	}
+	var second struct {
+		Data library.TrackPage `json:"data"`
+	}
+	response = ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks?limit=1&sort=title&cursor="+first.Data.NextCursor, nil)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &second) != nil {
+		t.Fatalf("second track page = %d %s", response.Code, response.Body.String())
+	}
+	if second.Data.Total != 2 || len(second.Data.Tracks) != 1 || second.Data.HasMore || second.Data.NextCursor != "" || second.Data.Tracks[0].Title != "Beta" {
+		t.Fatalf("unexpected second page: %#v", second.Data)
+	}
+	body := []byte(`{"ids":["` + first.Data.Tracks[0].ID + `"]}`)
+	resolved := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/resolve", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if resolved.Code != 200 || !containsJSON(resolved.Body.Bytes(), `"total":1`) || !containsJSON(resolved.Body.Bytes(), `"title":"Alpha"`) {
+		t.Fatalf("resolve tracks = %d %s", resolved.Code, resolved.Body.String())
+	}
+	invalid := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks?sort=unsupported", nil)
+	if invalid.Code != 400 || !containsJSON(invalid.Body.Bytes(), `"code":"invalid_track_query"`) {
+		t.Fatalf("invalid track sort = %d %s", invalid.Code, invalid.Body.String())
+	}
+	invalidCursor := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks?cursor=not-a-cursor", nil)
+	if invalidCursor.Code != 400 || !containsJSON(invalidCursor.Body.Bytes(), `"code":"invalid_track_cursor"`) {
+		t.Fatalf("invalid track cursor = %d %s", invalidCursor.Code, invalidCursor.Body.String())
+	}
+}
+
 func TestLibraryDirectoryProbeAPI(t *testing.T) {
 	s := newTestServer(t)
 	root := t.TempDir()
@@ -239,6 +276,33 @@ func TestLibrarySwitchQueuesSafeBackgroundJob(t *testing.T) {
 	busy := ut.PerformRequest(busyServer.h.Engine, "POST", "/api/v1/libraries/"+busyServer.library.Library().ID+"/switch", &ut.Body{Body: bytes.NewReader(busyBody), Len: len(busyBody)}, ut.Header{Key: "content-type", Value: "application/json"})
 	if busy.Code != 409 || !containsJSON(busy.Body.Bytes(), `"code":"library_switch_busy"`) {
 		t.Fatalf("busy switch = %d %s", busy.Code, busy.Body.String())
+	}
+}
+
+func TestLibraryDeleteRequiresInactiveAndNeverTouchesFiles(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	activeID := s.library.Library().ID
+	activeDelete := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/libraries/"+activeID, nil)
+	if activeDelete.Code != 409 || !containsJSON(activeDelete.Body.Bytes(), `"code":"library_active"`) {
+		t.Fatalf("active delete = %d %s", activeDelete.Code, activeDelete.Body.String())
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "keep.mp3")
+	if err := os.WriteFile(path, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.store.SaveScan(context.Background(), root, serverTestScanResult("lib-delete-api", "Delete API", serverTestTrack("track-delete-api", "keep.mp3"))); err != nil {
+		t.Fatal(err)
+	}
+	response := ut.PerformRequest(s.h.Engine, "DELETE", "/api/v1/libraries/lib-delete-api", nil)
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"deleted":true`) {
+		t.Fatalf("inactive delete = %d %s", response.Code, response.Body.String())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("local file changed after API delete: %q err=%v", got, err)
 	}
 }
 
@@ -1102,4 +1166,12 @@ func stringContains(value, fragment string) bool {
 		}
 	}
 	return false
+}
+
+func serverTestScanResult(libraryID, name string, tracks ...domain.Track) scanner.Result {
+	return scanner.Result{Library: domain.LibrarySummary{ID: libraryID, Name: name, RootLabel: name, TrackCount: len(tracks), FolderCount: 1}, Tracks: tracks, Report: domain.ScanReport{Discovered: len(tracks), Parsed: len(tracks)}}
+}
+
+func serverTestTrack(id, relativePath string) domain.Track {
+	return domain.Track{ID: id, FileName: filepath.Base(relativePath), RelativePath: relativePath, FolderID: "folder-root", Format: domain.FormatMP3, Title: id, Artists: []string{"Artist"}, Album: "Album", AlbumArtists: []string{}, Genres: []string{}, Health: domain.HealthComplete, Revision: "rev-" + id}
 }

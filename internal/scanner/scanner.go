@@ -28,6 +28,20 @@ type Options struct {
 	Now         func() time.Time
 }
 
+type ScanMode string
+
+const (
+	ScanFull   ScanMode = "full"
+	ScanQuick  ScanMode = "quick"
+	ScanTarget ScanMode = "targeted"
+)
+
+type ScanOptions struct {
+	Mode     ScanMode
+	Existing []domain.Track
+	Targets  []string
+}
+
 type Result struct {
 	Library domain.LibrarySummary
 	Tracks  []domain.Track
@@ -75,15 +89,42 @@ func New(engine tags.Engine, opts Options) (*Scanner, error) {
 }
 
 func (s *Scanner) Scan(ctx context.Context) (Result, error) {
+	return s.scan(ctx, ScanOptions{Mode: ScanFull})
+}
+
+// ScanIncremental walks only the requested folders (or the whole root when
+// no targets are provided), compares cheap filesystem fingerprints with the
+// persisted tracks, and reads tags only for new or changed files.
+func (s *Scanner) ScanIncremental(ctx context.Context, existing []domain.Track, targets []string) (Result, error) {
+	mode := ScanQuick
+	if len(targets) > 0 {
+		mode = ScanTarget
+	}
+	return s.scan(ctx, ScanOptions{Mode: mode, Existing: existing, Targets: targets})
+}
+
+func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error) {
+	if options.Mode == "" {
+		options.Mode = ScanFull
+	}
 	started := s.opts.Now()
-	paths, warnings, err := s.discover(ctx)
+	paths, fingerprints, warnings, err := s.discover(ctx, options.Targets...)
 	if err != nil {
 		return Result{}, err
 	}
+	previous := make(map[string]domain.Track, len(options.Existing))
+	for _, track := range options.Existing {
+		previous[track.RelativePath] = track
+	}
+	seen := make(map[string]struct{}, len(paths))
+	tracks := make([]domain.Track, 0, len(paths)+len(previous))
+	changed, unchanged, added, missing := 0, 0, 0, 0
 
 	type extraction struct {
 		track  domain.Track
 		failed bool
+		path   string
+		added  bool
 	}
 	jobs := make(chan string)
 	results := make(chan extraction, len(paths))
@@ -94,8 +135,15 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 		go func() {
 			defer workers.Done()
 			for path := range jobs {
+				relativePath, _ := filepath.Rel(s.opts.Root, path)
+				relativePath = filepath.ToSlash(relativePath)
+				prior, found := previous[relativePath]
+				if options.Mode != ScanFull && found && !prior.Missing && prior.FileFingerprint == fingerprints[path] {
+					results <- extraction{track: prior, path: path}
+					continue
+				}
 				track, readErr := s.extract(ctx, path)
-				results <- extraction{track: track, failed: readErr != nil}
+				results <- extraction{track: track, failed: readErr != nil, path: path, added: !found}
 			}
 		}()
 	}
@@ -115,16 +163,45 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 		close(results)
 	}()
 
-	tracks := make([]domain.Track, 0, len(paths))
 	failed := 0
 	for result := range results {
+		seen[result.track.RelativePath] = struct{}{}
 		tracks = append(tracks, result.track)
 		if result.failed {
 			failed++
+			changed++
+		} else if options.Mode != ScanFull && result.track.FileFingerprint == fingerprints[result.path] && previous[result.track.RelativePath].ID != "" {
+			unchanged++
+		} else {
+			changed++
+			if result.added {
+				added++
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
+	}
+	// Preserve tracks outside a targeted scan. Only a complete scan or a
+	// targeted scan of their containing folder may mark them missing.
+	for _, prior := range options.Existing {
+		if !inTargets(prior.RelativePath, options.Targets) {
+			tracks = append(tracks, prior)
+			continue
+		}
+		if len(warnings) > 0 {
+			tracks = append(tracks, prior)
+			continue
+		}
+		if _, found := seen[prior.RelativePath]; !found {
+			prior.Missing = true
+			if prior.MissingSince == "" {
+				prior.MissingSince = s.opts.Now().UTC().Format(time.RFC3339)
+			}
+			prior.Health = domain.HealthMissing
+			missing++
+			tracks = append(tracks, prior)
+		}
 	}
 	sort.Slice(tracks, func(i, j int) bool { return tracks[i].RelativePath < tracks[j].RelativePath })
 
@@ -149,8 +226,13 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 			StartedAt:    started.Format(time.RFC3339),
 			CompletedAt:  completed.Format(time.RFC3339),
 			Discovered:   len(paths),
-			Parsed:       len(paths) - failed,
+			Parsed:       changed - failed,
 			Failed:       failed,
+			Changed:      changed,
+			Unchanged:    unchanged,
+			Added:        added,
+			Missing:      missing,
+			Mode:         string(options.Mode),
 			WarningCount: len(warnings),
 			Warnings:     warnings,
 		},
@@ -198,42 +280,93 @@ func (s *Scanner) ScanTrack(ctx context.Context, relativePath string) (domain.Tr
 	return s.extract(ctx, absolutePath)
 }
 
-func (s *Scanner) discover(ctx context.Context) ([]string, []string, error) {
+func (s *Scanner) discover(ctx context.Context, targets ...string) ([]string, map[string]domain.FileFingerprint, []string, error) {
 	paths := make([]string, 0, 256)
+	fingerprints := make(map[string]domain.FileFingerprint)
 	warnings := make([]string, 0)
-	err := filepath.WalkDir(s.opts.Root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
+	roots := []string{s.opts.Root}
+	if len(targets) > 0 {
+		roots = roots[:0]
+		seenRoots := make(map[string]struct{})
+		for _, target := range targets {
+			target = filepath.Clean(filepath.FromSlash(strings.TrimSpace(target)))
+			if target == "." || target == "" {
+				if _, seen := seenRoots[s.opts.Root]; !seen {
+					roots = append(roots, s.opts.Root)
+					seenRoots[s.opts.Root] = struct{}{}
+				}
+				continue
+			}
+			if filepath.IsAbs(target) || target == ".." || strings.HasPrefix(target, ".."+string(filepath.Separator)) {
+				return nil, nil, nil, fmt.Errorf("invalid scan target: %s", target)
+			}
+			candidate := filepath.Join(s.opts.Root, target)
+			if _, seen := seenRoots[candidate]; !seen {
+				roots = append(roots, candidate)
+				seenRoots[candidate] = struct{}{}
+			}
 		}
-		if walkErr != nil {
-			warnings = append(warnings, walkErr.Error())
-			if entry != nil && entry.IsDir() {
+	}
+	if len(roots) > 1 {
+		sort.Slice(roots, func(i, j int) bool { return len(roots[i]) < len(roots[j]) })
+		filtered := make([]string, 0, len(roots))
+		for _, candidate := range roots {
+			nested := false
+			for _, parent := range filtered {
+				if candidate == parent || strings.HasPrefix(candidate, parent+string(filepath.Separator)) {
+					nested = true
+					break
+				}
+			}
+			if !nested {
+				filtered = append(filtered, candidate)
+			}
+		}
+		roots = filtered
+	}
+	for _, walkRoot := range roots {
+		if _, statErr := os.Stat(walkRoot); statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			warnings = append(warnings, statErr.Error())
+			continue
+		}
+		err := filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if walkErr != nil {
+				warnings = append(warnings, walkErr.Error())
+				if entry != nil && entry.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if path != s.opts.Root && entry.IsDir() && isIgnoredDirectory(entry.Name()) {
 				return fs.SkipDir
 			}
+			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+				return nil
+			}
+			// Safe writers use hidden same-directory files such as
+			// .song.tagger-123.mp3. Hidden files are never library entries, so a
+			// concurrent scan cannot accidentally index an in-flight copy.
+			if strings.HasPrefix(entry.Name(), ".") {
+				return nil
+			}
+			if isSupportedAudio(path) {
+				paths = append(paths, path)
+				fingerprints[path] = fileFingerprint(path)
+			}
 			return nil
+		})
+		if err != nil {
+			return nil, nil, warnings, fmt.Errorf("walk library: %w", err)
 		}
-		if path != s.opts.Root && entry.IsDir() && isIgnoredDirectory(entry.Name()) {
-			return fs.SkipDir
-		}
-		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
-			return nil
-		}
-		// Safe writers use hidden same-directory files such as
-		// .song.tagger-123.mp3. Hidden files are never library entries, so a
-		// concurrent scan cannot accidentally index an in-flight copy.
-		if strings.HasPrefix(entry.Name(), ".") {
-			return nil
-		}
-		if isSupportedAudio(path) {
-			paths = append(paths, path)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, warnings, fmt.Errorf("walk library: %w", err)
 	}
 	sort.Strings(paths)
-	return paths, warnings, nil
+	return paths, fingerprints, warnings, nil
 }
 
 func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error) {
@@ -252,6 +385,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 		track.Writable = info.Mode().Perm()&0o222 != 0
 		track.ModifiedAt = info.ModTime().Format("2006-01-02 15:04")
 	}
+	track.FileFingerprint = fileFingerprint(path)
 	if statErr != nil {
 		track.Health = domain.HealthParseError
 		track.ParseError = statErr.Error()
@@ -287,6 +421,34 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	track.Health = healthFor(track)
 	track.Revision = FileRevision(relativePath, info, snapshot.Raw)
 	return track, nil
+}
+
+func fileFingerprint(path string) domain.FileFingerprint {
+	var fingerprint domain.FileFingerprint
+	if info, err := os.Stat(path); err == nil {
+		fingerprint.SizeBytes = info.Size()
+		fingerprint.ModifiedUnixNano = info.ModTime().UnixNano()
+	}
+	sidecar := strings.TrimSuffix(path, filepath.Ext(path)) + ".lrc"
+	if info, err := os.Lstat(sidecar); err == nil && info.Mode().IsRegular() {
+		fingerprint.SidecarSize = info.Size()
+		fingerprint.SidecarUnixNano = info.ModTime().UnixNano()
+	}
+	return fingerprint
+}
+
+func inTargets(relativePath string, targets []string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+	path := filepath.ToSlash(filepath.Clean(filepath.FromSlash(relativePath)))
+	for _, target := range targets {
+		target = filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(target))))
+		if target == "." || target == "" || path == target || strings.HasPrefix(path, target+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func applySnapshot(track *domain.Track, snapshot tags.Snapshot) {

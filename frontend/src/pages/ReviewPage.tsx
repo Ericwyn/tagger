@@ -15,7 +15,7 @@ import {
 import {CoverArt} from '@/components/CoverArt';
 import {cn, formatDuration} from '@/lib/utils';
 import {candidatesFor} from '@/mock/data';
-import {apiReadMode, artworkURL, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, listTracks, rematchMatchItem, subscribeJobEvents, updateMatchItem, waitForJob} from '@/api';
+import {apiReadMode, artworkURL, candidateArtworkURL, createMatchJob, createWriteJob, getJob, listMatchItems, rematchMatchItem, resolveTracks, subscribeJobEvents, updateMatchItem, waitForJob} from '@/api';
 import type {Job, MatchCandidate, MatchItem, Track} from '@/types';
 
 interface ReviewPageProps {
@@ -190,16 +190,28 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   useEffect(() => {
     let active = true;
     let stopJobEvents: (() => void) | undefined;
-    void listTracks().then(async (allTracks) => {
-      const ids = trackIds.length ? new Set(trackIds) : new Set(allTracks.filter((track) => track.album === '安泊猜想').map((track) => track.id));
-      let next = allTracks.filter((track) => ids.has(track.id));
+    void (async () => {
+      let next: Track[] = [];
+      let persistedMatchItems: MatchItem[] | undefined;
+      if (trackIds.length > 0) {
+        next = (await resolveTracks({ids: trackIds})).tracks;
+      } else if (apiReadMode === 'real' && matchJobId) {
+        persistedMatchItems = await listMatchItems(matchJobId);
+        const persistedIds = persistedMatchItems.map((item) => item.trackId);
+        next = persistedIds.length > 0 ? (await resolveTracks({ids: persistedIds})).tracks : [];
+      } else {
+        // Mock review links historically opened the demo album when no explicit
+        // selection was supplied. Keep that behavior without loading the full
+        // library into the review page.
+        next = (await resolveTracks({query: {q: '安泊猜想'}})).tracks;
+      }
       let candidateOptionsByTrack = new Map<string, MatchCandidate[]>();
       let errorByTrack = new Map<string, string>();
       let matchStateByTrack = new Map<string, MatchItem['state']>();
       let selectedCandidateByTrack = new Map<string, string>();
 	  let reviewFieldsByTrack = new Map<string, string[] | null | undefined>();
 	  let reviewArtworkByTrack = new Map<string, boolean>();
-	  let reviewArtworkTouchedByTrack = new Map<string, boolean>();
+      let reviewArtworkTouchedByTrack = new Map<string, boolean>();
 	  let reviewArtworkMaxSizeByTrack = new Map<string, number>();
       if (apiReadMode === 'real') {
         const created = matchJobId ? await getJob(matchJobId) : await createMatchJob(next.map((track) => track.id));
@@ -221,10 +233,10 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           stopJobEvents?.();
           stopJobEvents = undefined;
           if (active) setJob(completed);
-          const matchItems = await listMatchItems(created.id);
-          if (matchJobId && trackIds.length === 0) {
-            const persistedIds = new Set(matchItems.map((item) => item.trackId));
-            next = allTracks.filter((track) => persistedIds.has(track.id));
+          const matchItems = persistedMatchItems ?? await listMatchItems(created.id);
+          if (matchJobId && trackIds.length === 0 && persistedMatchItems == null) {
+            const persistedIds = matchItems.map((item) => item.trackId);
+            next = persistedIds.length > 0 ? (await resolveTracks({ids: persistedIds})).tracks : [];
           }
           candidateOptionsByTrack = new Map(matchItems.map((item) => [item.trackId, item.candidates] as const));
           errorByTrack = new Map(matchItems.filter((item) => item.error).map((item) => [item.trackId, item.error!]));
@@ -263,7 +275,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       setItems(reviewed);
       setActiveId(reviewed[0]?.track.id);
       setLoading(false);
-    }).catch(() => {
+    })().catch(() => {
       if (active) setLoading(false);
     });
     return () => { active = false; stopJobEvents?.(); };

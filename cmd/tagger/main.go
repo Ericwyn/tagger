@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"github.com/ericwyn/tagger/internal/store"
 	"github.com/ericwyn/tagger/internal/tags/taglibwasm"
 	"github.com/ericwyn/tagger/internal/version"
+	"github.com/ericwyn/tagger/internal/watcher"
 	"github.com/ericwyn/tagger/web"
 )
 
@@ -51,62 +53,66 @@ func main() {
 		os.Exit(1)
 	}
 	defer dataStore.Close()
-	musicDir := strings.TrimSpace(cfg.MusicDir)
-	usingEmptyLibrary := false
+	musicDir := ""
+	usingPersistedLibrary := false
+	if persisted, found, rootErr := dataStore.LibraryRoot(ctx); rootErr != nil {
+		cancel()
+		logger.Error("load persisted library root", "error", rootErr)
+		os.Exit(1)
+	} else if found {
+		if info, statErr := os.Stat(persisted); statErr == nil && info.IsDir() {
+			musicDir = persisted
+			usingPersistedLibrary = true
+		} else {
+			logger.Warn("persisted music directory is unavailable; trying bootstrap configuration", "path", persisted)
+		}
+	}
+	// A configured path bootstraps a fresh installation. Once a runtime
+	// selection exists, the persisted selection wins so an explicitly removed
+	// library does not reappear after restart.
 	if musicDir == "" {
-		persisted, found, rootErr := dataStore.LibraryRoot(ctx)
-		if rootErr != nil {
+		musicDir = strings.TrimSpace(cfg.MusicDir)
+	}
+	if musicDir == "" {
+		// Older installations may already have indexed libraries but no
+		// active-root setting. Prefer the most recently scanned valid one.
+		first, firstFound, firstErr := dataStore.FirstLibraryRoot(ctx)
+		if firstErr != nil {
 			cancel()
-			logger.Error("load persisted library root", "error", rootErr)
+			logger.Error("load indexed library root", "error", firstErr)
 			os.Exit(1)
 		}
-		if found {
-			if info, statErr := os.Stat(persisted); statErr == nil && info.IsDir() {
-				musicDir = persisted
-			} else {
-				logger.Warn("persisted music directory is unavailable; waiting for a new library", "path", persisted)
-			}
-		}
-		if musicDir == "" {
-			// Older installations may already have indexed libraries but no
-			// active-root setting. Prefer the most recently scanned valid one.
-			first, firstFound, firstErr := dataStore.FirstLibraryRoot(ctx)
-			if firstErr != nil {
-				cancel()
-				logger.Error("load indexed library root", "error", firstErr)
-				os.Exit(1)
-			}
-			if firstFound {
-				if info, statErr := os.Stat(first); statErr == nil && info.IsDir() {
-					musicDir = first
-					if err := dataStore.SetLibraryRoot(ctx, first); err != nil {
-						cancel()
-						logger.Error("persist recovered library root", "error", err)
-						os.Exit(1)
-					}
+		if firstFound {
+			if info, statErr := os.Stat(first); statErr == nil && info.IsDir() {
+				musicDir = first
+				if err := dataStore.SetLibraryRoot(ctx, first); err != nil {
+					cancel()
+					logger.Error("persist recovered library root", "error", err)
+					os.Exit(1)
 				}
 			}
 		}
-		if musicDir == "" {
-			// Do not leave a stale setting pointing at an unavailable directory:
-			// the old indexed summary remains selectable, but no library is
-			// active until the user chooses a valid root in Settings.
-			if err := dataStore.ClearLibraryRoot(ctx); err != nil {
-				cancel()
-				logger.Error("clear unavailable library root", "error", err)
-				os.Exit(1)
-			}
-			// Keep scanner and writer valid while the UI shows the empty state.
-			// This private root is removed from the registry after the no-op scan.
-			emptyRoot := filepath.Join(cfg.DataDir, ".tagger-empty-library")
-			if err := os.MkdirAll(emptyRoot, 0o700); err != nil {
-				cancel()
-				logger.Error("create empty library root", "error", err)
-				os.Exit(1)
-			}
-			musicDir = emptyRoot
-			usingEmptyLibrary = true
+	}
+	usingEmptyLibrary := false
+	if musicDir == "" {
+		// Do not leave a stale setting pointing at an unavailable directory:
+		// the old indexed summary remains selectable, but no library is
+		// active until the user chooses a valid root in Settings.
+		if err := dataStore.ClearLibraryRoot(ctx); err != nil {
+			cancel()
+			logger.Error("clear unavailable library root", "error", err)
+			os.Exit(1)
 		}
+		// Keep scanner and writer valid while the UI shows the empty state.
+		// This private root is removed from the registry after the no-op scan.
+		emptyRoot := filepath.Join(cfg.DataDir, ".tagger-empty-library")
+		if err := os.MkdirAll(emptyRoot, 0o700); err != nil {
+			cancel()
+			logger.Error("create empty library root", "error", err)
+			os.Exit(1)
+		}
+		musicDir = emptyRoot
+		usingEmptyLibrary = true
 	}
 	engine := taglibwasm.New()
 	musicScanner, err := scanner.New(engine, scanner.Options{
@@ -119,7 +125,7 @@ func main() {
 		logger.Error("initialize scanner", "error", err)
 		os.Exit(1)
 	}
-	if cfg.MusicDir != "" {
+	if cfg.MusicDir != "" && !usingPersistedLibrary {
 		if err := dataStore.SetLibraryRoot(ctx, musicScanner.Root()); err != nil {
 			cancel()
 			logger.Error("persist library root", "error", err)
@@ -172,9 +178,14 @@ func main() {
 		}
 	}
 	jobManager := jobs.New(dataStore)
+	var libraryWatcher *watcher.Manager
+	watchContext, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
 	jobManager.Register(domain.JobScan, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
 		var payload struct {
-			Root string `json:"root"`
+			Root    string           `json:"root"`
+			Mode    scanner.ScanMode `json:"mode"`
+			Targets []string         `json:"targets"`
 		}
 		if strings.TrimSpace(job.Payload) != "" {
 			if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
@@ -191,6 +202,11 @@ func main() {
 			if err := tagWriter.SetRoot(payload.Root); err != nil {
 				return err
 			}
+			if libraryWatcher != nil {
+				if err := libraryWatcher.Start(watchContext, payload.Root); err != nil {
+					logger.Warn("restart library watcher after switch", "error", err)
+				}
+			}
 			total := libraryService.Library().TrackCount
 			return progress(total, total, total, 0, fmt.Sprintf("已切换曲库并索引 %d 首曲目", total))
 		}
@@ -198,11 +214,22 @@ func main() {
 		if err := progress(0, before, 0, 0, "正在发现并解析音乐文件"); err != nil {
 			return err
 		}
-		if err := libraryService.Rescan(ctx); err != nil {
-			return err
+		var scanErr error
+		if payload.Mode == scanner.ScanFull {
+			scanErr = libraryService.Rescan(ctx)
+		} else {
+			scanErr = libraryService.QuickScan(ctx, payload.Targets)
 		}
-		total := libraryService.Library().TrackCount
-		return progress(total, total, total, 0, fmt.Sprintf("扫描完成，共索引 %d 首曲目", total))
+		if scanErr != nil {
+			return scanErr
+		}
+		report := libraryService.LastReport()
+		total := report.Discovered
+		if total == 0 {
+			total = before
+		}
+		succeeded := report.Parsed + report.Unchanged
+		return progress(total, total, succeeded, report.Failed, fmt.Sprintf("%s扫描完成：变化 %d 首，未变化 %d 首，缺失 %d 首", scanModeLabel(payload.Mode), report.Changed, report.Unchanged, report.Missing))
 	})
 	jobManager.Register(domain.JobMatch, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
 		var payload struct {
@@ -353,7 +380,11 @@ func main() {
 			}
 		}
 		if len(completed) > 0 {
-			if err := libraryService.Rescan(ctx); err != nil {
+			ids := make([]string, 0, len(completed))
+			for _, item := range completed {
+				ids = append(ids, item.trackID)
+			}
+			if _, err := libraryService.RescanTracks(ctx, ids); err != nil {
 				return err
 			}
 			for _, item := range completed {
@@ -396,6 +427,56 @@ func main() {
 		os.Exit(1)
 	}
 	defer jobManager.Close()
+	enqueueScan := func(ctx context.Context, mode scanner.ScanMode, targets []string, titleSuffix string) error {
+		current := libraryService.Library()
+		if current.ID == "" {
+			return nil
+		}
+		active, err := jobManager.HasActive(ctx)
+		if err != nil {
+			return err
+		}
+		if active {
+			return watcher.ErrBusy
+		}
+		payload, _ := json.Marshal(struct {
+			Mode    scanner.ScanMode `json:"mode"`
+			Targets []string         `json:"targets"`
+		}{Mode: mode, Targets: targets})
+		_, err = jobManager.Enqueue(ctx, domain.Job{
+			Kind: domain.JobScan, LibraryID: current.ID, Title: current.Name + titleSuffix,
+			Detail: "等待文件变化扫描 worker", Total: current.TrackCount, Payload: string(payload),
+		})
+		return err
+	}
+	libraryWatcher = watcher.New(cfg.WatcherWait, func(ctx context.Context, targets []string) error {
+		return enqueueScan(ctx, scanner.ScanTarget, targets, " 文件变化扫描")
+	})
+	if err := libraryWatcher.Start(watchContext, libraryService.Root()); err != nil {
+		logger.Warn("initialize library watcher; manual scans remain available", "error", err)
+	}
+	go func() {
+		for err := range libraryWatcher.Errors() {
+			logger.Warn("library watcher error", "error", err)
+		}
+	}()
+	defer libraryWatcher.Stop()
+	if cfg.ReconcileInterval > 0 {
+		go func() {
+			ticker := time.NewTicker(cfg.ReconcileInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-watchContext.Done():
+					return
+				case <-ticker.C:
+					if err := enqueueScan(context.Background(), scanner.ScanQuick, nil, " 定时对账"); err != nil && !errors.Is(err, watcher.ErrBusy) {
+						logger.Warn("enqueue periodic library reconciliation", "error", err)
+					}
+				}
+			}
+		}()
+	}
 
 	srv := server.New(cfg.Listen, libraryService, tagWriter, providerRegistry, dataStore, web.Dist(), version.Version, engine.Version())
 	if artworkCache != nil {
@@ -415,6 +496,16 @@ func main() {
 
 func formatMatchProgress(processed, total, providerQueries, candidateCount int) string {
 	return fmt.Sprintf("已分析 %d/%d 首曲目 · 已查询 %d 次数据源 · 返回 %d 个候选", processed, total, providerQueries, candidateCount)
+}
+
+func scanModeLabel(mode scanner.ScanMode) string {
+	if mode == scanner.ScanFull {
+		return "完整"
+	}
+	if mode == scanner.ScanTarget {
+		return "定向"
+	}
+	return "快速"
 }
 
 // finalizeMatchJobAfterWrite closes the parent review workflow once its
@@ -578,7 +669,11 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 		if len(completed) == 0 {
 			return nil
 		}
-		if err := libraryService.Rescan(ctx); err != nil {
+		ids := make([]string, 0, len(completed))
+		for _, item := range completed {
+			ids = append(ids, item.track.ID)
+		}
+		if _, err := libraryService.RescanTracks(ctx, ids); err != nil {
 			return err
 		}
 		for _, item := range completed {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -92,6 +93,108 @@ func TestListLibrariesMarksActiveAndKeepsRootsIndependent(t *testing.T) {
 	_, root, found, err := dataStore.LibraryByID(context.Background(), "lib-first")
 	if err != nil || !found || root != firstRoot {
 		t.Fatalf("library lookup root=%q found=%v err=%v", root, found, err)
+	}
+}
+
+func TestLibrariesWithSameRelativeTrackPathRemainIndependent(t *testing.T) {
+	dataStore := openTestStore(t)
+	firstRoot := filepath.Join(t.TempDir(), "First")
+	secondRoot := filepath.Join(t.TempDir(), "Second")
+	track := testTrack("same-track", "Artist/Album/01.mp3")
+	if err := dataStore.SaveScan(context.Background(), firstRoot, testScanResult("lib-first", "First", track)); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.SaveScan(context.Background(), secondRoot, testScanResult("lib-second", "Second", track)); err != nil {
+		t.Fatal(err)
+	}
+	first, found, err := dataStore.LoadScan(context.Background(), firstRoot)
+	if err != nil || !found || len(first.Tracks) != 1 || first.Tracks[0].ID != track.ID {
+		t.Fatalf("first library = %#v found=%v err=%v", first, found, err)
+	}
+	second, found, err := dataStore.LoadScan(context.Background(), secondRoot)
+	if err != nil || !found || len(second.Tracks) != 1 || second.Tracks[0].ID != track.ID {
+		t.Fatalf("second library = %#v found=%v err=%v", second, found, err)
+	}
+}
+
+func TestDeleteLibraryCleansTaggerDataButLeavesMusicFiles(t *testing.T) {
+	dataStore := openTestStore(t)
+	root := filepath.Join(t.TempDir(), "Music")
+	path := filepath.Join(root, "song.mp3")
+	content := []byte("audio sentinel")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	track := testTrack("track-delete", "song.mp3")
+	track.FileFingerprint = domain.FileFingerprint{SizeBytes: int64(len(content)), ModifiedUnixNano: 1}
+	if err := dataStore.SaveScan(context.Background(), root, testScanResult("lib-delete", "Delete me", track)); err != nil {
+		t.Fatal(err)
+	}
+	job, err := dataStore.CreateJob(context.Background(), domain.Job{Kind: domain.JobMatch, LibraryID: "lib-delete", Title: "match"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.UpsertMatchItem(context.Background(), MatchItem{JobID: job.ID, TrackID: track.ID, State: "review", Candidates: []byte("[]")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.UpsertBatchEditItem(context.Background(), BatchEditItem{JobID: job.ID, TrackID: track.ID, State: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.AddLibraryMatchQueryHistory(context.Background(), "lib-delete", track.ID, []byte(`{"title":"song"}`), nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.CreateRevision(context.Background(), domain.Revision{LibraryID: "lib-delete", TrackID: track.ID, TrackTitle: "song", FileName: "song.mp3", Action: "test", Source: "test", BaseRevision: "a", ResultRevision: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := dataStore.DeleteLibrary(context.Background(), "lib-delete"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != string(content) {
+		t.Fatalf("music file changed or disappeared: %q err=%v", got, err)
+	}
+	var count int
+	for _, table := range []string{"libraries", "tracks", "jobs", "match_items", "batch_edit_items", "match_query_history", "revisions"} {
+		if err := dataStore.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("table %s still has %d rows", table, count)
+		}
+	}
+}
+
+func TestPurgeMissingRemovesOnlyMarkedIndexes(t *testing.T) {
+	dataStore := openTestStore(t)
+	root := filepath.Join(t.TempDir(), "Music")
+	keep := testTrack("track-keep", "keep.mp3")
+	missing := testTrack("track-missing", "missing.mp3")
+	missing.Missing = true
+	missing.MissingSince = "2026-08-21T00:00:00Z"
+	missing.Health = domain.HealthMissing
+	if err := dataStore.SaveScan(context.Background(), root, testScanResult("lib-purge", "Purge", keep, missing)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.AddMatchQueryHistory(context.Background(), missing.ID, []byte(`{"title":"missing"}`), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dataStore.AddLibraryMatchQueryHistory(context.Background(), "lib-purge", missing.ID, []byte(`{"title":"missing"}`), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := dataStore.PurgeMissing(context.Background(), "lib-purge")
+	if err != nil || removed != 1 {
+		t.Fatalf("purge removed=%d err=%v, want one", removed, err)
+	}
+	loaded, found, err := dataStore.LoadScan(context.Background(), root)
+	if err != nil || !found || len(loaded.Tracks) != 1 || loaded.Tracks[0].ID != keep.ID {
+		t.Fatalf("remaining scan=%#v found=%v err=%v", loaded, found, err)
+	}
+	history, err := dataStore.ListLibraryMatchQueryHistory(context.Background(), "lib-purge", missing.ID, 20)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("missing history=%#v err=%v, want empty", history, err)
 	}
 }
 

@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/cloudwego/hertz v0.10.6
+	github.com/fsnotify/fsnotify v1.5.4
 	github.com/pressly/goose/v3 v3.27.3
 	go.senan.xyz/taglib v0.14.0
 	golang.org/x/image v0.35.0
@@ -19,7 +20,6 @@ require (
 	github.com/cloudwego/gopkg v0.2.0 // indirect
 	github.com/cloudwego/netpoll v0.7.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
