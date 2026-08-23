@@ -259,7 +259,7 @@ export function TrackInspector({
   };
 
   return (
-    <aside className={cn('track-inspector', mobileOpen && 'is-mobile-open')}>
+    <aside className={cn('track-inspector', mobileOpen && 'is-mobile-open', restoreDraft?.trackId === track.id && 'has-restore-draft')}>
       <div className="inspector-mobile-head">
         <span>曲目详情</span>
         <button title="关闭详情" onClick={onCloseMobile}><X size={18} /></button>

@@ -1652,6 +1652,13 @@ button:disabled {
   border-left: 1px solid var(--line-strong);
 }
 
+/* The historical snapshot notice is a compact, optional row. Without this
+   modifier the inspector keeps its original four-row grid; with it, the
+   notice must not consume the scroll area's 1fr track. */
+.track-inspector.has-restore-draft {
+  grid-template-rows: auto 43px auto minmax(0, 1fr) 54px;
+}
+
 .inspector-empty {
   display: flex;
   flex-direction: column;

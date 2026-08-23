@@ -3,8 +3,37 @@ import userEvent from '@testing-library/user-event';
 import {describe, expect, it, vi} from 'vitest';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {seedTracks} from '@/mock/data';
+import type {TrackPatch} from '@/types';
 
 describe('TrackInspector', () => {
+  it('keeps the historical snapshot notice compact and dismissible', async () => {
+    const user = userEvent.setup();
+    const onDiscard = vi.fn();
+    const patch = {
+      title: '历史标题', artists: [], album: '', albumArtists: [], genres: [], lyrics: '', comment: '',
+      composers: [], conductor: '', lyricists: [], copyright: '', isrc: '', musicbrainzTrackId: '',
+      musicbrainzReleaseId: '', musicbrainzArtistIds: [], acoustidId: '', acoustidFingerprint: '',
+    } as TrackPatch;
+    const {container} = render(
+      <TrackInspector
+        track={seedTracks[0]}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={vi.fn().mockResolvedValue(undefined)}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+        restoreDraft={{key: 'rev-1', revisionId: 'rev-1', trackId: seedTracks[0].id, patch, label: '历史修订 rev-1'}}
+        onDiscardRestoreDraft={onDiscard}
+      />,
+    );
+
+    expect(container.querySelector('.track-inspector')?.classList.contains('has-restore-draft')).toBe(true);
+    expect(screen.getByText('已加载历史快照')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', {name: '取消加载'}));
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
   it('previews and submits field-level edits', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn().mockResolvedValue(undefined);
