@@ -885,6 +885,7 @@ button:disabled {
 
 .library-sidebar,
 .track-inspector {
+  min-width: 0;
   min-height: 0;
   background: color-mix(in srgb, var(--paper-2) 82%, transparent);
 }
@@ -1648,6 +1649,7 @@ button:disabled {
   position: relative;
   display: grid;
   grid-template-rows: auto 43px minmax(0, 1fr) 54px;
+  min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--line-strong);
 }
@@ -1806,7 +1808,9 @@ button:disabled {
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-width: 0;
+  overflow: hidden;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1852,9 +1856,12 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   padding: 10px 14px;
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
   background: color-mix(in srgb, var(--accent) 8%, var(--paper));
+  overflow: hidden;
 }
 
 .restore-draft-banner > div {
@@ -1891,11 +1898,14 @@ button:disabled {
 
 .inspector-scroll {
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 
 .inspector-pane {
+  min-width: 0;
   padding: 18px;
+  overflow-x: hidden;
 }
 
 .form-section-head {
@@ -1903,6 +1913,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   margin: 5px 0 10px;
+  min-width: 0;
   padding-top: 11px;
   border-top: 1px solid var(--line);
 }
@@ -1913,6 +1924,10 @@ button:disabled {
 }
 
 .form-section-head > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 700;
@@ -1925,17 +1940,24 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   padding: 5px 7px;
   border-radius: 2px;
   background: var(--accent-soft);
   color: var(--accent-2);
   font-size: 11px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .field-row {
   position: relative;
   display: block;
+  min-width: 0;
   margin-bottom: 11px;
 }
 
@@ -1953,6 +1975,7 @@ button:disabled {
 .system-settings input:not([type="checkbox"]),
 .system-settings select {
   width: 100%;
+  min-width: 0;
   height: 34px;
   padding: 0 9px;
   border: 1px solid var(--line);
@@ -1979,16 +2002,18 @@ button:disabled {
 .field-grid {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .field-grid.two {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .split-number {
   display: grid;
   grid-template-columns: 1fr 13px 1fr;
   align-items: center;
+  min-width: 0;
 }
 
 .split-number input {
@@ -2151,6 +2176,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   padding: 8px 12px;
   border-top: 1px solid var(--line-strong);
   background: var(--paper-2);
@@ -2161,8 +2187,16 @@ button:disabled {
   flex: 1;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: var(--muted);
   font-size: 11px;
+}
+
+.inspector-actions > div span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dirty-indicator {
@@ -2179,9 +2213,13 @@ button:disabled {
 
 .inspector-actions .primary-button,
 .inspector-actions .ghost-button {
+  min-width: 0;
   height: 35px;
   padding: 0 10px;
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .artwork-stage {
@@ -2252,7 +2290,12 @@ button:disabled {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  min-width: 0;
   margin-bottom: 12px;
+}
+
+.lyrics-head > div {
+  min-width: 0;
 }
 
 .lyrics-head span,
@@ -6607,6 +6650,10 @@ button:disabled {
 
   .track-inspector.is-mobile-open {
     transform: translateX(0);
+  }
+
+  .track-inspector .field-grid.two {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .library-sidebar {
