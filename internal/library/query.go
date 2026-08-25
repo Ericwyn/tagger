@@ -78,7 +78,7 @@ func NormalizeTrackQuery(query TrackQuery) (TrackQuery, error) {
 	}
 	if query.Health != "" {
 		switch query.Health {
-		case domain.HealthComplete, domain.HealthMissingArtwork, domain.HealthMissingLyrics, domain.HealthNeedsReview, domain.HealthParseError, domain.HealthMissing:
+		case domain.HealthComplete, domain.HealthTagCompatibility, domain.HealthMissingArtwork, domain.HealthMissingLyrics, domain.HealthNeedsReview, domain.HealthParseError, domain.HealthMissing:
 		default:
 			return TrackQuery{}, fmt.Errorf("%w: unsupported health %q", ErrInvalidTrackQuery, query.Health)
 		}
@@ -160,6 +160,11 @@ func trackMatchesQuery(track domain.Track, query TrackQuery) bool {
 	values = append(values, track.Artists...)
 	values = append(values, track.AlbumArtists...)
 	values = append(values, track.Genres...)
+	for _, hint := range track.TagHints {
+		values = append(values, hint.Title, hint.Album)
+		values = append(values, hint.Artists...)
+		values = append(values, hint.AlbumArtists...)
+	}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), needle) {
 			return true

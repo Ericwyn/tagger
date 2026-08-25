@@ -12,12 +12,13 @@ const (
 type TrackHealth string
 
 const (
-	HealthComplete       TrackHealth = "complete"
-	HealthMissingArtwork TrackHealth = "missing-artwork"
-	HealthMissingLyrics  TrackHealth = "missing-lyrics"
-	HealthNeedsReview    TrackHealth = "needs-review"
-	HealthParseError     TrackHealth = "parse-error"
-	HealthMissing        TrackHealth = "missing"
+	HealthComplete         TrackHealth = "complete"
+	HealthTagCompatibility TrackHealth = "tag-compatibility"
+	HealthMissingArtwork   TrackHealth = "missing-artwork"
+	HealthMissingLyrics    TrackHealth = "missing-lyrics"
+	HealthNeedsReview      TrackHealth = "needs-review"
+	HealthParseError       TrackHealth = "parse-error"
+	HealthMissing          TrackHealth = "missing"
 )
 
 // TrackSyncState separates cheap filesystem discovery from the more expensive
@@ -67,6 +68,28 @@ type TrackProperties struct {
 	Channels     int    `json:"channels"`
 }
 
+// TagHint is a non-authoritative metadata interpretation derived from a file
+// or directory name. Hints may be used to seed provider searches or explicitly
+// copied into the editor, but are never treated as embedded tag values.
+type TagHint struct {
+	Title        string   `json:"title,omitempty"`
+	Artists      []string `json:"artists"`
+	Album        string   `json:"album,omitempty"`
+	AlbumArtists []string `json:"albumArtists"`
+	Source       string   `json:"source"`
+	Pattern      string   `json:"pattern"`
+}
+
+type TagIssue string
+
+const (
+	TagIssueMissingTitle          TagIssue = "missing-embedded-title"
+	TagIssueMissingArtist         TagIssue = "missing-embedded-artist"
+	TagIssueMissingAlbum          TagIssue = "missing-embedded-album"
+	TagIssueMissingAlbumArtist    TagIssue = "missing-embedded-album-artist"
+	TagIssueSuspiciousAlbumArtist TagIssue = "suspicious-album-artist"
+)
+
 // Track is the lightweight normalized projection consumed by the library UI.
 // Raw tags and binary artwork deliberately live behind separate endpoints.
 type Track struct {
@@ -100,6 +123,8 @@ type Track struct {
 	MusicBrainzArtistIDs []string        `json:"musicbrainzArtistIds"`
 	AcoustID             string          `json:"acoustidId"`
 	AcoustIDFingerprint  string          `json:"acoustidFingerprint"`
+	TagHints             []TagHint       `json:"tagHints"`
+	TagIssues            []TagIssue      `json:"tagIssues"`
 	LyricsSidecar        *SidecarInfo    `json:"lyricsSidecar,omitempty"`
 	ArtworkCount         int             `json:"artworkCount"`
 	ArtworkWidth         int             `json:"artworkWidth,omitempty"`

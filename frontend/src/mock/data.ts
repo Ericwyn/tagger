@@ -61,6 +61,8 @@ function track(seed: TrackSeed): Track {
     musicbrainzArtistIds: seed.musicbrainzArtistIds ?? [],
     acoustidId: seed.acoustidId ?? '',
     acoustidFingerprint: seed.acoustidFingerprint ?? '',
+    tagHints: seed.tagHints ?? [],
+    tagIssues: seed.tagIssues ?? [],
     artworkCount: seed.artworkCount ?? 1,
     artworkWidth: seed.artworkWidth ?? ((seed.artworkCount ?? 1) > 0 ? 1000 : undefined),
     artworkHeight: seed.artworkHeight ?? ((seed.artworkCount ?? 1) > 0 ? 1000 : undefined),

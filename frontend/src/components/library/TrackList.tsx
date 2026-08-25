@@ -25,12 +25,17 @@ interface TrackListProps {
 
 const healthLabel: Record<Track['health'], string> = {
   complete: '完整',
+  'tag-compatibility': '标签兼容问题',
   'missing-artwork': '无封面',
   'missing-lyrics': '无歌词',
   'needs-review': '需确认',
   'parse-error': '解析失败',
   missing: '文件缺失',
 };
+
+function unambiguousHint(track: Track): Track['tagHints'][number] | undefined {
+  return track.tagHints.length === 1 ? track.tagHints[0] : undefined;
+}
 
 const TrackRow = memo(function TrackRow({
   track,
@@ -47,6 +52,10 @@ const TrackRow = memo(function TrackRow({
   onSelect: () => void;
   onToggle: () => void;
 }) {
+  const hint = unambiguousHint(track);
+  const displayTitle = track.title || hint?.title || track.fileName;
+  const displayArtists = track.artists.length > 0 ? track.artists : hint?.artists ?? [];
+  const inferredDisplay = !track.title && Boolean(hint?.title);
   return (
     <div
       className={cn('track-row', active && 'is-active', selected && 'is-selected', track.syncState === 'draft' && 'is-syncing')}
@@ -64,15 +73,15 @@ const TrackRow = memo(function TrackRow({
       <div className="track-check" onClick={(event) => event.stopPropagation()}>
         <button
           className={cn('square-check', selected && 'is-checked')}
-          aria-label={selected ? `取消选择 ${track.title}` : `选择 ${track.title}`}
+          aria-label={selected ? `取消选择 ${displayTitle}` : `选择 ${displayTitle}`}
           onClick={onToggle}
         >
           {selected && <Check size={12} strokeWidth={3} />}
         </button>
       </div>
       <CoverArt
-        title={track.title || track.fileName}
-        artist={track.artists[0]}
+        title={displayTitle}
+        artist={displayArtists[0]}
         tone={track.coverTone}
         missing={!showGeneratedCovers && track.artworkCount === 0}
 		imageUrl={artworkURL(track)}
@@ -80,10 +89,10 @@ const TrackRow = memo(function TrackRow({
         size="xs"
       />
       <div className="track-primary">
-        <strong>{track.title || '未命名曲目'}</strong>
+        <strong>{displayTitle}{inferredDisplay && <em className="inferred-tag">推断</em>}</strong>
         <span>{track.fileName}</span>
       </div>
-      <div className="track-cell track-artist">{track.artists.join(' / ') || '—'}</div>
+      <div className="track-cell track-artist">{displayArtists.join(' / ') || (track.tagHints.length > 1 ? '文件名待确认' : '—')}</div>
       <div className="track-cell track-album">{track.album || '—'}</div>
       <div className="track-cell track-year">{track.year || '—'}</div>
       <div className="track-cell track-format"><span>{track.format.toUpperCase()}</span></div>

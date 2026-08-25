@@ -2,7 +2,17 @@ export type PageID = 'library' | 'review' | 'jobs' | 'history' | 'settings';
 export type InspectorTab = 'tags' | 'artwork' | 'lyrics' | 'technical' | 'history';
 export type TrackFormat = 'flac' | 'mp3' | 'wav';
 export type CoverTone = 'vermilion' | 'moss' | 'cobalt' | 'sand' | 'charcoal' | 'jade';
-export type TrackHealth = 'complete' | 'missing-artwork' | 'missing-lyrics' | 'needs-review' | 'parse-error' | 'missing';
+export type TrackHealth = 'complete' | 'tag-compatibility' | 'missing-artwork' | 'missing-lyrics' | 'needs-review' | 'parse-error' | 'missing';
+export type TagIssue = 'missing-embedded-title' | 'missing-embedded-artist' | 'missing-embedded-album' | 'missing-embedded-album-artist' | 'suspicious-album-artist';
+
+export interface TagHint {
+  title?: string;
+  artists: string[];
+  album?: string;
+  albumArtists: string[];
+  source: 'filename' | 'directory';
+  pattern: 'filename-title' | 'title-artist' | 'artist-title' | 'directory-artist-album';
+}
 export const historyRetentionOptions = [3, 5, 10, 20] as const;
 export type HistoryRetention = typeof historyRetentionOptions[number];
 
@@ -53,6 +63,8 @@ export interface Track {
   musicbrainzArtistIds: string[];
   acoustidId: string;
   acoustidFingerprint: string;
+  tagHints: TagHint[];
+  tagIssues: TagIssue[];
   lyricsSidecar?: SidecarInfo;
   artworkCount: number;
   artworkWidth?: number;

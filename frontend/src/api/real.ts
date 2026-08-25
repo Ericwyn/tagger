@@ -16,6 +16,8 @@ import type {
 	RevisionDiff,
 	RawTagsResponse,
 	Track,
+	TagHint,
+	TagIssue,
 	TrackPatch,
 	WriteSelection,
 	BatchEditItem,
@@ -124,6 +126,36 @@ function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+const tagIssueValues: TagIssue[] = [
+  'missing-embedded-title', 'missing-embedded-artist', 'missing-embedded-album',
+  'missing-embedded-album-artist', 'suspicious-album-artist',
+];
+
+function normalizeTagIssues(value: unknown): TagIssue[] {
+  return stringArray(value).filter((item): item is TagIssue => tagIssueValues.includes(item as TagIssue));
+}
+
+function normalizeTagHints(value: unknown): TagHint[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const source = raw.source === 'directory' ? 'directory' : raw.source === 'filename' ? 'filename' : undefined;
+    const pattern = raw.pattern === 'filename-title' || raw.pattern === 'title-artist' || raw.pattern === 'artist-title' || raw.pattern === 'directory-artist-album'
+      ? raw.pattern
+      : undefined;
+    if (!source || !pattern) return [];
+    return [{
+      ...(stringValue(raw.title) ? {title: stringValue(raw.title)} : {}),
+      artists: stringArray(raw.artists),
+      ...(stringValue(raw.album) ? {album: stringValue(raw.album)} : {}),
+      albumArtists: stringArray(raw.albumArtists),
+      source,
+      pattern,
+    } satisfies TagHint];
+  });
+}
+
 // Keep older SQLite payloads/API responses readable after new normalized fields
 // are added. A rescan will populate the fields, but opening the library must
 // never crash just because an existing track predates the schema.
@@ -150,6 +182,8 @@ export function normalizeTrack(track: Track): Track {
     musicbrainzArtistIds: stringArray(raw.musicbrainzArtistIds),
     acoustidId: stringValue(raw.acoustidId),
     acoustidFingerprint: stringValue(raw.acoustidFingerprint),
+    tagHints: normalizeTagHints(raw.tagHints),
+    tagIssues: normalizeTagIssues(raw.tagIssues),
     ...(raw.syncState === 'indexed' || raw.syncState === 'draft' || raw.syncState === 'error' ? {syncState: raw.syncState} : {}),
   };
 }

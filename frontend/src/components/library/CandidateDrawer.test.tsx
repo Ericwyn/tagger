@@ -194,3 +194,37 @@ it('keeps per-track query history and can run a previous query again', async () 
     title: '历史查询', artists: track.artists, album: track.album, durationSeconds: track.durationSeconds,
   });
 });
+
+it('shows album artist in the diff and leaves a suspicious value unselected by default', async () => {
+  const user = userEvent.setup();
+  const onApply = vi.fn().mockResolvedValue(undefined);
+  const suspicious: MatchCandidate = {
+    ...candidate,
+    album: {value: 'デジモンエンディングベスト', source: 'Test'},
+    artists: {value: ['宮崎歩'], source: 'Test'},
+    albumArtists: {value: ['デジモンエンディングベスト'], source: 'Test'},
+  };
+  render(
+    <CandidateDrawer
+      open
+      track={track}
+      candidates={[suspicious]}
+      loading={false}
+      onClose={() => undefined}
+      onApply={onApply}
+    />,
+  );
+
+  expect(screen.getAllByText('专辑艺术家').length).toBeGreaterThanOrEqual(2);
+  expect(screen.getByText(/候选专辑艺术家与专辑名相同/)).toBeInTheDocument();
+  expect(screen.getByRole('button', {name: '专辑艺术家'})).not.toHaveClass('is-active');
+
+  await user.click(screen.getByRole('button', {name: '采用所选资料'}));
+  await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+  expect(onApply.mock.calls[0][0].albumArtists).toEqual(track.albumArtists);
+
+  await user.click(screen.getByRole('button', {name: '专辑艺术家'}));
+  await user.click(screen.getByRole('button', {name: '采用所选资料'}));
+  await waitFor(() => expect(onApply).toHaveBeenCalledTimes(2));
+  expect(onApply.mock.calls[1][0].albumArtists).toEqual(['デジモンエンディングベスト']);
+});

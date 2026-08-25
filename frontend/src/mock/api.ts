@@ -82,7 +82,7 @@ export async function listTrackPage(query: TrackQuery = {}, cursor = '', limit =
   await wait();
   if (limit < 0 || limit > 200) throw new Error('invalid_track_query');
   if (query.sort && !(['album', 'title', 'modified', 'format'] as TrackSort[]).includes(query.sort)) throw new Error('invalid_track_query');
-  if (query.health && !(['complete', 'missing-artwork', 'missing-lyrics', 'needs-review', 'parse-error', 'missing'] as Track['health'][]).includes(query.health)) throw new Error('invalid_track_query');
+  if (query.health && !(['complete', 'tag-compatibility', 'missing-artwork', 'missing-lyrics', 'needs-review', 'parse-error', 'missing'] as Track['health'][]).includes(query.health)) throw new Error('invalid_track_query');
   if (query.format && !(['mp3', 'flac', 'wav'] as Track['format'][]).includes(query.format)) throw new Error('invalid_track_query');
   const pageSize = Math.max(1, Math.min(limit || 100, 200));
   if (cursor && !/^\d+$/.test(cursor)) throw new Error('invalid_track_cursor');
@@ -117,17 +117,33 @@ export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery
   return {tracks: structuredClone(result), total: result.length};
 }
 
+function mockTagIssues(track: Track): Track['tagIssues'] {
+  const issues: Track['tagIssues'] = [];
+  if (!track.title.trim()) issues.push('missing-embedded-title');
+  if (track.artists.length === 0) issues.push('missing-embedded-artist');
+  const hintedAlbum = track.tagHints.some((hint) => Boolean(hint.album?.trim()));
+  if (!track.album.trim() && hintedAlbum) issues.push('missing-embedded-album');
+  if ((track.album.trim() || hintedAlbum) && track.albumArtists.length === 0) issues.push('missing-embedded-album-artist');
+  if (track.albumArtists.length === 1 && track.albumArtists[0].trim().toLocaleLowerCase() === track.album.trim().toLocaleLowerCase()
+    && !track.artists.some((artist) => artist.trim().toLocaleLowerCase() === track.album.trim().toLocaleLowerCase())) {
+    issues.push('suspicious-album-artist');
+  }
+  return issues;
+}
+
 export async function updateTrack(trackId: string, patch: TrackPatch): Promise<Track> {
   await wait(220);
   const index = tracks.findIndex((item) => item.id === trackId);
   if (index < 0) throw new Error('track_not_found');
-  tracks[index] = {
+  const next: Track = {
     ...tracks[index],
     ...patch,
-    health: patch.lyrics && tracks[index].artworkCount > 0 ? 'complete' : tracks[index].health,
     revision: `rev-${trackId}-${Date.now()}`,
     modifiedAt: '刚刚',
   };
+  next.tagIssues = mockTagIssues(next);
+  next.health = next.tagIssues.length > 0 ? 'tag-compatibility' : next.artworkCount === 0 ? 'missing-artwork' : next.lyrics ? 'complete' : 'missing-lyrics';
+  tracks[index] = next;
   return structuredClone(tracks[index]);
 }
 

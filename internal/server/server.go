@@ -1099,19 +1099,7 @@ func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) 
 		Title: request.Query.Title, Artists: request.Query.Artists, Album: request.Query.Album,
 		DurationSeconds: request.Query.DurationSeconds,
 	}
-	if query.Title == "" {
-		query.Title = track.Title
-	}
-	if len(query.Artists) == 0 {
-		query.Artists = track.Artists
-	}
-	if query.Album == "" {
-		query.Album = track.Album
-	}
-	if query.DurationSeconds == 0 {
-		query.DurationSeconds = track.DurationSeconds
-	}
-	result, err := s.providers.Search(ctx, query, request.ProviderIDs, request.LimitPerProvider)
+	result, err := s.providers.SearchTrack(ctx, track, query, request.ProviderIDs, request.LimitPerProvider)
 	if errors.Is(err, providers.ErrProviderNotFound) {
 		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
 		return
@@ -2005,6 +1993,7 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 			s.writeError(c, consts.StatusInternalServerError, "internal_error", trackErr.Error())
 			return
 		}
+		appendTagCompatibilityWarning(&result, track)
 		c.Header("ETag", `"`+track.Revision+`"`)
 		s.writeData(c, map[string]any{"track": track, "write": result})
 		return
@@ -2018,6 +2007,7 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "reindex_failed", "文件已写入，但曲目索引不可用")
 		return
 	}
+	appendTagCompatibilityWarning(&result, track)
 	if s.historyEnabled(ctx) {
 		_, historyErr := s.store.CreateRevision(ctx, domain.Revision{
 			LibraryID:      s.library.Library().ID,
@@ -2039,6 +2029,13 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, map[string]any{"track": track, "write": result})
+}
+
+func appendTagCompatibilityWarning(result *filewrite.Result, track domain.Track) {
+	if result == nil || len(track.TagIssues) == 0 {
+		return
+	}
+	result.Warnings = append(result.Warnings, fmt.Sprintf("文件仍有 %d 项内嵌标签兼容问题，请在标签页复核", len(track.TagIssues)))
 }
 
 type revisionResponse struct {
@@ -3018,8 +3015,11 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 		Title: request.Query.Title, Artists: request.Query.Artists, Album: request.Query.Album,
 		DurationSeconds: request.Query.DurationSeconds,
 	}
+	var track domain.Track
+	effectiveQueries := []providers.Query{query}
 	if request.FileID != "" {
-		track, err := s.library.Track(request.FileID)
+		var err error
+		track, err = s.library.Track(request.FileID)
 		if errors.Is(err, library.ErrTrackNotFound) {
 			s.writeError(c, consts.StatusNotFound, "track_not_found", "曲目不存在")
 			return
@@ -3032,20 +3032,15 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 			s.writeError(c, consts.StatusConflict, "track_not_indexed", "曲目仍在索引，请稍后重试")
 			return
 		}
-		if query.Title == "" {
-			query.Title = track.Title
-		}
-		if len(query.Artists) == 0 {
-			query.Artists = track.Artists
-		}
-		if query.Album == "" {
-			query.Album = track.Album
-		}
-		if query.DurationSeconds == 0 {
-			query.DurationSeconds = track.DurationSeconds
-		}
+		effectiveQueries = providers.TrackQueries(track, query)
 	}
-	result, err := s.providers.Search(ctx, query, request.ProviderIDs, request.LimitPerProvider)
+	var result providers.SearchResult
+	var err error
+	if request.FileID != "" {
+		result, err = s.providers.SearchTrack(ctx, track, query, request.ProviderIDs, request.LimitPerProvider)
+	} else {
+		result, err = s.providers.Search(ctx, query, request.ProviderIDs, request.LimitPerProvider)
+	}
 	if errors.Is(err, providers.ErrProviderNotFound) {
 		s.writeError(c, consts.StatusNotFound, "provider_not_found", err.Error())
 		return
@@ -3055,13 +3050,17 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	if request.FileID != "" && s.store != nil {
-		artists := append([]string(nil), query.Artists...)
+		auditQuery := query
+		if len(effectiveQueries) > 0 {
+			auditQuery = effectiveQueries[0]
+		}
+		artists := append([]string(nil), auditQuery.Artists...)
 		if artists == nil {
 			artists = []string{}
 		}
 		queryPayload, _ := json.Marshal(map[string]any{
-			"title": query.Title, "artists": artists, "album": query.Album,
-			"durationSeconds": query.DurationSeconds,
+			"title": auditQuery.Title, "artists": artists, "album": auditQuery.Album,
+			"durationSeconds": auditQuery.DurationSeconds,
 		})
 		// Search remains successful even if the optional audit trail cannot be persisted.
 		_, _ = s.store.AddLibraryMatchQueryHistory(ctx, s.library.Library().ID, request.FileID, queryPayload, request.ProviderIDs, len(result.Candidates))

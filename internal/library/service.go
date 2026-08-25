@@ -242,6 +242,17 @@ func (s *Service) SwitchRoot(ctx context.Context, root string) error {
 			return fmt.Errorf("load switched library: %w", err)
 		}
 	}
+	if found && hasDraftTracks(result.Tracks) {
+		result, err = nextScanner.ScanIncremental(ctx, result.Tracks, nil)
+		if err != nil {
+			return fmt.Errorf("rebuild switched library metadata: %w", err)
+		}
+		if s.repo != nil {
+			if err := s.repo.SaveScan(ctx, nextScanner.Root(), result); err != nil {
+				return fmt.Errorf("persist rebuilt switched library: %w", err)
+			}
+		}
+	}
 	if !found {
 		result, err = nextScanner.Scan(ctx)
 		if err != nil {
@@ -266,6 +277,15 @@ func (s *Service) SwitchRoot(ctx context.Context, root string) error {
 	s.mu.Unlock()
 	s.apply(result)
 	return nil
+}
+
+func hasDraftTracks(tracks []domain.Track) bool {
+	for _, track := range tracks {
+		if !track.Missing && track.SyncState == domain.SyncDraft {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) apply(result scanner.Result) {
@@ -561,6 +581,11 @@ func trackMatches(track domain.Track, query string) bool {
 	values = append(values, track.Artists...)
 	values = append(values, track.AlbumArtists...)
 	values = append(values, track.Genres...)
+	for _, hint := range track.TagHints {
+		values = append(values, hint.Title, hint.Album)
+		values = append(values, hint.Artists...)
+		values = append(values, hint.AlbumArtists...)
+	}
 	for _, value := range values {
 		if strings.Contains(strings.ToLower(value), query) {
 			return true
@@ -581,6 +606,15 @@ func cloneTrack(track domain.Track) domain.Track {
 	track.Artists = cloneStrings(track.Artists)
 	track.AlbumArtists = cloneStrings(track.AlbumArtists)
 	track.Genres = cloneStrings(track.Genres)
+	track.Composers = cloneStrings(track.Composers)
+	track.Lyricists = cloneStrings(track.Lyricists)
+	track.MusicBrainzArtistIDs = cloneStrings(track.MusicBrainzArtistIDs)
+	track.TagIssues = append([]domain.TagIssue(nil), track.TagIssues...)
+	track.TagHints = append([]domain.TagHint(nil), track.TagHints...)
+	for index := range track.TagHints {
+		track.TagHints[index].Artists = cloneStrings(track.TagHints[index].Artists)
+		track.TagHints[index].AlbumArtists = cloneStrings(track.TagHints[index].AlbumArtists)
+	}
 	if track.LyricsSidecar != nil {
 		sidecar := *track.LyricsSidecar
 		track.LyricsSidecar = &sidecar

@@ -93,6 +93,21 @@ function parseList(value: string): string[] {
   return value.split(/[,，/]/).map((item) => item.trim()).filter(Boolean);
 }
 
+const hintPatternLabels: Record<Track['tagHints'][number]['pattern'], string> = {
+  'filename-title': '文件名标题',
+  'title-artist': '标题 - 艺术家',
+  'artist-title': '艺术家 - 标题',
+  'directory-artist-album': '目录艺术家 - 专辑',
+};
+
+const tagIssueLabels: Record<Track['tagIssues'][number], string> = {
+  'missing-embedded-title': '缺少内嵌标题',
+  'missing-embedded-artist': '缺少内嵌艺术家',
+  'missing-embedded-album': '缺少内嵌专辑',
+  'missing-embedded-album-artist': '缺少内嵌专辑艺术家',
+  'suspicious-album-artist': '专辑艺术家疑似写成了专辑名',
+};
+
 function mockRawTags(track: Track): Record<string, string[]> {
   const tags: Record<string, string[]> = {
     TITLE: track.title ? [track.title] : [],
@@ -219,6 +234,16 @@ export function TrackInspector({
     setDraft((current) => current ? {...current, [key]: value} : current);
   };
 
+  const applyTagHint = (hint: Track['tagHints'][number]) => {
+    setDraft((current) => current ? {
+      ...current,
+      title: current.title || hint.title || '',
+      artists: current.artists.length > 0 ? current.artists : [...hint.artists],
+      album: current.album || hint.album || '',
+      albumArtists: current.albumArtists.length > 0 ? current.albumArtists : [...hint.albumArtists],
+    } : current);
+  };
+
   const inputNumber = (value: string): number | undefined => {
     if (!value.trim()) return undefined;
     const next = Number(value);
@@ -287,8 +312,8 @@ export function TrackInspector({
         />
         <div className="hero-copy">
           <div className="eyebrow">NOW INSPECTING · {track.format.toUpperCase()}</div>
-          <h2>{track.title || '未命名曲目'}</h2>
-          <p>{track.artists.join(' / ')} <span>·</span> {track.album || '未知专辑'}</p>
+          <h2>{track.title || track.fileName}</h2>
+          <p>{track.artists.join(' / ') || '内嵌艺术家为空'} <span>·</span> {track.album || '未知专辑'}</p>
           <div className="mini-player">
 			<button title={indexing ? '索引完成后可试听' : activePlaying ? '暂停试听' : '试听'} disabled={indexing} onClick={togglePlayback}>
               {activePlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
@@ -342,10 +367,28 @@ export function TrackInspector({
 	  <fieldset className="inspector-scroll" disabled={indexing}>
         {tab === 'tags' && (
 		  <div className="inspector-pane tag-form">
-			<div className="form-section-head">
-			  <span>基本信息</span>
-			  <button onClick={() => onSearch()}><Sparkles size={14} /> 从数据源补全</button>
-			</div>
+            <div className="form-section-head">
+              <span>基本信息</span>
+              <button onClick={() => onSearch()}><Sparkles size={14} /> 从数据源补全</button>
+            </div>
+            {track.tagIssues.length > 0 && (
+              <div className="tag-hint-panel">
+                <div>
+                  <strong>文件标签与页面提示已分离</strong>
+                  <span>{track.tagIssues.map((issue) => tagIssueLabels[issue]).join(' · ')}</span>
+                </div>
+                {track.tagHints.length > 0 ? (
+                  <div className="tag-hint-options">
+                    {track.tagHints.map((hint, index) => (
+                      <button type="button" key={`${hint.pattern}-${index}`} onClick={() => applyTagHint(hint)}>
+                        <span>{hint.title || '未推断标题'}{hint.artists.length > 0 ? ` · ${hint.artists.join(' / ')}` : ''}</span>
+                        <small>{hintPatternLabels[hint.pattern]}{hint.album ? ` · ${hint.album}` : ''} · 点击填入空字段</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : <small>未找到可靠的文件名或目录提示，请手工填写或从数据源补全。</small>}
+              </div>
+            )}
             <label className="field-row">
               <span>标题</span>
               <input value={draft.title} onChange={(event) => set('title', event.target.value)} />

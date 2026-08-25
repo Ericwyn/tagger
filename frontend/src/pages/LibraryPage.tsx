@@ -63,6 +63,7 @@ interface LibraryPageProps {
 const filterLabels: Record<SidebarFilter, string> = {
   all: '全部音乐',
   complete: '资料完整',
+  'tag-compatibility': '标签兼容问题',
   'missing-artwork': '缺少封面',
   'missing-lyrics': '缺少歌词',
   'needs-review': '需要确认',
@@ -173,6 +174,11 @@ function trackOperationError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function tagWriteNotice(track: Track, success: string): string {
+  if (track.tagIssues.length === 0) return success;
+  return `标签已写入，但文件仍有 ${track.tagIssues.length} 项内嵌标签兼容问题，请继续复核`;
+}
+
 export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false, restoreDraft, onRestoreDraftConsumed, onDiscardRestoreDraft}: LibraryPageProps) {
   const pageSize = 100;
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
@@ -216,7 +222,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   const requestIDRef = useRef(0);
   const abortRef = useRef<AbortController | undefined>(undefined);
 	  const viewportStateRef = useRef<StateSnapshot | undefined>(undefined);
-	  const liveRefreshTimerRef = useRef<number>();
+	  const liveRefreshTimerRef = useRef<number | undefined>(undefined);
 	  const reconcileInFlightRef = useRef(false);
 	  const libraryGenerationRef = useRef(0);
 	  const liveRefreshInFlightRef = useRef(false);
@@ -684,7 +690,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 	  updated = await updateTrack(activeTrack.id, patch, provenance);
 	  updateTrackState(updated);
 	  if (restoreDraft?.trackId === updated.id) onRestoreDraftConsumed?.();
-	  onNotice(notice);
+	  onNotice(tagWriteNotice(updated, notice));
 	  return updated;
 	} catch (error) {
 	  onNotice(error instanceof Error ? error.message : '标签保存失败');
@@ -710,7 +716,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		  updated = await applyCandidateArtwork(updated.id, candidate.id, options.artworkMaxSize ?? 0);
 		  updateTrackState(updated);
 		}
-		onNotice(`已采用 ${candidate.providerName} 候选并安全写入${options.artwork ? '标签与封面' : '音乐标签'}`);
+		onNotice(tagWriteNotice(updated, `已采用 ${candidate.providerName} 候选并安全写入${options.artwork ? '标签与封面' : '音乐标签'}`));
 	  } catch (error) {
 		const message = error instanceof Error ? error.message : '候选资料应用失败';
 		onNotice(tagsApplied && options.artwork ? `标签已写入，但候选封面应用失败：${message}` : message);

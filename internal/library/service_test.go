@@ -18,6 +18,31 @@ type serviceEngine struct{}
 
 type countingServiceEngine struct{ reads atomic.Int32 }
 
+type memoryServiceRepository struct {
+	scans      map[string]scanner.Result
+	savedRoots []string
+	activeRoot string
+}
+
+func (repo *memoryServiceRepository) LoadScan(_ context.Context, root string) (scanner.Result, bool, error) {
+	result, found := repo.scans[root]
+	return result, found, nil
+}
+
+func (repo *memoryServiceRepository) SaveScan(_ context.Context, root string, result scanner.Result) error {
+	if repo.scans == nil {
+		repo.scans = make(map[string]scanner.Result)
+	}
+	repo.scans[root] = result
+	repo.savedRoots = append(repo.savedRoots, root)
+	return nil
+}
+
+func (repo *memoryServiceRepository) SetLibraryRoot(_ context.Context, root string) error {
+	repo.activeRoot = root
+	return nil
+}
+
 func (engine *countingServiceEngine) Read(ctx context.Context, path string) (tags.Snapshot, error) {
 	engine.reads.Add(1)
 	return serviceEngine{}.Read(ctx, path)
@@ -119,6 +144,41 @@ func TestServiceLoadsPersistedIndexAndRescansOnDemand(t *testing.T) {
 	}
 	if engine.reads.Load() != 2 {
 		t.Fatalf("explicit rescan reads=%d, want 2", engine.reads.Load())
+	}
+}
+
+func TestServiceRecoversPersistedDraftProjectionWithUntargetedQuickScan(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Recovered.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := &countingServiceEngine{}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &memoryServiceRepository{scans: map[string]scanner.Result{
+		root: {
+			Library: domain.LibrarySummary{ID: "persisted-library", Name: "Persisted", RootPath: root, TrackCount: 1},
+			Tracks: []domain.Track{{
+				ID: "trk-persisted", FileName: "Recovered.mp3", RelativePath: "Recovered.mp3", Format: domain.FormatMP3,
+				Title: "stale projection", SyncState: domain.SyncDraft,
+			}},
+		},
+	}}
+	service, err := New(context.Background(), musicScanner, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 0 || len(service.PendingPaths()) != 1 {
+		t.Fatalf("loaded draft reads=%d pending=%v", engine.reads.Load(), service.PendingPaths())
+	}
+	if err := service.QuickScan(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	tracks := service.ListTracks(TrackFilter{})
+	if engine.reads.Load() != 1 || len(tracks) != 1 || tracks[0].Title != "Recovered" || tracks[0].SyncState != domain.SyncIndexed || len(service.PendingPaths()) != 0 {
+		t.Fatalf("recovered tracks=%#v reads=%d pending=%v", tracks, engine.reads.Load(), service.PendingPaths())
 	}
 }
 
@@ -409,5 +469,51 @@ func TestServiceSwitchRootScansBeforeReplacingActiveIndex(t *testing.T) {
 	persisted, found, err := dataStore.LibraryRoot(context.Background())
 	if err != nil || !found || persisted != second {
 		t.Fatalf("persisted root=%q found=%v err=%v", persisted, found, err)
+	}
+}
+
+func TestServiceSwitchRootRebuildsCachedDraftProjectionBeforeActivation(t *testing.T) {
+	first := t.TempDir()
+	second := t.TempDir()
+	if err := os.WriteFile(filepath.Join(first, "First.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(second, "Next.mp3"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := &countingServiceEngine{}
+	firstScanner, err := scanner.New(engine, scanner.Options{Root: first, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &memoryServiceRepository{scans: make(map[string]scanner.Result)}
+	service, err := New(context.Background(), firstScanner, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 1 {
+		t.Fatalf("initial reads=%d, want 1", engine.reads.Load())
+	}
+	repo.scans[second] = scanner.Result{
+		Library: domain.LibrarySummary{ID: "cached-library", Name: "Cached", RootPath: second, TrackCount: 1},
+		Tracks: []domain.Track{{
+			ID: "trk-cached", FileName: "Next.mp3", RelativePath: "Next.mp3", Format: domain.FormatMP3,
+			Title: "stale projection", SyncState: domain.SyncDraft,
+		}},
+	}
+
+	if err := service.SwitchRoot(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	tracks := service.ListTracks(TrackFilter{})
+	if engine.reads.Load() != 2 || len(tracks) != 1 || tracks[0].Title != "Next" || tracks[0].SyncState != domain.SyncIndexed {
+		t.Fatalf("rebuilt tracks=%#v reads=%d", tracks, engine.reads.Load())
+	}
+	persisted := repo.scans[second]
+	if len(persisted.Tracks) != 1 || persisted.Tracks[0].SyncState != domain.SyncIndexed || persisted.Tracks[0].Title != "Next" {
+		t.Fatalf("persisted rebuild=%#v", persisted.Tracks)
+	}
+	if repo.activeRoot != second {
+		t.Fatalf("active root=%q, want %q", repo.activeRoot, second)
 	}
 }

@@ -551,16 +551,10 @@ func inTargets(relativePath string, targets []string) bool {
 func applySnapshot(track *domain.Track, snapshot tags.Snapshot) {
 	track.Properties = snapshot.Properties
 	track.ArtworkCount = snapshot.ArtworkCount
-	track.Title = first(snapshot.Raw, "TITLE", "SUBTITLE", track.Title)
-	track.Artists = values(snapshot.Raw, "ARTIST", "ARTISTS")
-	if len(track.Artists) == 0 {
-		_, track.Artists, _ = inferFromPath(track.RelativePath)
-	}
-	track.Album = first(snapshot.Raw, "ALBUM", track.Album)
-	track.AlbumArtists = values(snapshot.Raw, "ALBUMARTIST", "ALBUM ARTIST")
-	if len(track.AlbumArtists) == 0 {
-		track.AlbumArtists = append([]string(nil), track.Artists...)
-	}
+	track.Title = first(snapshot.Raw, "TITLE", "")
+	track.Artists = values(snapshot.Raw, "ARTIST")
+	track.Album = first(snapshot.Raw, "ALBUM", "")
+	track.AlbumArtists = values(snapshot.Raw, "ALBUMARTIST")
 	track.Genres = values(snapshot.Raw, "GENRE")
 	track.Lyrics = first(snapshot.Raw, "LYRICS", "UNSYNCEDLYRICS", "UNSYNCED LYRICS", "")
 	track.Comment = first(snapshot.Raw, "COMMENT", "DESCRIPTION", "")
@@ -578,44 +572,108 @@ func applySnapshot(track *domain.Track, snapshot tags.Snapshot) {
 	track.TrackNumber, track.TrackTotal = indexValues(snapshot.Raw, "TRACKNUMBER", "TRACKTOTAL", "TOTALTRACKS")
 	track.DiscNumber, track.DiscTotal = indexValues(snapshot.Raw, "DISCNUMBER", "DISCTOTAL", "TOTALDISCS")
 	track.Year = yearValue(first(snapshot.Raw, "DATE", "YEAR", "RELEASEDATE", ""))
+	track.TagIssues = tagIssuesForTrack(*track)
 }
 
 func fallbackTrack(relativePath string, format domain.TrackFormat) domain.Track {
-	title, artists, album := inferFromPath(relativePath)
-	return domain.Track{
+	track := domain.Track{
 		Format:               format,
-		Title:                title,
-		Artists:              artists,
-		Album:                album,
-		AlbumArtists:         append([]string(nil), artists...),
+		Artists:              []string{},
+		AlbumArtists:         []string{},
 		Genres:               []string{},
 		Composers:            []string{},
 		Lyricists:            []string{},
 		MusicBrainzArtistIDs: []string{},
-		Health:               domain.HealthNeedsReview,
+		TagHints:             tagHintsFromPath(relativePath),
+		TagIssues:            []domain.TagIssue{},
+		Health:               domain.HealthTagCompatibility,
 		SyncState:            domain.SyncDraft,
 		Properties: domain.TrackProperties{
 			Container: strings.ToUpper(string(format)),
 			Codec:     strings.ToUpper(string(format)),
 		},
 	}
+	track.TagIssues = tagIssuesForTrack(track)
+	return track
 }
 
-func inferFromPath(relativePath string) (string, []string, string) {
+func tagHintsFromPath(relativePath string) []domain.TagHint {
 	directory := filepath.ToSlash(filepath.Dir(relativePath))
-	base := strings.TrimSuffix(filepath.Base(relativePath), filepath.Ext(relativePath))
+	base := strings.TrimSpace(strings.TrimSuffix(filepath.Base(relativePath), filepath.Ext(relativePath)))
 	if directory != "." {
 		albumFolder := filepath.Base(directory)
 		artist, album, found := strings.Cut(albumFolder, "-")
+		artist, album = strings.TrimSpace(artist), strings.TrimSpace(album)
 		if found && artist != "" && album != "" {
-			title := strings.TrimPrefix(base, artist+"-")
-			return title, []string{artist}, album
+			title := strings.TrimSpace(strings.TrimPrefix(base, artist+"-"))
+			if title == "" {
+				title = base
+			}
+			return []domain.TagHint{{
+				Title: title, Artists: []string{artist}, Album: album, AlbumArtists: []string{artist},
+				Source: "directory", Pattern: "directory-artist-album",
+			}}
 		}
 	}
 	if index := strings.LastIndex(base, "-"); index > 0 && index < len(base)-1 {
-		return base[:index], []string{base[index+1:]}, ""
+		left, right := strings.TrimSpace(base[:index]), strings.TrimSpace(base[index+1:])
+		if left != "" && right != "" {
+			return []domain.TagHint{
+				{Title: left, Artists: []string{right}, AlbumArtists: []string{right}, Source: "filename", Pattern: "title-artist"},
+				{Title: right, Artists: []string{left}, AlbumArtists: []string{left}, Source: "filename", Pattern: "artist-title"},
+			}
+		}
 	}
-	return base, []string{}, ""
+	if base == "" {
+		return []domain.TagHint{}
+	}
+	return []domain.TagHint{{Title: base, Artists: []string{}, AlbumArtists: []string{}, Source: "filename", Pattern: "filename-title"}}
+}
+
+func tagIssuesForTrack(track domain.Track) []domain.TagIssue {
+	issues := make([]domain.TagIssue, 0, 5)
+	if strings.TrimSpace(track.Title) == "" {
+		issues = append(issues, domain.TagIssueMissingTitle)
+	}
+	if len(cleanTagValues(track.Artists)) == 0 {
+		issues = append(issues, domain.TagIssueMissingArtist)
+	}
+	hintedAlbum := false
+	for _, hint := range track.TagHints {
+		if strings.TrimSpace(hint.Album) != "" {
+			hintedAlbum = true
+			break
+		}
+	}
+	if strings.TrimSpace(track.Album) == "" && hintedAlbum {
+		issues = append(issues, domain.TagIssueMissingAlbum)
+	}
+	if (strings.TrimSpace(track.Album) != "" || hintedAlbum) && len(cleanTagValues(track.AlbumArtists)) == 0 {
+		issues = append(issues, domain.TagIssueMissingAlbumArtist)
+	}
+	if len(track.AlbumArtists) == 1 && strings.EqualFold(strings.TrimSpace(track.AlbumArtists[0]), strings.TrimSpace(track.Album)) && strings.TrimSpace(track.Album) != "" {
+		albumMatchesArtist := false
+		for _, artist := range track.Artists {
+			if strings.EqualFold(strings.TrimSpace(artist), strings.TrimSpace(track.Album)) {
+				albumMatchesArtist = true
+				break
+			}
+		}
+		if !albumMatchesArtist {
+			issues = append(issues, domain.TagIssueSuspiciousAlbumArtist)
+		}
+	}
+	return issues
+}
+
+func cleanTagValues(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func buildFolders(tracks []domain.Track) []domain.FolderNode {
@@ -666,8 +724,8 @@ func healthFor(track domain.Track) domain.TrackHealth {
 	if track.ParseError != "" {
 		return domain.HealthParseError
 	}
-	if track.Title == "" || len(track.Artists) == 0 {
-		return domain.HealthNeedsReview
+	if len(track.TagIssues) > 0 {
+		return domain.HealthTagCompatibility
 	}
 	if track.ArtworkCount == 0 {
 		return domain.HealthMissingArtwork

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/scanner"
+	"github.com/pressly/goose/v3"
 )
 
 func TestOpenMigratesAndConfiguresSQLite(t *testing.T) {
@@ -38,6 +40,50 @@ func TestOpenMigratesAndConfiguresSQLite(t *testing.T) {
 	}
 	if migrations == 0 {
 		t.Fatal("migration table contains no applied migration")
+	}
+}
+
+func TestEmbeddedTagProjectionMigrationMarksPresentFilesDraft(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projection.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	goose.SetBaseFS(migrationFiles)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		migrationMu.Unlock()
+		t.Fatal(err)
+	}
+	err = goose.UpToContext(context.Background(), db, "migrations", 14, goose.WithNoColor(true))
+	migrationMu.Unlock()
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO libraries(id, root_path, name, summary_json, report_json, scan_token, updated_at) VALUES('lib-1', '/music', 'Music', '{}', '{}', 'scan', 'now')`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO library_files(library_id, relative_path, track_id, folder_id, format, file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns, writable, present, sync_state, parse_error, missing_since, updated_at) VALUES('lib-1', 'song.mp3', 'trk-1', 'folder-root', 'mp3', 1, 1, 0, 0, 1, 1, 'indexed', 'old error', '', 'now')`); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dataStore, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	var state, parseError string
+	if err := dataStore.db.QueryRow(`SELECT sync_state, parse_error FROM library_files WHERE library_id='lib-1' AND relative_path='song.mp3'`).Scan(&state, &parseError); err != nil {
+		t.Fatal(err)
+	}
+	if state != string(domain.SyncDraft) || parseError != "" {
+		t.Fatalf("projection state=%q parseError=%q", state, parseError)
 	}
 }
 

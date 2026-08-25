@@ -259,7 +259,7 @@ func main() {
 				failed++
 				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()})
 			} else {
-				result, searchErr := providerRegistry.Search(ctx, providers.Query{Title: track.Title, Artists: track.Artists, Album: track.Album, DurationSeconds: track.DurationSeconds}, payload.ProviderIDs, payload.Limit)
+				result, searchErr := providerRegistry.SearchTrack(ctx, track, providers.Query{}, payload.ProviderIDs, payload.Limit)
 				if searchErr != nil {
 					failed++
 					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()})
@@ -486,7 +486,15 @@ func main() {
 		defer libraryWatcher.Stop()
 	}
 	if pending := libraryService.PendingPaths(); len(pending) > 0 {
-		if err := enqueueScan(context.Background(), scanner.ScanTarget, pending, " 恢复待索引文件"); err != nil && !errors.Is(err, watcher.ErrBusy) {
+		payload, _ := json.Marshal(struct {
+			Mode    scanner.ScanMode `json:"mode"`
+			Targets []string         `json:"targets"`
+		}{Mode: scanner.ScanQuick})
+		if _, err := jobManager.Enqueue(context.Background(), domain.Job{
+			Kind: domain.JobScan, LibraryID: libraryService.Library().ID,
+			Title:  libraryService.Library().Name + " 恢复待索引文件",
+			Detail: "等待标签投影重建 worker", Total: len(pending), Payload: string(payload),
+		}); err != nil {
 			logger.Warn("enqueue persisted draft metadata scan", "error", err)
 		}
 	}

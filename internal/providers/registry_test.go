@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/store"
 )
 
@@ -145,6 +146,32 @@ func TestRegistryRejectsUnknownProvider(t *testing.T) {
 	_, err := registry.Search(context.Background(), Query{Title: "Song"}, []string{"missing"}, 5)
 	if !errors.Is(err, ErrProviderNotFound) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestTrackQueriesSearchAmbiguousHintsWithoutPromotingThem(t *testing.T) {
+	track := domain.Track{
+		DurationSeconds: 252,
+		TagHints: []domain.TagHint{
+			{Title: "宮崎歩", Artists: []string{"brave heart"}, Source: "filename", Pattern: "title-artist"},
+			{Title: "brave heart", Artists: []string{"宮崎歩"}, Source: "filename", Pattern: "artist-title"},
+		},
+	}
+	queries := TrackQueries(track, Query{})
+	if len(queries) != 2 || queries[0].Title != "宮崎歩" || queries[1].Title != "brave heart" || queries[1].Artists[0] != "宮崎歩" {
+		t.Fatalf("queries = %#v", queries)
+	}
+	if track.Title != "" || len(track.Artists) != 0 {
+		t.Fatalf("hints mutated embedded fields: %#v", track)
+	}
+	strategy := &countingStrategy{descriptor: Descriptor{ID: "hint-source", Name: "Hint Source", Enabled: true, Health: HealthReady}}
+	registry := NewRegistry(strategy)
+	result, err := registry.SearchTrack(context.Background(), track, Query{}, nil, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strategy.calls != 2 || len(result.Candidates) != 1 {
+		t.Fatalf("calls=%d candidates=%#v", strategy.calls, result.Candidates)
 	}
 }
 

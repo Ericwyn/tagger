@@ -28,29 +28,188 @@ interface CandidateDrawerProps {
   onApply: (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean; artworkMaxSize?: number}) => Promise<void>;
 }
 
+function suspiciousAlbumArtist(candidate: MatchCandidate): boolean {
+  if (!candidate.album.value || candidate.albumArtists.value.length !== 1) return false;
+  const album = candidate.album.value.trim().toLocaleLowerCase();
+  const albumArtist = candidate.albumArtists.value[0].trim().toLocaleLowerCase();
+  if (!album || album !== albumArtist) return false;
+  return !candidate.artists.value.some((artist) => artist.trim().toLocaleLowerCase() === album);
+}
+
+type CandidateFieldDescriptor = {
+  id: string;
+  label: string;
+  available: (candidate: MatchCandidate) => boolean;
+  currentText: (track: Track) => string;
+  candidateText: (candidate: MatchCandidate) => string;
+  apply: (patch: TrackPatch, candidate: MatchCandidate) => void;
+  warning?: (candidate: MatchCandidate) => string | undefined;
+};
+
 const fieldOptions = [
-  {id: 'title', label: '标题'},
-  {id: 'artists', label: '艺术家'},
-  {id: 'album', label: '专辑'},
-  {id: 'albumArtists', label: '专辑艺术家'},
-  {id: 'track', label: '音轨 / 光盘'},
-  {id: 'year', label: '年份'},
-  {id: 'genres', label: '风格'},
-  {id: 'comment', label: '注释'},
-  {id: 'composers', label: '作曲家'},
-  {id: 'conductor', label: '指挥'},
-  {id: 'lyricists', label: '作词家'},
-  {id: 'copyright', label: '版权'},
-  {id: 'bpm', label: 'BPM'},
-  {id: 'isrc', label: 'ISRC'},
-  {id: 'musicbrainzTrackId', label: 'MB Track ID'},
-  {id: 'musicbrainzReleaseId', label: 'MB Release ID'},
-  {id: 'musicbrainzArtistIds', label: 'MB Artist ID'},
-  {id: 'acoustidId', label: 'AcoustID'},
-  {id: 'acoustidFingerprint', label: 'AcoustID 指纹'},
-] as const;
+  {
+    id: 'title', label: '标题',
+    available: (candidate) => Boolean(candidate.title.value),
+    currentText: (track) => track.title || '空',
+    candidateText: (candidate) => candidate.title.value || '来源未提供',
+    apply: (patch, candidate) => { patch.title = candidate.title.value; },
+  },
+  {
+    id: 'artists', label: '艺术家',
+    available: (candidate) => candidate.artists.value.length > 0,
+    currentText: (track) => track.artists.join(' / ') || '空',
+    candidateText: (candidate) => candidate.artists.value.join(' / ') || '来源未提供',
+    apply: (patch, candidate) => { patch.artists = [...candidate.artists.value]; },
+  },
+  {
+    id: 'album', label: '专辑',
+    available: (candidate) => Boolean(candidate.album.value),
+    currentText: (track) => track.album || '空',
+    candidateText: (candidate) => candidate.album.value || '来源未提供',
+    apply: (patch, candidate) => { patch.album = candidate.album.value; },
+  },
+  {
+    id: 'albumArtists', label: '专辑艺术家',
+    available: (candidate) => candidate.albumArtists.value.length > 0,
+    currentText: (track) => track.albumArtists.join(' / ') || '空',
+    candidateText: (candidate) => candidate.albumArtists.value.join(' / ') || '来源未提供',
+    apply: (patch, candidate) => { patch.albumArtists = [...candidate.albumArtists.value]; },
+    warning: (candidate) => suspiciousAlbumArtist(candidate)
+      ? '候选专辑艺术家与专辑名相同、但与曲目艺术家不同，已默认取消勾选'
+      : undefined,
+  },
+  {
+    id: 'track', label: '音轨 / 光盘',
+    available: (candidate) => candidate.trackNumber.value > 0 || candidate.trackTotal.value > 0 || candidate.discNumber.value > 0 || candidate.discTotal.value > 0,
+    currentText: (track) => {
+      const trackValue = track.trackNumber ? `${track.trackNumber} / ${track.trackTotal || '—'}` : '空';
+      const discValue = track.discNumber ? `${track.discNumber} / ${track.discTotal || '—'}` : '空';
+      return `音轨 ${trackValue} · 光盘 ${discValue}`;
+    },
+    candidateText: (candidate) => {
+      const trackValue = candidate.trackNumber.value > 0 ? `${candidate.trackNumber.value} / ${candidate.trackTotal.value || '—'}` : '来源未提供';
+      const discValue = candidate.discNumber.value > 0 ? `${candidate.discNumber.value} / ${candidate.discTotal.value || '—'}` : '来源未提供';
+      return `音轨 ${trackValue} · 光盘 ${discValue}`;
+    },
+    apply: (patch, candidate) => {
+      if (candidate.trackNumber.value > 0) patch.trackNumber = candidate.trackNumber.value;
+      if (candidate.trackTotal.value > 0) patch.trackTotal = candidate.trackTotal.value;
+      if (candidate.discNumber.value > 0) patch.discNumber = candidate.discNumber.value;
+      if (candidate.discTotal.value > 0) patch.discTotal = candidate.discTotal.value;
+    },
+  },
+  {
+    id: 'year', label: '年份',
+    available: (candidate) => candidate.year.value > 0,
+    currentText: (track) => String(track.year || '空'),
+    candidateText: (candidate) => String(candidate.year.value || '来源未提供'),
+    apply: (patch, candidate) => { patch.year = candidate.year.value; },
+  },
+  {
+    id: 'genres', label: '风格',
+    available: (candidate) => candidate.genres.value.length > 0,
+    currentText: (track) => track.genres.join(', ') || '空',
+    candidateText: (candidate) => candidate.genres.value.join(', ') || '来源未提供',
+    apply: (patch, candidate) => { patch.genres = [...candidate.genres.value]; },
+  },
+  {
+    id: 'comment', label: '注释',
+    available: (candidate) => Boolean(candidate.comment?.value),
+    currentText: (track) => track.comment || '空',
+    candidateText: (candidate) => candidate.comment?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.comment = candidate.comment?.value ?? ''; },
+  },
+  {
+    id: 'composers', label: '作曲家',
+    available: (candidate) => Boolean(candidate.composers?.value.length),
+    currentText: (track) => track.composers.join(' / ') || '空',
+    candidateText: (candidate) => candidate.composers?.value.join(' / ') || '来源未提供',
+    apply: (patch, candidate) => { patch.composers = [...(candidate.composers?.value ?? [])]; },
+  },
+  {
+    id: 'conductor', label: '指挥',
+    available: (candidate) => Boolean(candidate.conductor?.value),
+    currentText: (track) => track.conductor || '空',
+    candidateText: (candidate) => candidate.conductor?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.conductor = candidate.conductor?.value ?? ''; },
+  },
+  {
+    id: 'lyricists', label: '作词家',
+    available: (candidate) => Boolean(candidate.lyricists?.value.length),
+    currentText: (track) => track.lyricists.join(' / ') || '空',
+    candidateText: (candidate) => candidate.lyricists?.value.join(' / ') || '来源未提供',
+    apply: (patch, candidate) => { patch.lyricists = [...(candidate.lyricists?.value ?? [])]; },
+  },
+  {
+    id: 'copyright', label: '版权',
+    available: (candidate) => Boolean(candidate.copyright?.value),
+    currentText: (track) => track.copyright || '空',
+    candidateText: (candidate) => candidate.copyright?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.copyright = candidate.copyright?.value ?? ''; },
+  },
+  {
+    id: 'bpm', label: 'BPM',
+    available: (candidate) => Boolean(candidate.bpm?.value),
+    currentText: (track) => String(track.bpm || '空'),
+    candidateText: (candidate) => String(candidate.bpm?.value || '来源未提供'),
+    apply: (patch, candidate) => { patch.bpm = candidate.bpm?.value; },
+  },
+  {
+    id: 'isrc', label: 'ISRC',
+    available: (candidate) => Boolean(candidate.isrc?.value),
+    currentText: (track) => track.isrc || '空',
+    candidateText: (candidate) => candidate.isrc?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.isrc = candidate.isrc?.value ?? ''; },
+  },
+  {
+    id: 'musicbrainzTrackId', label: 'MB Track ID',
+    available: (candidate) => Boolean(candidate.musicbrainzTrackId?.value),
+    currentText: (track) => track.musicbrainzTrackId || '空',
+    candidateText: (candidate) => candidate.musicbrainzTrackId?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.musicbrainzTrackId = candidate.musicbrainzTrackId?.value ?? ''; },
+  },
+  {
+    id: 'musicbrainzReleaseId', label: 'MB Release ID',
+    available: (candidate) => Boolean(candidate.musicbrainzReleaseId?.value),
+    currentText: (track) => track.musicbrainzReleaseId || '空',
+    candidateText: (candidate) => candidate.musicbrainzReleaseId?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.musicbrainzReleaseId = candidate.musicbrainzReleaseId?.value ?? ''; },
+  },
+  {
+    id: 'musicbrainzArtistIds', label: 'MB Artist ID',
+    available: (candidate) => Boolean(candidate.musicbrainzArtistIds?.value.length),
+    currentText: (track) => track.musicbrainzArtistIds.join(' / ') || '空',
+    candidateText: (candidate) => candidate.musicbrainzArtistIds?.value.join(' / ') || '来源未提供',
+    apply: (patch, candidate) => { patch.musicbrainzArtistIds = [...(candidate.musicbrainzArtistIds?.value ?? [])]; },
+  },
+  {
+    id: 'acoustidId', label: 'AcoustID',
+    available: (candidate) => Boolean(candidate.acoustidId?.value),
+    currentText: (track) => track.acoustidId || '空',
+    candidateText: (candidate) => candidate.acoustidId?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.acoustidId = candidate.acoustidId?.value ?? ''; },
+  },
+  {
+    id: 'acoustidFingerprint', label: 'AcoustID 指纹',
+    available: (candidate) => Boolean(candidate.acoustidFingerprint?.value),
+    currentText: (track) => track.acoustidFingerprint || '空',
+    candidateText: (candidate) => candidate.acoustidFingerprint?.value || '来源未提供',
+    apply: (patch, candidate) => { patch.acoustidFingerprint = candidate.acoustidFingerprint?.value ?? ''; },
+  },
+] as const satisfies readonly CandidateFieldDescriptor[];
 
 type FieldID = typeof fieldOptions[number]['id'];
+
+function fieldWarning(field: CandidateFieldDescriptor, candidate: MatchCandidate): string | undefined {
+  return field.warning?.(candidate);
+}
+
+function defaultCandidateFields(candidate: MatchCandidate): Set<FieldID> {
+  return new Set(fieldOptions
+    .filter((field) => field.available(candidate))
+    .filter((field) => !fieldWarning(field, candidate))
+    .map((field) => field.id));
+}
 
 const queryHistoryLimit = 8;
 
@@ -108,7 +267,7 @@ export function CandidateDrawer({
   onApply,
 }: CandidateDrawerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [fields, setFields] = useState<Set<FieldID>>(new Set(fieldOptions.map((item) => item.id)));
+  const [fields, setFields] = useState<Set<FieldID>>(new Set());
   const [applying, setApplying] = useState(false);
   const [includeLyrics, setIncludeLyrics] = useState(false);
   const [lyricsDraft, setLyricsDraft] = useState('');
@@ -181,14 +340,14 @@ export function CandidateDrawer({
   );
 
   const availableFieldIDs = useMemo(
-    () => selected ? fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id) : [],
+    () => selected ? fieldOptions.filter((field) => field.available(selected)).map((field) => field.id) : [],
     [selected],
   );
   const allAvailableFieldsSelected = availableFieldIDs.length > 0 && availableFieldIDs.every((field) => fields.has(field));
 
   useEffect(() => {
     if (!selected) return;
-    setFields(new Set(fieldOptions.filter((field) => candidateHasField(selected, field.id)).map((field) => field.id)));
+    setFields(defaultCandidateFields(selected));
     setIncludeLyrics(focus === 'lyrics' && Boolean(selected.hasLyrics && selected.lyrics?.value));
     setLyricsDraft(selected.lyrics?.value ?? '');
     setSelectedArtworkInfo(undefined);
@@ -199,58 +358,37 @@ export function CandidateDrawer({
   if (!open || !track) return null;
 
   const buildPatch = (): TrackPatch => {
-    if (!selected) {
-      return {
-        title: track.title,
-        artists: track.artists,
-        album: track.album,
-        albumArtists: track.albumArtists,
-        trackNumber: track.trackNumber,
-        trackTotal: track.trackTotal,
-        discNumber: track.discNumber,
-        discTotal: track.discTotal,
-        year: track.year,
-        genres: track.genres,
-        lyrics: track.lyrics,
-        comment: track.comment,
-        composers: track.composers,
-        conductor: track.conductor,
-        lyricists: track.lyricists,
-        copyright: track.copyright,
-        bpm: track.bpm,
-        isrc: track.isrc,
-        musicbrainzTrackId: track.musicbrainzTrackId,
-        musicbrainzReleaseId: track.musicbrainzReleaseId,
-        musicbrainzArtistIds: track.musicbrainzArtistIds,
-        acoustidId: track.acoustidId,
-        acoustidFingerprint: track.acoustidFingerprint,
-      };
-    }
-    return {
-      title: fields.has('title') && selected.title.value ? selected.title.value : track.title,
-      artists: fields.has('artists') && selected.artists.value.length > 0 ? selected.artists.value : track.artists,
-      album: fields.has('album') && selected.album.value ? selected.album.value : track.album,
-      albumArtists: fields.has('albumArtists') && selected.albumArtists.value.length > 0 ? selected.albumArtists.value : track.albumArtists,
-      trackNumber: fields.has('track') && selected.trackNumber.value > 0 ? selected.trackNumber.value : track.trackNumber,
-      trackTotal: fields.has('track') && selected.trackTotal.value > 0 ? selected.trackTotal.value : track.trackTotal,
-      discNumber: fields.has('track') && selected.discNumber.value > 0 ? selected.discNumber.value : track.discNumber,
-	  discTotal: fields.has('track') && selected.discTotal.value > 0 ? selected.discTotal.value : track.discTotal,
-      year: fields.has('year') && selected.year.value > 0 ? selected.year.value : track.year,
-      genres: fields.has('genres') && selected.genres.value.length > 0 ? selected.genres.value : track.genres,
+    const patch: TrackPatch = {
+      title: track.title,
+      artists: [...track.artists],
+      album: track.album,
+      albumArtists: [...track.albumArtists],
+      trackNumber: track.trackNumber,
+      trackTotal: track.trackTotal,
+      discNumber: track.discNumber,
+      discTotal: track.discTotal,
+      year: track.year,
+      genres: [...track.genres],
       lyrics: includeLyrics ? lyricsDraft : track.lyrics,
-      comment: fields.has('comment') && selected.comment?.value ? selected.comment.value : track.comment,
-      composers: fields.has('composers') && selected.composers?.value.length ? selected.composers.value : track.composers,
-      conductor: fields.has('conductor') && selected.conductor?.value ? selected.conductor.value : track.conductor,
-      lyricists: fields.has('lyricists') && selected.lyricists?.value.length ? selected.lyricists.value : track.lyricists,
-      copyright: fields.has('copyright') && selected.copyright?.value ? selected.copyright.value : track.copyright,
-      bpm: fields.has('bpm') && selected.bpm?.value ? selected.bpm.value : track.bpm,
-      isrc: fields.has('isrc') && selected.isrc?.value ? selected.isrc.value : track.isrc,
-      musicbrainzTrackId: fields.has('musicbrainzTrackId') && selected.musicbrainzTrackId?.value ? selected.musicbrainzTrackId.value : track.musicbrainzTrackId,
-      musicbrainzReleaseId: fields.has('musicbrainzReleaseId') && selected.musicbrainzReleaseId?.value ? selected.musicbrainzReleaseId.value : track.musicbrainzReleaseId,
-      musicbrainzArtistIds: fields.has('musicbrainzArtistIds') && selected.musicbrainzArtistIds?.value.length ? selected.musicbrainzArtistIds.value : track.musicbrainzArtistIds,
-      acoustidId: fields.has('acoustidId') && selected.acoustidId?.value ? selected.acoustidId.value : track.acoustidId,
-      acoustidFingerprint: fields.has('acoustidFingerprint') && selected.acoustidFingerprint?.value ? selected.acoustidFingerprint.value : track.acoustidFingerprint,
+      comment: track.comment,
+      composers: [...track.composers],
+      conductor: track.conductor,
+      lyricists: [...track.lyricists],
+      copyright: track.copyright,
+      bpm: track.bpm,
+      isrc: track.isrc,
+      musicbrainzTrackId: track.musicbrainzTrackId,
+      musicbrainzReleaseId: track.musicbrainzReleaseId,
+      musicbrainzArtistIds: [...track.musicbrainzArtistIds],
+      acoustidId: track.acoustidId,
+      acoustidFingerprint: track.acoustidFingerprint,
     };
+    if (selected) {
+      fieldOptions.forEach((field) => {
+        if (fields.has(field.id) && field.available(selected)) field.apply(patch, selected);
+      });
+    }
+    return patch;
   };
 
   const toggleField = (id: FieldID) => {
@@ -403,7 +541,7 @@ export function CandidateDrawer({
                   </div>
                   <div className="field-chips">
                     {fieldOptions.map((field) => {
-                      const available = candidateHasField(selected, field.id);
+                      const available = field.available(selected);
                       return (
                         <button
                           key={field.id}
@@ -421,31 +559,16 @@ export function CandidateDrawer({
 
                 <div className="candidate-diff">
                   <div className="diff-column-head"><span>字段</span><span>当前文件</span><span>候选值</span></div>
-                  <DiffRow label="标题" current={track.title} candidate={selected.title.value} active={fields.has('title')} />
-                  <DiffRow label="艺术家" current={track.artists.join(' / ')} candidate={selected.artists.value.join(' / ')} active={fields.has('artists')} />
-                  <DiffRow label="专辑" current={track.album || '空'} candidate={selected.album.value} active={fields.has('album')} />
-                  <DiffRow
-                    label="音轨"
-                    current={track.trackNumber ? `${track.trackNumber} / ${track.trackTotal || '—'}` : '空'}
-                    candidate={selected.trackNumber.value > 0
-                      ? `${selected.trackNumber.value} / ${selected.trackTotal.value || '—'}`
-                      : '来源未提供'}
-                    active={fields.has('track')}
-                  />
-                  <DiffRow label="年份" current={String(track.year || '空')} candidate={String(selected.year.value || '来源未提供')} active={fields.has('year')} />
-                  <DiffRow label="风格" current={track.genres.join(', ') || '空'} candidate={selected.genres.value.join(', ')} active={fields.has('genres')} />
-                  {selected.comment?.value && <DiffRow label="注释" current={track.comment || '空'} candidate={selected.comment.value} active={fields.has('comment')} />}
-                  {selected.composers?.value.length ? <DiffRow label="作曲家" current={track.composers.join(' / ') || '空'} candidate={selected.composers.value.join(' / ')} active={fields.has('composers')} /> : null}
-                  {selected.conductor?.value && <DiffRow label="指挥" current={track.conductor || '空'} candidate={selected.conductor.value} active={fields.has('conductor')} />}
-                  {selected.lyricists?.value.length ? <DiffRow label="作词家" current={track.lyricists.join(' / ') || '空'} candidate={selected.lyricists.value.join(' / ')} active={fields.has('lyricists')} /> : null}
-                  {selected.copyright?.value && <DiffRow label="版权" current={track.copyright || '空'} candidate={selected.copyright.value} active={fields.has('copyright')} />}
-                  {selected.bpm?.value ? <DiffRow label="BPM" current={String(track.bpm || '空')} candidate={String(selected.bpm.value)} active={fields.has('bpm')} /> : null}
-                  {selected.isrc?.value && <DiffRow label="ISRC" current={track.isrc || '空'} candidate={selected.isrc.value} active={fields.has('isrc')} />}
-                  {selected.musicbrainzTrackId?.value && <DiffRow label="MB Track ID" current={track.musicbrainzTrackId || '空'} candidate={selected.musicbrainzTrackId.value} active={fields.has('musicbrainzTrackId')} />}
-                  {selected.musicbrainzReleaseId?.value && <DiffRow label="MB Release ID" current={track.musicbrainzReleaseId || '空'} candidate={selected.musicbrainzReleaseId.value} active={fields.has('musicbrainzReleaseId')} />}
-                  {selected.musicbrainzArtistIds?.value.length ? <DiffRow label="MB Artist ID" current={track.musicbrainzArtistIds.join(' / ') || '空'} candidate={selected.musicbrainzArtistIds.value.join(' / ')} active={fields.has('musicbrainzArtistIds')} /> : null}
-                  {selected.acoustidId?.value && <DiffRow label="AcoustID" current={track.acoustidId || '空'} candidate={selected.acoustidId.value} active={fields.has('acoustidId')} />}
-                  {selected.acoustidFingerprint?.value && <DiffRow label="AcoustID 指纹" current={track.acoustidFingerprint || '空'} candidate={selected.acoustidFingerprint.value} active={fields.has('acoustidFingerprint')} />}
+                  {fieldOptions.filter((field) => field.available(selected)).map((field) => (
+                    <DiffRow
+                      key={field.id}
+                      label={field.label}
+                      current={field.currentText(track)}
+                      candidate={field.candidateText(selected)}
+                      active={fields.has(field.id)}
+                      warning={fieldWarning(field, selected)}
+                    />
+                  ))}
                 </div>
 
                 {selected.lyrics?.value && (
@@ -531,37 +654,13 @@ export function CandidateDrawer({
   );
 }
 
-function DiffRow({label, current, candidate, active}: {label: string; current: string; candidate: string; active: boolean}) {
+function DiffRow({label, current, candidate, active, warning}: {label: string; current: string; candidate: string; active: boolean; warning?: string}) {
   const same = current === candidate;
   return (
-    <div className={cn('candidate-diff-row', !active && 'is-muted')}>
+    <div className={cn('candidate-diff-row', !active && 'is-muted', warning && 'has-warning')}>
       <span>{label}</span>
       <span>{current}</span>
-      <span className={cn(!same && active && 'is-changed')}>{candidate}</span>
+      <span className={cn(!same && active && 'is-changed')}>{candidate}{warning && <small>{warning}</small>}</span>
     </div>
   );
-}
-
-function candidateHasField(candidate: MatchCandidate, field: FieldID): boolean {
-  switch (field) {
-    case 'title': return Boolean(candidate.title.value);
-    case 'artists': return candidate.artists.value.length > 0;
-    case 'album': return Boolean(candidate.album.value);
-    case 'albumArtists': return candidate.albumArtists.value.length > 0;
-    case 'track': return candidate.trackNumber.value > 0 || candidate.trackTotal.value > 0 || candidate.discNumber.value > 0;
-    case 'year': return candidate.year.value > 0;
-    case 'genres': return candidate.genres.value.length > 0;
-    case 'comment': return Boolean(candidate.comment?.value);
-    case 'composers': return Boolean(candidate.composers?.value.length);
-    case 'conductor': return Boolean(candidate.conductor?.value);
-    case 'lyricists': return Boolean(candidate.lyricists?.value.length);
-    case 'copyright': return Boolean(candidate.copyright?.value);
-    case 'bpm': return Boolean(candidate.bpm?.value);
-    case 'isrc': return Boolean(candidate.isrc?.value);
-    case 'musicbrainzTrackId': return Boolean(candidate.musicbrainzTrackId?.value);
-    case 'musicbrainzReleaseId': return Boolean(candidate.musicbrainzReleaseId?.value);
-    case 'musicbrainzArtistIds': return Boolean(candidate.musicbrainzArtistIds?.value.length);
-    case 'acoustidId': return Boolean(candidate.acoustidId?.value);
-    case 'acoustidFingerprint': return Boolean(candidate.acoustidFingerprint?.value);
-  }
 }

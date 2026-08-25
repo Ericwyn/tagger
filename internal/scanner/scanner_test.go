@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -142,10 +143,16 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	if flac.BPM == nil || *flac.BPM != 128 || flac.ISRC != "US-ABC-24-00001" || flac.MusicBrainzTrackID != "track-mbid" || flac.MusicBrainzReleaseID != "release-mbid" || len(flac.MusicBrainzArtistIDs) != 2 || flac.AcoustID != "acoustid-id" || flac.AcoustIDFingerprint != "fingerprint" {
 		t.Fatalf("flac identifiers = %#v", flac)
 	}
-	if mp3.Title != "Song Two" || len(mp3.Artists) != 1 || mp3.Artists[0] != "Singer" || mp3.Album != "Album" {
-		t.Fatalf("filename fallback = %#v", mp3)
+	if mp3.Title != "" || len(mp3.Artists) != 0 || mp3.Album != "" || len(mp3.AlbumArtists) != 0 {
+		t.Fatalf("embedded tags must remain empty = %#v", mp3)
 	}
-	if mp3.Lyrics != "[00:01.00]sidecar" || mp3.Health != domain.HealthMissingArtwork {
+	if len(mp3.TagHints) != 1 || mp3.TagHints[0].Title != "Song Two" || !slices.Equal(mp3.TagHints[0].Artists, []string{"Singer"}) || mp3.TagHints[0].Album != "Album" {
+		t.Fatalf("path hints = %#v", mp3.TagHints)
+	}
+	if !slices.Equal(mp3.TagIssues, []domain.TagIssue{domain.TagIssueMissingTitle, domain.TagIssueMissingArtist, domain.TagIssueMissingAlbum, domain.TagIssueMissingAlbumArtist}) {
+		t.Fatalf("tag issues = %#v", mp3.TagIssues)
+	}
+	if mp3.Lyrics != "[00:01.00]sidecar" || mp3.Health != domain.HealthTagCompatibility {
 		t.Fatalf("sidecar/health = %#v", mp3)
 	}
 	if mp3.LyricsSidecar == nil || !mp3.LyricsSidecar.Exists || mp3.LyricsSidecar.Revision == "" || mp3.LyricsSidecar.SizeBytes == 0 {
@@ -153,6 +160,53 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	}
 	if wav.Health != domain.HealthParseError || wav.ParseError == "" {
 		t.Fatalf("parse error = %#v", wav)
+	}
+}
+
+func TestFilenameHintsRemainAmbiguousAndNeverBecomeTags(t *testing.T) {
+	hints := tagHintsFromPath("music/数码宝贝/宮崎歩-brave heart.mp3")
+	if len(hints) != 2 {
+		t.Fatalf("hints = %#v", hints)
+	}
+	if hints[0].Pattern != "title-artist" || hints[0].Title != "宮崎歩" || !slices.Equal(hints[0].Artists, []string{"brave heart"}) {
+		t.Fatalf("title-artist hint = %#v", hints[0])
+	}
+	if hints[1].Pattern != "artist-title" || hints[1].Title != "brave heart" || !slices.Equal(hints[1].Artists, []string{"宮崎歩"}) {
+		t.Fatalf("artist-title hint = %#v", hints[1])
+	}
+	track := fallbackTrack("music/数码宝贝/宮崎歩-brave heart.mp3", domain.FormatMP3)
+	if track.Title != "" || len(track.Artists) != 0 || track.Health != domain.HealthTagCompatibility {
+		t.Fatalf("fallback track promoted a hint = %#v", track)
+	}
+}
+
+func TestTagIssuesDetectSuspiciousAlbumArtist(t *testing.T) {
+	track := fallbackTrack("brave heart-宮崎歩.mp3", domain.FormatMP3)
+	applySnapshot(&track, tags.Snapshot{Raw: map[string][]string{
+		"TITLE": {"brave heart"}, "ARTIST": {"宮崎歩"},
+		"ALBUM": {"デジモンエンディングベスト"}, "ALBUMARTIST": {"デジモンエンディングベスト"},
+	}})
+	track.Health = healthFor(track)
+	if track.Health != domain.HealthTagCompatibility || !slices.Contains(track.TagIssues, domain.TagIssueSuspiciousAlbumArtist) {
+		t.Fatalf("suspicious album artist = %#v", track)
+	}
+}
+
+func TestLegacyAliasTagsDoNotHideMissingStandardCompatibilityFields(t *testing.T) {
+	track := fallbackTrack("legacy.mp3", domain.FormatMP3)
+	applySnapshot(&track, tags.Snapshot{Raw: map[string][]string{
+		"SUBTITLE":     {"Not a TIT2 title"},
+		"ARTISTS":      {"Not a TPE1 artist"},
+		"ALBUM":        {"Album"},
+		"ALBUM ARTIST": {"Legacy album artist"},
+	}})
+	if track.Title != "" || len(track.Artists) != 0 || len(track.AlbumArtists) != 0 {
+		t.Fatalf("legacy aliases promoted to standard fields: %#v", track)
+	}
+	for _, issue := range []domain.TagIssue{domain.TagIssueMissingTitle, domain.TagIssueMissingArtist, domain.TagIssueMissingAlbumArtist} {
+		if !slices.Contains(track.TagIssues, issue) {
+			t.Fatalf("missing issue %q in %#v", issue, track.TagIssues)
+		}
 	}
 }
 

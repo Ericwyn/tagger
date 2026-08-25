@@ -3,6 +3,7 @@ package filewrite
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"image"
@@ -705,6 +706,159 @@ func TestWriterExtendedFieldsAcrossCertifiedFormats(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWriterEmitsStandardMP3FramesFromV23AndV24Inputs(t *testing.T) {
+	for _, version := range []byte{3, 4} {
+		t.Run(string(rune('0'+version)), func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "compat.mp3")
+			writeSyntheticMP3(t, path, version)
+			beforeBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeAudio := sha256.Sum256(mpegPayload(t, beforeBytes))
+
+			engine := taglibwasm.New()
+			before, err := engine.Read(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if firstRaw(before.Raw, "X-COMPAT-TEST") != "keep" {
+				t.Fatalf("custom frame not mapped: %#v", before.Raw)
+			}
+			writer, err := New(root, engine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := testFileRef(t, root, path, domain.FormatMP3, engine)
+			_, err = writer.Write(context.Background(), ref, ref.Revision, domain.TagPatch{
+				Title:        &domain.StringFieldPatch{Op: domain.OperationSet, Value: "brave heart"},
+				Artists:      &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"宮崎歩"}},
+				Album:        &domain.StringFieldPatch{Op: domain.OperationSet, Value: "デジモンエンディングベスト"},
+				AlbumArtists: &domain.StringsFieldPatch{Op: domain.OperationSet, Value: []string{"宮崎歩"}},
+			}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := engine.Read(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if firstRaw(after.Raw, "TITLE") != "brave heart" || firstRaw(after.Raw, "ARTIST") != "宮崎歩" || firstRaw(after.Raw, "ALBUM") != "デジモンエンディングベスト" || firstRaw(after.Raw, "ALBUMARTIST") != "宮崎歩" {
+				t.Fatalf("written properties = %#v", after.Raw)
+			}
+			if firstRaw(after.Raw, "X-COMPAT-TEST") != "keep" {
+				t.Fatalf("custom property was lost: %#v", after.Raw)
+			}
+			afterBytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frames := id3FrameIDs(t, afterBytes)
+			for _, frame := range []string{"TIT2", "TPE1", "TALB", "TPE2", "TXXX"} {
+				if !slices.Contains(frames, frame) {
+					t.Fatalf("frame %s missing from %v", frame, frames)
+				}
+			}
+			afterAudio := sha256.Sum256(mpegPayload(t, afterBytes))
+			if beforeAudio != afterAudio {
+				t.Fatal("MPEG audio payload changed during tag write")
+			}
+		})
+	}
+}
+
+func writeSyntheticMP3(t *testing.T, path string, version byte) {
+	t.Helper()
+	description := []byte("X-COMPAT-TEST")
+	framePayload := append([]byte{0}, description...)
+	framePayload = append(framePayload, 0)
+	framePayload = append(framePayload, []byte("keep")...)
+	frame := bytes.NewBuffer(nil)
+	frame.WriteString("TXXX")
+	if version == 4 {
+		size := synchsafe(len(framePayload))
+		frame.Write(size[:])
+	} else {
+		_ = binary.Write(frame, binary.BigEndian, uint32(len(framePayload)))
+	}
+	frame.Write([]byte{0, 0})
+	frame.Write(framePayload)
+
+	buffer := bytes.NewBuffer(nil)
+	buffer.Write([]byte{'I', 'D', '3', version, 0, 0})
+	tagSize := synchsafe(frame.Len())
+	buffer.Write(tagSize[:])
+	buffer.Write(frame.Bytes())
+	const frameLength = 417
+	for range 100 {
+		mpegFrame := make([]byte, frameLength)
+		copy(mpegFrame, []byte{0xff, 0xfb, 0x90, 0x64})
+		buffer.Write(mpegFrame)
+	}
+	if err := os.WriteFile(path, buffer.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func synchsafe(value int) [4]byte {
+	return [4]byte{byte(value >> 21 & 0x7f), byte(value >> 14 & 0x7f), byte(value >> 7 & 0x7f), byte(value & 0x7f)}
+}
+
+func synchsafeValue(value []byte) int {
+	if len(value) < 4 {
+		return 0
+	}
+	return int(value[0]&0x7f)<<21 | int(value[1]&0x7f)<<14 | int(value[2]&0x7f)<<7 | int(value[3]&0x7f)
+}
+
+func id3FrameIDs(t *testing.T, data []byte) []string {
+	t.Helper()
+	if len(data) < 10 || string(data[:3]) != "ID3" {
+		t.Fatal("missing ID3v2 header")
+	}
+	version := data[3]
+	end := 10 + synchsafeValue(data[6:10])
+	if end > len(data) {
+		t.Fatal("invalid ID3v2 size")
+	}
+	frames := make([]string, 0)
+	for offset := 10; offset+10 <= end; {
+		id := string(data[offset : offset+4])
+		if id == "\x00\x00\x00\x00" {
+			break
+		}
+		size := int(binary.BigEndian.Uint32(data[offset+4 : offset+8]))
+		if version == 4 {
+			size = synchsafeValue(data[offset+4 : offset+8])
+		}
+		if size < 0 || offset+10+size > end {
+			t.Fatalf("invalid frame %q size %d", id, size)
+		}
+		frames = append(frames, id)
+		offset += 10 + size
+	}
+	return frames
+}
+
+func mpegPayload(t *testing.T, data []byte) []byte {
+	t.Helper()
+	payload := data
+	if len(data) >= 10 && string(data[:3]) == "ID3" {
+		offset := 10 + synchsafeValue(data[6:10])
+		if data[5]&0x10 != 0 {
+			offset += 10
+		}
+		if offset <= len(data) {
+			payload = data[offset:]
+		}
+	}
+	if len(payload) >= 128 && string(payload[len(payload)-128:len(payload)-125]) == "TAG" {
+		payload = payload[:len(payload)-128]
+	}
+	return payload
 }
 
 func testFileRef(t *testing.T, root, path string, format domain.TrackFormat, engine tags.Engine) library.FileRef {

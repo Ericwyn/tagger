@@ -169,6 +169,68 @@ func TestReviewJobsDoNotBlockFilesystemRefresh(t *testing.T) {
 	}
 }
 
+func TestManagerSerializesRecoveryScanBehindRunningWrite(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	scanStarted := make(chan struct{})
+	order := make(chan string, 2)
+	manager.Register(domain.JobWrite, func(_ context.Context, _ domain.Job, _ jobs.Progress) error {
+		close(writeStarted)
+		<-releaseWrite
+		order <- "write"
+		return nil
+	})
+	manager.Register(domain.JobScan, func(_ context.Context, _ domain.Job, _ jobs.Progress) error {
+		order <- "scan"
+		close(scanStarted)
+		return nil
+	})
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			close(releaseWrite)
+		}
+		manager.Close()
+	}()
+	if _, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobWrite, Title: "Persisted write"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("write job did not start")
+	}
+	if _, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobScan, Title: "Draft recovery scan"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-scanStarted:
+		t.Fatal("recovery scan started before the running write completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseWrite)
+	released = true
+	for _, want := range []string{"write", "scan"} {
+		select {
+		case got := <-order:
+			if got != want {
+				t.Fatalf("execution order got %q, want %q", got, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for %s job", want)
+		}
+	}
+}
+
 func waitForState(t *testing.T, manager *jobs.Manager, id string, state domain.JobState) domain.Job {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

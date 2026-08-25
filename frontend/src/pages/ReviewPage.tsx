@@ -168,7 +168,16 @@ function trackFieldValue(track: Track, field: string): unknown {
 }
 
 function changedFields(track: Track, candidate: MatchCandidate): string[] {
-  return availableFields(candidate).filter((field) => JSON.stringify(candidateFieldValue(candidate, field)) !== JSON.stringify(trackFieldValue(track, field)));
+  return availableFields(candidate)
+    .filter((field) => field !== 'albumArtists' || !suspiciousAlbumArtist(candidate))
+    .filter((field) => JSON.stringify(candidateFieldValue(candidate, field)) !== JSON.stringify(trackFieldValue(track, field)));
+}
+
+function suspiciousAlbumArtist(candidate: MatchCandidate): boolean {
+  if (!candidate.album.value || candidate.albumArtists.value.length !== 1) return false;
+  const album = candidate.album.value.trim().toLocaleLowerCase();
+  const albumArtist = candidate.albumArtists.value[0].trim().toLocaleLowerCase();
+  return Boolean(album && album === albumArtist && !candidate.artists.value.some((artist) => artist.trim().toLocaleLowerCase() === album));
 }
 
 export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, onBack, onComplete, onJobQueued}: ReviewPageProps) {
@@ -268,7 +277,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           includeArtwork: artworkTouched ? (reviewArtworkByTrack.get(track.id) ?? false) : defaultIncludeArtwork,
 		  artworkMaxSize: reviewArtworkMaxSizeByTrack.get(track.id) ?? 0,
           error: errorByTrack.get(track.id),
-          state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 ? 'accepted' as const : 'review' as const,
+          state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 && !suspiciousAlbumArtist(candidate) ? 'accepted' as const : 'review' as const,
         };
       });
       if (!active) return;
@@ -631,7 +640,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
               <ReviewDiff field="title" label="标题" current={active.track.title} next={active.candidate.title.value} source={active.candidate.providerName} checked={active.fields.includes('title')} onToggle={() => toggleField(active.track.id, 'title')} />
               <ReviewDiff field="artists" label="艺术家" current={active.track.artists.join(' / ')} next={active.candidate.artists.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('artists')} onToggle={() => toggleField(active.track.id, 'artists')} />
               <ReviewDiff field="album" label="专辑" current={active.track.album || '空'} next={active.candidate.album.value} source={active.candidate.providerName} changed={!active.track.album} checked={active.fields.includes('album')} onToggle={() => toggleField(active.track.id, 'album')} />
-              <ReviewDiff field="albumArtists" label="专辑艺术家" current={active.track.albumArtists.join(' / ') || '空'} next={active.candidate.albumArtists.value.join(' / ') || '来源未提供'} source={active.candidate.providerName} checked={active.fields.includes('albumArtists')} onToggle={() => toggleField(active.track.id, 'albumArtists')} />
+              <ReviewDiff field="albumArtists" label="专辑艺术家" current={active.track.albumArtists.join(' / ') || '空'} next={active.candidate.albumArtists.value.join(' / ') || '来源未提供'} source={active.candidate.providerName} checked={active.fields.includes('albumArtists')} onToggle={() => toggleField(active.track.id, 'albumArtists')} warning={suspiciousAlbumArtist(active.candidate) ? '候选值与专辑名相同、但与曲目艺术家不同，已默认取消采用' : undefined} />
               <ReviewDiff
                 field="trackNumber"
                 label="音轨"
@@ -785,6 +794,7 @@ function ReviewDiff({
   changed = false,
   inspectLabel,
   onInspect,
+  warning,
 }: {
   field: string;
   checked: boolean;
@@ -796,6 +806,7 @@ function ReviewDiff({
   changed?: boolean;
   inspectLabel?: string;
   onInspect?: () => void;
+  warning?: string;
 }) {
   return (
     <div className={cn('review-diff-row', !checked && 'is-disabled')} data-field={field}>
@@ -806,6 +817,7 @@ function ReviewDiff({
       <span>{current}</span>
       <span className={cn(changed && 'is-changed')}>
         {next}
+        {warning && <small className="review-diff-warning">{warning}</small>}
         {onInspect && <button type="button" className="review-diff-inspect" onClick={onInspect}>{inspectLabel || '查看详情'}</button>}
       </span>
       <em>{source}</em>

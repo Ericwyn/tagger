@@ -345,7 +345,7 @@ describe('real API client', () => {
       acoustidId: 'acoustid-id',
       acoustidFingerprint: 'fingerprint',
       trackNumber: 1,
-    }, {providerId: 'musicbrainz'})).resolves.toEqual(expect.objectContaining({track: updated}));
+    }, {providerId: 'musicbrainz'})).resolves.toEqual(expect.objectContaining({track: normalizeTrack(updated)}));
 
     const init = fetcher.mock.calls[0][1] as RequestInit;
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/tracks/trk-1/tags');

@@ -3,9 +3,50 @@ import userEvent from '@testing-library/user-event';
 import {describe, expect, it, vi} from 'vitest';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {seedTracks} from '@/mock/data';
-import type {TrackPatch} from '@/types';
+import type {Track, TrackPatch} from '@/types';
 
 describe('TrackInspector', () => {
+  it('keeps path hints out of real fields until the user explicitly applies one', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const hintedTrack: Track = {
+      ...seedTracks[0],
+      title: '', artists: [], album: '', albumArtists: [],
+      health: 'tag-compatibility',
+      tagIssues: ['missing-embedded-title', 'missing-embedded-artist'],
+      tagHints: [
+        {title: '宮崎歩', artists: ['brave heart'], albumArtists: ['brave heart'], source: 'filename', pattern: 'title-artist'},
+        {title: 'brave heart', artists: ['宮崎歩'], albumArtists: ['宮崎歩'], source: 'filename', pattern: 'artist-title'},
+      ],
+    };
+    render(
+      <TrackInspector
+        track={hintedTrack}
+        saving={false}
+        mobileOpen
+        onCloseMobile={() => {}}
+        onSearch={() => {}}
+        onSave={onSave}
+        onArtworkChange={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByLabelText('标题')).toHaveValue('');
+    expect(screen.getByLabelText(/^艺术家/)).toHaveValue('');
+    expect(screen.getByRole('button', {name: '保存修改'})).toBeDisabled();
+
+    await user.click(screen.getByRole('button', {name: /brave heart · 宮崎歩.*艺术家 - 标题/}));
+    expect(screen.getByLabelText('标题')).toHaveValue('brave heart');
+    expect(screen.getByLabelText(/^艺术家/)).toHaveValue('宮崎歩');
+    expect(screen.getByLabelText('专辑艺术家')).toHaveValue('宮崎歩');
+
+    await user.click(screen.getByRole('button', {name: '保存修改'}));
+    await user.click(screen.getByRole('button', {name: '确认写入'}));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'brave heart', artists: ['宮崎歩'], albumArtists: ['宮崎歩'],
+    }), {writeTag: true});
+  });
+
   it('keeps the historical snapshot notice compact and dismissible', async () => {
     const user = userEvent.setup();
     const onDiscard = vi.fn();
