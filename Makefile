@@ -2,7 +2,7 @@
 	test test-go test-frontend test-integration lint clean
 
 BINARY ?= tagger
-VERSION ?= dev
+VERSION ?= 1.0.1
 MUSIC_DIR ?=
 
 all: build

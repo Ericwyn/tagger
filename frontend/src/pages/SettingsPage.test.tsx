@@ -69,7 +69,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.purgeMissing.mockResolvedValue({removed: 2});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
-    api.getSystem.mockResolvedValue({version: 'dev', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
+    api.getSystem.mockResolvedValue({version: '1.0.1', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
     api.clearRuntimeCache.mockResolvedValue({databaseBytes: 1024 * 1024, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 1024 * 1024});
     api.updateSystemSettings.mockResolvedValue({historyRetention: 20, writeHistory: true});
     api.testProvider.mockResolvedValue({
@@ -249,6 +249,9 @@ describe('SettingsPage provider diagnostics', () => {
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
 
     await user.click(screen.getByRole('button', {name: /系统/}));
+    expect(await screen.findByText('1.0.1')).toBeInTheDocument();
+    expect(screen.getByRole('link', {name: /github\.com\/Ericwyn\/tagger/i})).toHaveAttribute('href', 'https://github.com/Ericwyn/tagger');
+    expect(screen.getByRole('link', {name: /github\.com\/Ericwyn\/tagger/i})).toHaveAttribute('target', '_blank');
     expect(await screen.findByText('127.0.0.1:8090')).toBeInTheDocument();
     expect(screen.queryByDisplayValue('127.0.0.1:8090')).not.toBeInTheDocument();
     const retention = screen.getByRole('combobox', {name: '历史保留次数'});

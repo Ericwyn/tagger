@@ -301,3 +301,7 @@ make lint
 本项目使用 `go.senan.xyz/taglib` v0.14.0，并将其基于 TagLib v2.1.1 构建的 `taglib.wasm` 嵌入最终 Go 可执行文件。该组件按 GNU LGPL v2.1 授权，不因本项目的 MIT License 而重新授权；分发包含该组件的源码或二进制时，请保留其上游声明并履行 LGPL-2.1 的适用义务。详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
 
 其他 Go 和 npm 依赖也继续按各自上游许可证授权。音乐文件、歌词、封面、元数据及外部数据源返回内容的版权和服务条款不因本项目许可证而改变，使用时请自行获得必要授权并遵守相应条款。
+
+## 友情链接
+
+- [LINUX DO](https://linux.do/)

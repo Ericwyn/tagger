@@ -5,7 +5,9 @@ import {
   ChevronRight,
   CircleAlert,
   Database,
+  ExternalLink,
   FolderCog,
+  Github,
   ImagePlus,
   KeyRound,
   LoaderCircle,
@@ -56,6 +58,8 @@ const defaultTestQuery: CandidateSearchQuery = {
 
 const historyRetentionKey = 'tagger-history-retention';
 const providerTestQueryKey = 'tagger-provider-test-query-v1';
+const taggerRepositoryURL = 'https://github.com/Ericwyn/tagger';
+const taggerRepositoryLabel = 'github.com/Ericwyn/tagger';
 
 function readProviderTestQuery(): CandidateSearchQuery {
   try {
@@ -744,6 +748,20 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <>
               <div className="settings-content-head"><div><h2>系统与安全</h2><p>单进程运行参数和文件修改保护。</p></div></div>
               <div className="system-settings">
+                <section className="system-info-section">
+                  <div className="system-icon"><Github size={19} /></div>
+                  <div><strong>系统信息</strong><p>查看当前运行版本，并前往 Tagger 的开源项目主页。</p></div>
+                  <div className="system-info-panel">
+                    <div className="system-info-item">
+                      <span>当前版本</span>
+                      <code>{systemInfo?.version || '正在读取…'}</code>
+                    </div>
+                    <a className="system-repository-link" href={taggerRepositoryURL} target="_blank" rel="noreferrer" title={taggerRepositoryURL}>
+                      <span><small>GitHub</small><code>{taggerRepositoryLabel}</code></span>
+                      <ExternalLink size={15} aria-hidden="true" />
+                    </a>
+                  </div>
+                </section>
                 <section className="theme-settings-row">
                   <div className="system-icon"><Palette size={19} /></div>
                   <div><strong>主题与字体</strong><p>配色和文字排版只保存在当前浏览器，不影响音乐文件。</p></div>
