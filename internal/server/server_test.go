@@ -190,6 +190,26 @@ func TestTrackPaginationAndResolveAPI(t *testing.T) {
 	}
 }
 
+func TestLibraryReconcileExposesDraftWithoutReadingTags(t *testing.T) {
+	s := newTestServer(t)
+	album := filepath.Join(s.library.Root(), "New Artist", "New Album")
+	if err := os.MkdirAll(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(album, "Draft.flac"), []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"folderPath":"New Artist"}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/libraries/"+s.library.Library().ID+"/reconcile", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"changed":true`) || !containsJSON(response.Body.Bytes(), `"New Artist/New Album/Draft.flac"`) {
+		t.Fatalf("reconcile=%d %s", response.Code, response.Body.String())
+	}
+	tracks := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks?q=Draft", nil)
+	if tracks.Code != 200 || !containsJSON(tracks.Body.Bytes(), `"syncState":"draft"`) || !containsJSON(tracks.Body.Bytes(), `"total":1`) {
+		t.Fatalf("draft tracks=%d %s", tracks.Code, tracks.Body.String())
+	}
+}
+
 func TestLibraryDirectoryProbeAPI(t *testing.T) {
 	s := newTestServer(t)
 	root := t.TempDir()

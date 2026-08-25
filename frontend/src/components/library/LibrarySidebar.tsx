@@ -46,7 +46,7 @@ function folderTree(folders: FolderNode[]): FolderBranch[] {
   const roots: FolderBranch[] = [];
   for (const folder of folders) {
     if (folder.id === 'folder-root') continue;
-    const parts = folder.name.split(' · ').map((part) => part.trim()).filter(Boolean);
+    const parts = (folder.path ?? folder.name.split(' · ').join('/')).split('/').map((part) => part.trim()).filter(Boolean);
     if (parts.length === 0) continue;
     let siblings = roots;
     let key = '';
@@ -54,7 +54,7 @@ function folderTree(folders: FolderNode[]): FolderBranch[] {
       key = key ? `${key}/${part}` : part;
       let branch = siblings.find((item) => item.key === key);
       if (!branch) {
-        branch = {key, path: parts.slice(0, index + 1).join(' · '), name: part, count: 0, children: []};
+        branch = {key, path: parts.slice(0, index + 1).join('/'), name: part, count: 0, children: []};
         siblings.push(branch);
       }
       branch.count += folder.count;
@@ -152,6 +152,11 @@ export function LibrarySidebar({
   onSelectFolderPath,
 }: LibrarySidebarProps) {
   const folders = folderTree(library.folders);
+  const watchLabel = library.watchState === 'polling'
+    ? '目录轮询'
+    : library.watchState === 'degraded'
+	  ? library.watchMode === 'events' ? '事件监听异常' : '监听降级 · 轮询兜底'
+      : '文件实时监听';
   const [libraryMenuOpen, setLibraryMenuOpen] = useState(false);
   return (
     <aside className={cn('library-sidebar', mobileOpen && 'is-mobile-open')}>
@@ -183,7 +188,7 @@ export function LibrarySidebar({
           </div>
         )}
         <div className="scan-line">
-          <span><i /> 已同步 · {library.lastScanLabel}</span>
+          <span><i /> {watchLabel} · {library.lastScanLabel}</span>
           <button title="重新扫描曲库" disabled={scanning} onClick={onRescan}>{<RefreshCw size={14} className={scanning ? 'spin' : undefined} />}</button>
         </div>
       </section>

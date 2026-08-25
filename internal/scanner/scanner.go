@@ -48,6 +48,19 @@ type Result struct {
 	Report  domain.ScanReport
 }
 
+// DiscoveredFile is the cheap filesystem projection used by live browsing.
+// It deliberately contains no embedded tags or artwork information.
+type DiscoveredFile struct {
+	RelativePath    string
+	FileName        string
+	FolderID        string
+	Format          domain.TrackFormat
+	SizeBytes       int64
+	ModifiedAt      string
+	Writable        bool
+	FileFingerprint domain.FileFingerprint
+}
+
 type Scanner struct {
 	engine tags.Engine
 	opts   Options
@@ -92,6 +105,12 @@ func (s *Scanner) Scan(ctx context.Context) (Result, error) {
 	return s.scan(ctx, ScanOptions{Mode: ScanFull})
 }
 
+// ScanFull forces metadata extraction for every present file while retaining
+// missing records from the previous snapshot for explicit review and purge.
+func (s *Scanner) ScanFull(ctx context.Context, existing []domain.Track) (Result, error) {
+	return s.scan(ctx, ScanOptions{Mode: ScanFull, Existing: existing})
+}
+
 // ScanIncremental walks only the requested folders (or the whole root when
 // no targets are provided), compares cheap filesystem fingerprints with the
 // persisted tracks, and reads tags only for new or changed files.
@@ -125,6 +144,7 @@ func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error)
 		failed bool
 		path   string
 		added  bool
+		reused bool
 	}
 	jobs := make(chan string)
 	results := make(chan extraction, len(paths))
@@ -138,8 +158,8 @@ func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error)
 				relativePath, _ := filepath.Rel(s.opts.Root, path)
 				relativePath = filepath.ToSlash(relativePath)
 				prior, found := previous[relativePath]
-				if options.Mode != ScanFull && found && !prior.Missing && prior.FileFingerprint == fingerprints[path] {
-					results <- extraction{track: prior, path: path}
+				if options.Mode != ScanFull && found && !prior.Missing && prior.SyncState == domain.SyncIndexed && prior.FileFingerprint == fingerprints[path] {
+					results <- extraction{track: prior, path: path, reused: true}
 					continue
 				}
 				track, readErr := s.extract(ctx, path)
@@ -170,7 +190,7 @@ func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error)
 		if result.failed {
 			failed++
 			changed++
-		} else if options.Mode != ScanFull && result.track.FileFingerprint == fingerprints[result.path] && previous[result.track.RelativePath].ID != "" {
+		} else if result.reused {
 			unchanged++
 		} else {
 			changed++
@@ -207,6 +227,12 @@ func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error)
 
 	completed := s.opts.Now()
 	folders := buildFolders(tracks)
+	presentTracks := 0
+	for _, track := range tracks {
+		if !track.Missing {
+			presentTracks++
+		}
+	}
 	rootInfo, _ := os.Stat(s.opts.Root)
 	rootWritable := rootInfo != nil && rootInfo.Mode().Perm()&0o222 != 0
 	return Result{
@@ -215,7 +241,7 @@ func (s *Scanner) scan(ctx context.Context, options ScanOptions) (Result, error)
 			Name:          s.opts.LibraryName,
 			RootLabel:     filepath.Base(s.opts.Root),
 			RootPath:      s.opts.Root,
-			TrackCount:    len(tracks),
+			TrackCount:    presentTracks,
 			FolderCount:   len(folders),
 			Writable:      rootWritable,
 			LastScanLabel: completed.Format("2006-01-02 15:04"),
@@ -280,7 +306,58 @@ func (s *Scanner) ScanTrack(ctx context.Context, relativePath string) (domain.Tr
 	return s.extract(ctx, absolutePath)
 }
 
+// DiscoverFiles enumerates supported audio files without invoking the tag
+// engine. maxDepth is relative to each target directory: 0 lists direct files,
+// 1 also lists files in direct child directories, and -1 walks recursively.
+func (s *Scanner) DiscoverFiles(ctx context.Context, targets []string, maxDepth int) ([]DiscoveredFile, []string, error) {
+	paths, fingerprints, warnings, err := s.discoverDepth(ctx, maxDepth, targets...)
+	if err != nil {
+		return nil, warnings, err
+	}
+	files := make([]DiscoveredFile, 0, len(paths))
+	for _, path := range paths {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			warnings = append(warnings, statErr.Error())
+			continue
+		}
+		relativePath, _ := filepath.Rel(s.opts.Root, path)
+		relativePath = filepath.ToSlash(relativePath)
+		files = append(files, DiscoveredFile{
+			RelativePath:    relativePath,
+			FileName:        filepath.Base(path),
+			FolderID:        folderID(filepath.ToSlash(filepath.Dir(relativePath))),
+			Format:          formatFromPath(path),
+			SizeBytes:       info.Size(),
+			ModifiedAt:      info.ModTime().Format("2006-01-02 15:04"),
+			Writable:        info.Mode().Perm()&0o222 != 0,
+			FileFingerprint: fingerprints[path],
+		})
+	}
+	return files, warnings, nil
+}
+
+// DraftTrack creates the minimal row shown while metadata extraction is queued.
+func (s *Scanner) DraftTrack(file DiscoveredFile) domain.Track {
+	track := fallbackTrack(file.RelativePath, file.Format)
+	track.ID = "trk-" + shortHash(file.RelativePath)
+	track.FileName = file.FileName
+	track.RelativePath = file.RelativePath
+	track.FolderID = file.FolderID
+	track.SizeBytes = file.SizeBytes
+	track.ModifiedAt = file.ModifiedAt
+	track.Writable = file.Writable
+	track.FileFingerprint = file.FileFingerprint
+	track.CoverTone = coverTone(track.ID)
+	track.SyncState = domain.SyncDraft
+	return track
+}
+
 func (s *Scanner) discover(ctx context.Context, targets ...string) ([]string, map[string]domain.FileFingerprint, []string, error) {
+	return s.discoverDepth(ctx, -1, targets...)
+}
+
+func (s *Scanner) discoverDepth(ctx context.Context, maxDepth int, targets ...string) ([]string, map[string]domain.FileFingerprint, []string, error) {
 	paths := make([]string, 0, 256)
 	fingerprints := make(map[string]domain.FileFingerprint)
 	warnings := make([]string, 0)
@@ -343,10 +420,19 @@ func (s *Scanner) discover(ctx context.Context, targets ...string) ([]string, ma
 				}
 				return nil
 			}
-			if path != s.opts.Root && entry.IsDir() && isIgnoredDirectory(entry.Name()) {
-				return fs.SkipDir
+			if entry.IsDir() {
+				if path != s.opts.Root && isIgnoredDirectory(entry.Name()) {
+					return fs.SkipDir
+				}
+				if maxDepth >= 0 && path != walkRoot {
+					relativeDirectory, relErr := filepath.Rel(walkRoot, path)
+					if relErr == nil && pathDepth(relativeDirectory) > maxDepth {
+						return fs.SkipDir
+					}
+				}
+				return nil
 			}
-			if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() {
+			if entry.Type()&os.ModeSymlink != 0 {
 				return nil
 			}
 			// Safe writers use hidden same-directory files such as
@@ -369,6 +455,14 @@ func (s *Scanner) discover(ctx context.Context, targets ...string) ([]string, ma
 	return paths, fingerprints, warnings, nil
 }
 
+func pathDepth(path string) int {
+	path = filepath.Clean(path)
+	if path == "." || path == "" {
+		return 0
+	}
+	return len(strings.Split(filepath.ToSlash(path), "/"))
+}
+
 func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error) {
 	info, statErr := os.Stat(path)
 	relativePath, _ := filepath.Rel(s.opts.Root, path)
@@ -389,6 +483,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	if statErr != nil {
 		track.Health = domain.HealthParseError
 		track.ParseError = statErr.Error()
+		track.SyncState = domain.SyncError
 		track.Revision = FileRevision(relativePath, info, nil)
 		return track, statErr
 	}
@@ -397,6 +492,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	if readErr != nil {
 		track.Health = domain.HealthParseError
 		track.ParseError = readErr.Error()
+		track.SyncState = domain.SyncError
 		track.Revision = FileRevision(relativePath, info, nil)
 		return track, readErr
 	}
@@ -419,6 +515,7 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	track.LyricsSidecar = sidecarInfo
 	track.DurationSeconds = snapshotDurationSeconds(snapshot)
 	track.Health = healthFor(track)
+	track.SyncState = domain.SyncIndexed
 	track.Revision = FileRevision(relativePath, info, snapshot.Raw)
 	return track, nil
 }
@@ -496,6 +593,7 @@ func fallbackTrack(relativePath string, format domain.TrackFormat) domain.Track 
 		Lyricists:            []string{},
 		MusicBrainzArtistIDs: []string{},
 		Health:               domain.HealthNeedsReview,
+		SyncState:            domain.SyncDraft,
 		Properties: domain.TrackProperties{
 			Container: strings.ToUpper(string(format)),
 			Codec:     strings.ToUpper(string(format)),
@@ -524,10 +622,14 @@ func buildFolders(tracks []domain.Track) []domain.FolderNode {
 	type folder struct {
 		id    string
 		name  string
+		path  string
 		count int
 	}
 	folders := make(map[string]*folder)
 	for _, track := range tracks {
+		if track.Missing {
+			continue
+		}
 		directory := filepath.ToSlash(filepath.Dir(track.RelativePath))
 		name := "根目录单曲"
 		if directory != "." {
@@ -535,14 +637,18 @@ func buildFolders(tracks []domain.Track) []domain.FolderNode {
 		}
 		entry := folders[track.FolderID]
 		if entry == nil {
-			entry = &folder{id: track.FolderID, name: name}
+			path := directory
+			if path == "." {
+				path = ""
+			}
+			entry = &folder{id: track.FolderID, name: name, path: path}
 			folders[track.FolderID] = entry
 		}
 		entry.count++
 	}
 	result := make([]domain.FolderNode, 0, len(folders))
 	for _, entry := range folders {
-		result = append(result, domain.FolderNode{ID: entry.id, Name: entry.name, Count: entry.count})
+		result = append(result, domain.FolderNode{ID: entry.id, Name: entry.name, Path: entry.path, Count: entry.count})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].ID == "folder-root" {

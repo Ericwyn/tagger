@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ericwyn/tagger/internal/domain"
 )
 
 type Config struct {
@@ -16,6 +18,7 @@ type Config struct {
 	LibraryName       string
 	AuthToken         string
 	ScanWorkers       int
+	WatchMode         domain.WatchMode
 	WatcherWait       time.Duration
 	ReconcileInterval time.Duration
 }
@@ -54,6 +57,7 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		LibraryName:       strings.TrimSpace(getenv("TAGGER_LIBRARY_NAME")),
 		AuthToken:         strings.TrimSpace(getenv("TAGGER_AUTH_TOKEN")),
 		ScanWorkers:       workers,
+		WatchMode:         domain.WatchMode(valueOr(getenv("TAGGER_WATCH_MODE"), string(domain.WatchModeAuto))),
 		WatcherWait:       watcherWait,
 		ReconcileInterval: reconcileInterval,
 	}
@@ -64,6 +68,7 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	flags.StringVar(&cfg.LibraryName, "library-name", cfg.LibraryName, "display name for the music library")
 	flags.StringVar(&cfg.AuthToken, "auth-token", cfg.AuthToken, "optional bearer token for API access")
 	flags.IntVar(&cfg.ScanWorkers, "scan-workers", cfg.ScanWorkers, "parallel metadata readers (1-32)")
+	flags.Var((*watchModeValue)(&cfg.WatchMode), "watch-mode", "filesystem update mode: auto, events, or poll")
 	flags.DurationVar(&cfg.WatcherWait, "watcher-wait", cfg.WatcherWait, "debounce delay for filesystem changes")
 	flags.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "optional periodic incremental reconciliation (0 disables)")
 	if err := flags.Parse(args); err != nil {
@@ -85,6 +90,11 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	if cfg.ScanWorkers < 1 || cfg.ScanWorkers > 32 {
 		return Config{}, fmt.Errorf("scan workers must be between 1 and 32")
 	}
+	switch cfg.WatchMode {
+	case domain.WatchModeAuto, domain.WatchModeEvents, domain.WatchModePoll:
+	default:
+		return Config{}, fmt.Errorf("watch mode must be auto, events, or poll")
+	}
 	if cfg.WatcherWait < 0 || cfg.WatcherWait > 10*time.Minute {
 		return Config{}, fmt.Errorf("watcher wait must be between 0 and 10 minutes")
 	}
@@ -92,6 +102,15 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("reconcile interval must be between 0 and 720 hours")
 	}
 	return cfg, nil
+}
+
+type watchModeValue domain.WatchMode
+
+func (value *watchModeValue) String() string { return string(*value) }
+
+func (value *watchModeValue) Set(raw string) error {
+	*value = watchModeValue(strings.TrimSpace(raw))
+	return nil
 }
 
 func valueOr(value, fallback string) string {

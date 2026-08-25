@@ -1,5 +1,7 @@
 import type {
 	LibrarySummary,
+	LibraryEvent,
+	LibraryReconcileResult,
 	DirectoryProbe,
 	Job,
   MatchCandidate,
@@ -148,20 +150,25 @@ export function normalizeTrack(track: Track): Track {
     musicbrainzArtistIds: stringArray(raw.musicbrainzArtistIds),
     acoustidId: stringValue(raw.acoustidId),
     acoustidFingerprint: stringValue(raw.acoustidFingerprint),
+    ...(raw.syncState === 'indexed' || raw.syncState === 'draft' || raw.syncState === 'error' ? {syncState: raw.syncState} : {}),
   };
 }
 
 export function normalizeLibrary(library: LibrarySummary): LibrarySummary {
   const raw = library as LibrarySummary & Record<string, unknown>;
-  const folders = Array.isArray(raw.folders) ? raw.folders.filter((item): item is LibrarySummary['folders'][number] => Boolean(item && typeof item === 'object')) : [];
+  const folders = Array.isArray(raw.folders)
+    ? raw.folders.filter((item): item is LibrarySummary['folders'][number] => Boolean(item && typeof item === 'object'))
+    : [];
   return {
     ...library,
     name: stringValue(raw.name) || stringValue(raw.rootLabel) || '未命名曲库',
     rootLabel: stringValue(raw.rootLabel),
-    rootPath: stringValue(raw.rootPath) || undefined,
+    ...(stringValue(raw.rootPath) ? {rootPath: stringValue(raw.rootPath)} : {}),
     trackCount: typeof raw.trackCount === 'number' ? raw.trackCount : 0,
     folderCount: typeof raw.folderCount === 'number' ? raw.folderCount : folders.length,
     folders,
+    ...(raw.watchMode === 'auto' || raw.watchMode === 'events' || raw.watchMode === 'poll' ? {watchMode: raw.watchMode} : {}),
+    ...(raw.watchState === 'healthy' || raw.watchState === 'degraded' || raw.watchState === 'polling' ? {watchState: raw.watchState} : {}),
   };
 }
 
@@ -318,12 +325,35 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  return request<Track>(`/api/v1/tracks/${encodeURIComponent(trackId)}/scan`, {method: 'POST'}).then(normalizeTrack);
 	},
 
-	async rescanLibrary(libraryId: string, mode: ScanMode = 'quick', targets: string[] = []): Promise<Job> {
+		async rescanLibrary(libraryId: string, mode: ScanMode = 'quick', targets: string[] = []): Promise<Job> {
 	  return request<Job>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/scans`, {
 	    method: 'POST', headers: {'Content-Type': 'application/json'},
 	    body: JSON.stringify({mode, targets}),
 	  });
-	},
+		},
+
+		reconcileLibrary(libraryId: string, folderPath = ''): Promise<LibraryReconcileResult> {
+		  return request<LibraryReconcileResult>(`/api/v1/libraries/${encodeURIComponent(libraryId)}/reconcile`, {
+			method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({folderPath}),
+		  });
+		},
+
+		subscribeLibraryEvents(libraryId: string, onEvent: (event: LibraryEvent) => void): () => void {
+		  if (typeof EventSource === 'undefined') return () => undefined;
+		  const source = new EventSource(`/api/v1/libraries/${encodeURIComponent(libraryId)}/events`);
+		  const handler = (event: Event) => {
+			try {
+			  onEvent(JSON.parse((event as MessageEvent<string>).data) as LibraryEvent);
+			} catch {
+			  // REST snapshots remain authoritative after malformed or lost events.
+			}
+		  };
+		  source.addEventListener('library', handler);
+		  return () => {
+			source.removeEventListener('library', handler);
+			source.close();
+		  };
+		},
 
 	async deleteLibrary(libraryId: string): Promise<{id: string; deleted: boolean}> {
 	  return request<{id: string; deleted: boolean}>(`/api/v1/libraries/${encodeURIComponent(libraryId)}`, {method: 'DELETE'});

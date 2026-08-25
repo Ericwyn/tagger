@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ericwyn/tagger/internal/domain"
 )
 
 func TestParseUsesEnvironmentAndFlags(t *testing.T) {
@@ -27,6 +29,9 @@ func TestParseUsesEnvironmentAndFlags(t *testing.T) {
 	}
 	if cfg.ReconcileInterval != 0 {
 		t.Fatalf("reconcile interval = %s, want disabled by default", cfg.ReconcileInterval)
+	}
+	if cfg.WatchMode != domain.WatchModeAuto {
+		t.Fatalf("watch mode=%q, want auto", cfg.WatchMode)
 	}
 }
 
@@ -100,5 +105,16 @@ func TestParseReconcileInterval(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "reconcile interval") {
 		t.Fatalf("out of range reconcile interval error=%v", err)
+	}
+}
+
+func TestParseWatchMode(t *testing.T) {
+	cfg, err := Parse([]string{"--watch-mode", "poll"}, nil)
+	if err != nil || cfg.WatchMode != domain.WatchModePoll {
+		t.Fatalf("config=%#v err=%v", cfg, err)
+	}
+	_, err = Parse([]string{"--watch-mode", "unknown"}, nil)
+	if err == nil || !strings.Contains(err.Error(), "watch mode") {
+		t.Fatalf("invalid watch mode error=%v", err)
 	}
 }

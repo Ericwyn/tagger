@@ -193,6 +193,7 @@ TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' \
 | `--library-name` | `TAGGER_LIBRARY_NAME` | 空 | 初始曲库显示名称 |
 | `--auth-token` | `TAGGER_AUTH_TOKEN` | 空 | 可选单用户访问令牌 |
 | `--scan-workers` | `TAGGER_SCAN_WORKERS` | `min(CPU, 8)` | 并行扫描 worker，范围 `1–32` |
+| `--watch-mode` | `TAGGER_WATCH_MODE` | `auto` | 文件更新策略：`auto` 优先 fsnotify，`events` 强制事件模式，`poll` 使用当前目录轮询 |
 | `--watcher-wait` | `TAGGER_WATCHER_WAIT` | `5s` | 文件变化事件合并等待时间，范围 `0–10m` |
 | `--reconcile-interval` | `TAGGER_RECONCILE_INTERVAL` | `0`（关闭） | 低频增量对账间隔，范围 `0–720h` |
 

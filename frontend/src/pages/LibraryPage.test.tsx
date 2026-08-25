@@ -16,7 +16,7 @@ vi.mock('@/api', async () => ({
   ...api,
 }));
 
-import {LibraryPage, libraryBrowseStateKey} from '@/pages/LibraryPage';
+import {LibraryPage, libraryBrowseStateKey, shouldPollLibrary} from '@/pages/LibraryPage';
 import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 const firstLibrary: LibrarySummary = {
@@ -76,6 +76,13 @@ describe('LibraryPage active library boundary', () => {
     installTrackPageSource([firstTrack]);
     api.switchLibrary.mockResolvedValue({id: 'job-switch', kind: 'scan', state: 'succeeded', title: '切换', detail: '完成', processed: 1, total: 1, succeeded: 1, failed: 0, startedAt: '刚刚'});
   });
+
+	  it('polls only for explicit or automatic watcher fallback', () => {
+		expect(shouldPollLibrary({watchMode: 'auto', watchState: 'healthy'})).toBe(false);
+		expect(shouldPollLibrary({watchMode: 'auto', watchState: 'degraded'})).toBe(true);
+		expect(shouldPollLibrary({watchMode: 'poll', watchState: 'polling'})).toBe(true);
+		expect(shouldPollLibrary({watchMode: 'events', watchState: 'degraded'})).toBe(false);
+	  });
 
   it('resets the old folder selection after switching libraries', async () => {
     const user = userEvent.setup();
@@ -184,4 +191,17 @@ describe('LibraryPage active library boundary', () => {
     await user.click(screen.getByRole('button', {name: '关闭详情'}));
     expect(inspector).not.toHaveClass('is-mobile-open');
   });
+
+	  it('shows draft files immediately while keeping metadata operations locked', async () => {
+		const user = userEvent.setup();
+		const draftTrack: Track = {...firstTrack, syncState: 'draft'};
+		installTrackPageSource([draftTrack]);
+		render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+
+		expect(await screen.findByText(/正在读取标签、封面和技术信息/)).toBeInTheDocument();
+		expect(screen.getByRole('button', {name: '索引完成后可试听'})).toBeDisabled();
+		await user.click(screen.getByRole('button', {name: '全选当前结果集'}));
+		expect(screen.getByRole('button', {name: '批量编辑'})).toBeDisabled();
+		expect(screen.getByRole('button', {name: '抓取元数据'})).toBeDisabled();
+	  });
 });

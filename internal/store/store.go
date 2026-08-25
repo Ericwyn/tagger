@@ -161,7 +161,15 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 		return fmt.Errorf("prepare track upsert: %w", err)
 	}
 	defer statement.Close()
+	fileStatement, err := prepareLibraryFileUpsert(ctx, tx)
+	if err != nil {
+		return err
+	}
+	defer fileStatement.Close()
 	for _, track := range result.Tracks {
+		if track.SyncState == "" {
+			track.SyncState = domain.SyncIndexed
+		}
 		payload, err := json.Marshal(track)
 		if err != nil {
 			return fmt.Errorf("encode track %s: %w", track.ID, err)
@@ -175,9 +183,15 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 			boolToInt(track.Missing), track.MissingSince); err != nil {
 			return fmt.Errorf("upsert track %s: %w", track.ID, err)
 		}
+		if err := upsertLibraryFile(fileStatement, result.Library.ID, track, now); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM tracks WHERE library_id = ? AND scan_token <> ?`, result.Library.ID, token); err != nil {
 		return fmt.Errorf("remove stale tracks: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM library_files WHERE library_id=? AND relative_path NOT IN (SELECT relative_path FROM tracks WHERE library_id=?)`, result.Library.ID, result.Library.ID); err != nil {
+		return fmt.Errorf("remove stale library files: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit scan: %w", err)
@@ -240,7 +254,15 @@ func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.
 		return fmt.Errorf("prepare track delta upsert: %w", err)
 	}
 	defer statement.Close()
+	fileStatement, err := prepareLibraryFileUpsert(ctx, tx)
+	if err != nil {
+		return err
+	}
+	defer fileStatement.Close()
 	for _, track := range tracks {
+		if track.SyncState == "" {
+			track.SyncState = domain.SyncIndexed
+		}
 		payload, marshalErr := json.Marshal(track)
 		if marshalErr != nil {
 			return fmt.Errorf("encode track %s: %w", track.ID, marshalErr)
@@ -254,9 +276,49 @@ func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.
 			boolToInt(track.Missing), track.MissingSince); execErr != nil {
 			return fmt.Errorf("upsert track delta %s: %w", track.ID, execErr)
 		}
+		if execErr := upsertLibraryFile(fileStatement, result.Library.ID, track, now); execErr != nil {
+			return execErr
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit track delta: %w", err)
+	}
+	return nil
+}
+
+func prepareLibraryFileUpsert(ctx context.Context, tx *sql.Tx) (*sql.Stmt, error) {
+	statement, err := tx.PrepareContext(ctx, `
+		INSERT INTO library_files(
+			library_id, relative_path, track_id, folder_id, format,
+			file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns,
+			writable, present, sync_state, parse_error, missing_since, updated_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(library_id, relative_path) DO UPDATE SET
+			track_id=excluded.track_id, folder_id=excluded.folder_id, format=excluded.format,
+			file_size=excluded.file_size, file_mtime_ns=excluded.file_mtime_ns,
+			sidecar_size=excluded.sidecar_size, sidecar_mtime_ns=excluded.sidecar_mtime_ns,
+			writable=excluded.writable, present=excluded.present, sync_state=excluded.sync_state,
+			parse_error=excluded.parse_error, missing_since=excluded.missing_since,
+			updated_at=excluded.updated_at`)
+	if err != nil {
+		return nil, fmt.Errorf("prepare library file upsert: %w", err)
+	}
+	return statement, nil
+}
+
+func upsertLibraryFile(statement *sql.Stmt, libraryID string, track domain.Track, now time.Time) error {
+	state := track.SyncState
+	if state == "" {
+		state = domain.SyncIndexed
+	}
+	if _, err := statement.Exec(
+		libraryID, track.RelativePath, track.ID, track.FolderID, track.Format,
+		track.FileFingerprint.SizeBytes, track.FileFingerprint.ModifiedUnixNano,
+		track.FileFingerprint.SidecarSize, track.FileFingerprint.SidecarUnixNano,
+		boolToInt(track.Writable), boolToInt(!track.Missing), state, track.ParseError,
+		track.MissingSince, now.Format(time.RFC3339Nano),
+	); err != nil {
+		return fmt.Errorf("upsert library file %s: %w", track.RelativePath, err)
 	}
 	return nil
 }
@@ -279,7 +341,16 @@ func (s *Store) LoadScan(ctx context.Context, root string) (scanner.Result, bool
 	if err := json.Unmarshal(reportJSON, &result.Report); err != nil {
 		return scanner.Result{}, false, fmt.Errorf("decode scan report: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload_json, file_size, file_mtime_ns, sidecar_size, sidecar_mtime_ns, missing, missing_since FROM tracks WHERE library_id = ? ORDER BY relative_path`, libraryID)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT t.payload_json,
+		       COALESCE(f.file_size, t.file_size), COALESCE(f.file_mtime_ns, t.file_mtime_ns),
+		       COALESCE(f.sidecar_size, t.sidecar_size), COALESCE(f.sidecar_mtime_ns, t.sidecar_mtime_ns),
+		       CASE WHEN COALESCE(f.present, CASE WHEN t.missing=0 THEN 1 ELSE 0 END)=0 THEN 1 ELSE 0 END,
+		       COALESCE(f.missing_since, t.missing_since), COALESCE(f.sync_state, 'indexed'),
+		       COALESCE(f.parse_error, ''), f.writable
+		FROM tracks t
+		LEFT JOIN library_files f ON f.library_id=t.library_id AND f.relative_path=t.relative_path
+		WHERE t.library_id = ? ORDER BY t.relative_path`, libraryID)
 	if err != nil {
 		return scanner.Result{}, false, fmt.Errorf("load tracks: %w", err)
 	}
@@ -289,8 +360,9 @@ func (s *Store) LoadScan(ctx context.Context, root string) (scanner.Result, bool
 		var payload []byte
 		var size, mtime, sidecarSize, sidecarMtime int64
 		var missing int
-		var missingSince string
-		if err := rows.Scan(&payload, &size, &mtime, &sidecarSize, &sidecarMtime, &missing, &missingSince); err != nil {
+		var missingSince, syncState, parseError string
+		var writable sql.NullInt64
+		if err := rows.Scan(&payload, &size, &mtime, &sidecarSize, &sidecarMtime, &missing, &missingSince, &syncState, &parseError, &writable); err != nil {
 			return scanner.Result{}, false, err
 		}
 		var track domain.Track
@@ -300,6 +372,11 @@ func (s *Store) LoadScan(ctx context.Context, root string) (scanner.Result, bool
 		track.FileFingerprint = domain.FileFingerprint{SizeBytes: size, ModifiedUnixNano: mtime, SidecarSize: sidecarSize, SidecarUnixNano: sidecarMtime}
 		track.Missing = missing != 0
 		track.MissingSince = missingSince
+		track.SyncState = domain.TrackSyncState(syncState)
+		track.ParseError = parseError
+		if writable.Valid {
+			track.Writable = writable.Int64 != 0
+		}
 		if track.Missing {
 			track.Health = domain.HealthMissing
 		}

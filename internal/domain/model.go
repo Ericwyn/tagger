@@ -20,6 +20,33 @@ const (
 	HealthMissing        TrackHealth = "missing"
 )
 
+// TrackSyncState separates cheap filesystem discovery from the more expensive
+// metadata projection. Draft tracks are safe to browse, but callers must wait
+// for the scanner to produce an indexed revision before editing them.
+type TrackSyncState string
+
+const (
+	SyncIndexed TrackSyncState = "indexed"
+	SyncDraft   TrackSyncState = "draft"
+	SyncError   TrackSyncState = "error"
+)
+
+type WatchMode string
+
+const (
+	WatchModeAuto   WatchMode = "auto"
+	WatchModeEvents WatchMode = "events"
+	WatchModePoll   WatchMode = "poll"
+)
+
+type WatchState string
+
+const (
+	WatchStateHealthy  WatchState = "healthy"
+	WatchStateDegraded WatchState = "degraded"
+	WatchStatePolling  WatchState = "polling"
+)
+
 type CoverTone string
 
 const (
@@ -87,6 +114,7 @@ type Track struct {
 	ParseError           string          `json:"parseError,omitempty"`
 	Missing              bool            `json:"missing,omitempty"`
 	MissingSince         string          `json:"missingSince,omitempty"`
+	SyncState            TrackSyncState  `json:"syncState"`
 	// FileFingerprint is persisted by the store but intentionally omitted from
 	// API JSON. It lets quick scans skip unchanged media without reading tags.
 	FileFingerprint FileFingerprint `json:"-"`
@@ -102,6 +130,7 @@ type FileFingerprint struct {
 type FolderNode struct {
 	ID       string       `json:"id"`
 	Name     string       `json:"name"`
+	Path     string       `json:"path,omitempty"`
 	Count    int          `json:"count"`
 	ParentID string       `json:"parentId,omitempty"`
 	Children []FolderNode `json:"children,omitempty"`
@@ -118,6 +147,8 @@ type LibrarySummary struct {
 	Writable      bool         `json:"writable"`
 	LastScanLabel string       `json:"lastScanLabel"`
 	Folders       []FolderNode `json:"folders"`
+	WatchMode     WatchMode    `json:"watchMode,omitempty"`
+	WatchState    WatchState   `json:"watchState,omitempty"`
 }
 
 type ScanReport struct {

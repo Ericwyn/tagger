@@ -108,6 +108,38 @@ describe('real API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/scans', expect.objectContaining({method: 'POST'}));
   });
 
+	  it('reconciles a relative folder and subscribes to library invalidations', async () => {
+		const result = {generation: 3, changed: true, pending: ['Artist/Album/new.flac'], missing: 0};
+		const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: result}), {status: 200}));
+		const api = createRealAPI(fetcher);
+		await expect(api.reconcileLibrary('lib/a', 'Artist/Album')).resolves.toEqual(result);
+		expect(fetcher).toHaveBeenCalledWith('/api/v1/libraries/lib%2Fa/reconcile', expect.objectContaining({
+		  method: 'POST', body: JSON.stringify({folderPath: 'Artist/Album'}),
+		}));
+
+		class FakeEventSource {
+		  static last: FakeEventSource | undefined;
+		  listeners = new Map<string, EventListener>();
+		  close = vi.fn();
+		  constructor(readonly url: string) { FakeEventSource.last = this; }
+		  addEventListener(type: string, listener: EventListener) { this.listeners.set(type, listener); }
+		  removeEventListener(type: string) { this.listeners.delete(type); }
+		  emit(type: string, data: string) { this.listeners.get(type)?.({data} as MessageEvent<string>); }
+		}
+		vi.stubGlobal('EventSource', FakeEventSource);
+		try {
+		  const onEvent = vi.fn();
+		  const unsubscribe = api.subscribeLibraryEvents('lib/a', onEvent);
+		  expect(FakeEventSource.last?.url).toBe('/api/v1/libraries/lib%2Fa/events');
+		  FakeEventSource.last?.emit('library', JSON.stringify({libraryId: 'lib/a', generation: 4, kind: 'inventory'}));
+		  expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({generation: 4, kind: 'inventory'}));
+		  unsubscribe();
+		  expect(FakeEventSource.last?.close).toHaveBeenCalledOnce();
+		} finally {
+		  vi.unstubAllGlobals();
+		}
+	  });
+
   it('probes a candidate library directory before an explicit switch', async () => {
     const probe = {path: '/music', name: 'music', readable: true, writable: true, audioFiles: 3, folders: 1, formats: {mp3: 1, flac: 1, wav: 1}};
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: probe}), {status: 200}));

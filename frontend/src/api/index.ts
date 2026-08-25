@@ -3,7 +3,9 @@ import {APIError, createRealAPI} from '@/api/real';
 import type {
 	Job,
 	DirectoryProbe,
-  LibrarySummary,
+	LibrarySummary,
+	LibraryEvent,
+	LibraryReconcileResult,
   MatchCandidate,
 	MatchItem,
 	ProviderConfig,
@@ -123,6 +125,15 @@ export async function rescanLibrary(libraryId: string, mode: ScanMode = 'quick',
   return mode === 'quick' && targets.length === 0
     ? real.rescanLibrary(libraryId)
     : real.rescanLibrary(libraryId, mode, targets);
+}
+
+export function reconcileLibrary(libraryId: string, folderPath = ''): Promise<LibraryReconcileResult> {
+  if (apiReadMode === 'mock') return Promise.resolve({generation: Date.now(), changed: false, missing: 0});
+  return real.reconcileLibrary(libraryId, folderPath);
+}
+
+export function subscribeLibraryEvents(libraryId: string, onEvent: (event: LibraryEvent) => void): () => void {
+  return apiReadMode === 'mock' ? () => undefined : real.subscribeLibraryEvents(libraryId, onEvent);
 }
 
 export async function deleteLibrary(libraryId: string): Promise<{id: string; deleted: boolean}> {
@@ -325,7 +336,7 @@ export function getRevisionSnapshot(revision: Revision): Promise<RevisionSnapsho
 }
 
 export function artworkURL(track: Track): string | undefined {
-  if (apiReadMode === 'mock' || track.artworkCount === 0) return undefined;
+	if (apiReadMode === 'mock' || track.artworkCount === 0 || (track.syncState && track.syncState !== 'indexed')) return undefined;
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/artwork/0?revision=${encodeURIComponent(track.revision)}`;
 }
 
@@ -335,7 +346,7 @@ export function candidateArtworkURL(candidate: MatchCandidate): string | undefin
 }
 
 export function audioURL(track: Track): string | undefined {
-  if (apiReadMode === 'mock') return undefined;
+	if (apiReadMode === 'mock' || (track.syncState && track.syncState !== 'indexed')) return undefined;
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/audio?revision=${encodeURIComponent(track.revision)}`;
 }
 

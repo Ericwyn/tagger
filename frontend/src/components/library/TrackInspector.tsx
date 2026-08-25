@@ -26,8 +26,9 @@ import {cn, formatBytes, formatDuration} from '@/lib/utils';
 import type {InspectorTab, RestoreDraftRequest, Track, TrackPatch} from '@/types';
 
 interface TrackInspectorProps {
-  track: Track | null;
-  saving: boolean;
+	track: Track | null;
+	saving: boolean;
+	indexing?: boolean;
   mobileOpen: boolean;
   onCloseMobile: () => void;
   onSearch: (focus?: 'metadata' | 'lyrics') => void;
@@ -120,8 +121,9 @@ function mockRawTags(track: Track): Record<string, string[]> {
 }
 
 export function TrackInspector({
-  track,
-  saving,
+	track,
+	saving,
+	indexing = false,
   mobileOpen,
   onCloseMobile,
   onSearch,
@@ -223,7 +225,11 @@ export function TrackInspector({
     return Number.isFinite(next) ? next : undefined;
   };
 
-  const togglePlayback = () => {
+	const togglePlayback = () => {
+	  if (indexing) {
+		onNotice?.('当前文件仍在索引，完成后才能试听');
+		return;
+	  }
     if (onPlayTrack && onTogglePlayer) {
       if (playerTrackId !== track.id) onPlayTrack(track);
       else onTogglePlayer();
@@ -232,7 +238,11 @@ export function TrackInspector({
     setFallbackPlaying((value) => !value);
   };
 
-  const showRawTags = async () => {
+	const showRawTags = async () => {
+	  if (indexing) {
+		onNotice?.('当前文件仍在索引，完成后才能读取原始标签');
+		return;
+	  }
     setRawTagsOpen((value) => !value);
     if (rawTags) return;
     setRawTagsLoading(true);
@@ -259,7 +269,7 @@ export function TrackInspector({
   };
 
   return (
-    <aside className={cn('track-inspector', mobileOpen && 'is-mobile-open', restoreDraft?.trackId === track.id && 'has-restore-draft')}>
+	<aside className={cn('track-inspector', mobileOpen && 'is-mobile-open', indexing && 'is-syncing', restoreDraft?.trackId === track.id && 'has-restore-draft')} aria-busy={indexing}>
       <div className="inspector-mobile-head">
         <span>曲目详情</span>
         <button title="关闭详情" onClick={onCloseMobile}><X size={18} /></button>
@@ -280,21 +290,29 @@ export function TrackInspector({
           <h2>{track.title || '未命名曲目'}</h2>
           <p>{track.artists.join(' / ')} <span>·</span> {track.album || '未知专辑'}</p>
           <div className="mini-player">
-            <button title={activePlaying ? '暂停试听' : '试听'} onClick={togglePlayback}>
+			<button title={indexing ? '索引完成后可试听' : activePlaying ? '暂停试听' : '试听'} disabled={indexing} onClick={togglePlayback}>
               {activePlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
             </button>
             <div className={cn('waveform', activePlaying && 'is-playing')} aria-label="音频波形">
               {Array.from({length: 24}, (_, index) => (
                 <i key={index} style={{height: `${8 + ((index * 13) % 18)}px`}} />
               ))}
-            </div>
-            <span>{formatDuration(track.durationSeconds)}</span>
+	  </div>
+
+			<span>{formatDuration(track.durationSeconds)}</span>
           </div>
         </div>
-        <button className="hero-more" title="重新读取当前文件" disabled={saving || !onRescan} onClick={() => onRescan && void onRescan()}>
+		<button className="hero-more" title="重新读取当前文件" disabled={saving || !onRescan} onClick={() => onRescan && void onRescan()}>
           {saving ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={17} />}
         </button>
-      </div>
+	  </div>
+
+	  {indexing && (
+		<div className="track-sync-banner">
+		  <LoaderCircle size={14} className={track.syncState === 'draft' ? 'spin' : undefined} />
+		  <span>{track.syncState === 'error' ? '文件解析失败，可重新读取后再编辑' : '正在读取标签、封面和技术信息，完成后自动解锁操作'}</span>
+		</div>
+	  )}
 
       <div className="inspector-tabs" role="tablist">
         {tabs.map((item) => (
@@ -321,13 +339,13 @@ export function TrackInspector({
         </div>
       )}
 
-      <div className="inspector-scroll">
+	  <fieldset className="inspector-scroll" disabled={indexing}>
         {tab === 'tags' && (
-          <div className="inspector-pane tag-form">
-            <div className="form-section-head">
-              <span>基本信息</span>
-              <button onClick={() => onSearch()}><Sparkles size={14} /> 从数据源补全</button>
-            </div>
+		  <div className="inspector-pane tag-form">
+			<div className="form-section-head">
+			  <span>基本信息</span>
+			  <button onClick={() => onSearch()}><Sparkles size={14} /> 从数据源补全</button>
+			</div>
             <label className="field-row">
               <span>标题</span>
               <input value={draft.title} onChange={(event) => set('title', event.target.value)} />
@@ -649,9 +667,9 @@ export function TrackInspector({
             </div>
           </div>
         )}
-      </div>
+	  </fieldset>
 
-      <div className="inspector-actions">
+	  <div className="inspector-actions">
         <div>
           <span className={cn('dirty-indicator', dirty && 'is-dirty')} />
           {dirty ? `${changedFields.length} 项未保存` : '所有修改已保存'}
@@ -661,7 +679,7 @@ export function TrackInspector({
             放弃
           </button>
         )}
-        <button className="primary-button" disabled={!dirty || saving} onClick={() => setShowPreview(true)}>
+		<button className="primary-button" disabled={!dirty || saving || indexing} onClick={() => setShowPreview(true)}>
           {saving ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}
           保存修改
         </button>

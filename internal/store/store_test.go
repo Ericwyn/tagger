@@ -48,6 +48,10 @@ func TestSaveLoadAndReplaceScan(t *testing.T) {
 	if err := dataStore.SaveScan(context.Background(), root, first); err != nil {
 		t.Fatal(err)
 	}
+	var inventoryCount int
+	if err := dataStore.db.QueryRow(`SELECT COUNT(*) FROM library_files WHERE library_id=? AND present=1 AND sync_state='indexed'`, "lib-1").Scan(&inventoryCount); err != nil || inventoryCount != 2 {
+		t.Fatalf("live inventory count=%d err=%v", inventoryCount, err)
+	}
 
 	loaded, found, err := dataStore.LoadScan(context.Background(), root)
 	if err != nil {
@@ -566,6 +570,6 @@ func testTrack(id, relativePath string) domain.Track {
 		ID: id, FileName: filepath.Base(relativePath), RelativePath: relativePath, FolderID: "folder-root",
 		Format: format, Title: id, Artists: []string{"Artist"}, Album: "Album", AlbumArtists: []string{},
 		Genres: []string{}, CoverTone: domain.CoverMoss, Health: domain.HealthComplete,
-		Writable: true, Revision: "revision-" + id, ModifiedAt: "2026-08-20T12:00:00Z",
+		Writable: true, Revision: "revision-" + id, ModifiedAt: "2026-08-20T12:00:00Z", SyncState: domain.SyncIndexed,
 	}
 }

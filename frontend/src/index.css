@@ -1552,6 +1552,10 @@ button:disabled {
   background: color-mix(in srgb, var(--accent) 7%, var(--paper));
 }
 
+.track-row.is-syncing .track-primary strong {
+  color: var(--muted);
+}
+
 .track-primary {
   min-width: 0;
 }
@@ -1645,6 +1649,10 @@ button:disabled {
 
 .status-dot.healthy {
   background: var(--success);
+}
+
+.status-dot.warning {
+  background: var(--warning);
 }
 
 .empty-state {
@@ -1992,9 +2000,36 @@ button:disabled {
   font-size: 11px;
 }
 
+.track-sync-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning) 35%, var(--line));
+  background: color-mix(in srgb, var(--warning) 8%, var(--paper));
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.track-sync-banner svg {
+  flex: 0 0 auto;
+  color: var(--warning);
+}
+
+.track-inspector.is-syncing .inspector-scroll input,
+.track-inspector.is-syncing .inspector-scroll textarea,
+.track-inspector.is-syncing .inspector-scroll select,
+.track-inspector.is-syncing .inspector-scroll button {
+  pointer-events: none;
+  opacity: 0.62;
+}
+
 .inspector-scroll {
   min-height: 0;
   min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
   overflow-y: auto;
 }
 

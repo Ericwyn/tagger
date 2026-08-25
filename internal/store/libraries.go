@@ -204,6 +204,9 @@ func (s *Store) PurgeMissing(ctx context.Context, libraryID string) (int, error)
 	if _, err := tx.ExecContext(ctx, `DELETE FROM tracks WHERE library_id=? AND missing=1`, libraryID); err != nil {
 		return 0, fmt.Errorf("purge missing tracks: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM library_files WHERE library_id=? AND present=0`, libraryID); err != nil {
+		return 0, fmt.Errorf("purge missing library files: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM artwork_blobs WHERE hash NOT IN (
 		SELECT before_artwork_hash FROM revisions WHERE before_artwork_hash IS NOT NULL AND before_artwork_hash <> ''
 		UNION SELECT after_artwork_hash FROM revisions WHERE after_artwork_hash IS NOT NULL AND after_artwork_hash <> ''
@@ -218,8 +221,10 @@ func (s *Store) PurgeMissing(ctx context.Context, libraryID string) (int, error)
 			_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tracks WHERE library_id=?`, libraryID).Scan(&trackCount)
 			_ = tx.QueryRowContext(ctx, `SELECT COUNT(DISTINCT folder_id) FROM tracks WHERE library_id=?`, libraryID).Scan(&folderCount)
 			folderNames := make(map[string]string, len(summary.Folders))
+			folderPaths := make(map[string]string, len(summary.Folders))
 			for _, folder := range summary.Folders {
 				folderNames[folder.ID] = folder.Name
+				folderPaths[folder.ID] = folder.Path
 			}
 			folderRows, queryErr := tx.QueryContext(ctx, `SELECT folder_id, COUNT(*) FROM tracks WHERE library_id=? GROUP BY folder_id`, libraryID)
 			if queryErr == nil {
@@ -234,7 +239,7 @@ func (s *Store) PurgeMissing(ctx context.Context, libraryID string) (int, error)
 					if name == "" {
 						name = id
 					}
-					folders = append(folders, domain.FolderNode{ID: id, Name: name, Count: count})
+					folders = append(folders, domain.FolderNode{ID: id, Name: name, Path: folderPaths[id], Count: count})
 				}
 				_ = folderRows.Close()
 				summary.Folders = folders

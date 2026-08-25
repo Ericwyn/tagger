@@ -1,6 +1,6 @@
 import {memo, useEffect, useRef} from 'react';
 import {Virtuoso, type StateSnapshot, type VirtuosoHandle} from 'react-virtuoso';
-import {AlertCircle, Check, ChevronDown, ListFilter, MoreHorizontal} from 'lucide-react';
+import {AlertCircle, Check, ChevronDown, ListFilter, LoaderCircle, MoreHorizontal} from 'lucide-react';
 import {CoverArt} from '@/components/CoverArt';
 import {artworkURL} from '@/api';
 import {cn, formatDuration} from '@/lib/utils';
@@ -49,7 +49,7 @@ const TrackRow = memo(function TrackRow({
 }) {
   return (
     <div
-      className={cn('track-row', active && 'is-active', selected && 'is-selected')}
+      className={cn('track-row', active && 'is-active', selected && 'is-selected', track.syncState === 'draft' && 'is-syncing')}
       onClick={onSelect}
       role="row"
       tabIndex={0}
@@ -88,10 +88,14 @@ const TrackRow = memo(function TrackRow({
       <div className="track-cell track-year">{track.year || '—'}</div>
       <div className="track-cell track-format"><span>{track.format.toUpperCase()}</span></div>
       <div className="track-cell track-time">{formatDuration(track.durationSeconds)}</div>
-      <div className="track-status">
-        {track.health !== 'complete' && (
-          <span title={healthLabel[track.health]}><AlertCircle size={14} /></span>
-        )}
+	  <div className="track-status">
+		{track.syncState === 'draft' ? (
+		  <span title="正在索引"><LoaderCircle size={14} className="spin" /></span>
+		) : track.syncState === 'error' ? (
+		  <span title="索引失败"><AlertCircle size={14} /></span>
+		) : track.health !== 'complete' && (
+		  <span title={healthLabel[track.health]}><AlertCircle size={14} /></span>
+		)}
       </div>
       <button className="row-more" title="更多曲目操作" onClick={(event) => event.stopPropagation()}>
         <MoreHorizontal size={17} />

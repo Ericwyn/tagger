@@ -67,12 +67,13 @@ export interface Track {
   parseError?: string;
   missing?: boolean;
   missingSince?: string;
-  syncState?: 'indexed' | 'draft';
+  syncState?: 'indexed' | 'draft' | 'error';
 }
 
 export interface FolderNode {
   id: string;
   name: string;
+  path?: string;
   count: number;
   parentId?: string;
   children?: FolderNode[];
@@ -89,6 +90,26 @@ export interface LibrarySummary {
   writable: boolean;
   lastScanLabel: string;
   folders: FolderNode[];
+  watchMode?: 'auto' | 'events' | 'poll';
+  watchState?: 'healthy' | 'degraded' | 'polling';
+}
+
+export interface LibraryEvent {
+  libraryId: string;
+  generation: number;
+  kind: 'snapshot' | 'inventory' | 'metadata' | 'watcher-state';
+  paths?: string[];
+  watchMode?: LibrarySummary['watchMode'];
+  watchState?: LibrarySummary['watchState'];
+}
+
+export interface LibraryReconcileResult {
+  generation: number;
+  changed: boolean;
+  pending?: string[];
+  missing: number;
+  warnings?: string[];
+  job?: Job;
 }
 
 export type TrackSort = 'album' | 'title' | 'modified' | 'format';

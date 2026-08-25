@@ -127,6 +127,13 @@ func normalizePageSize(limit int) (int, error) {
 }
 
 func trackMatchesQuery(track domain.Track, query TrackQuery) bool {
+	if query.Health == domain.HealthMissing {
+		if !track.Missing {
+			return false
+		}
+	} else if track.Missing {
+		return false
+	}
 	if query.FolderID != "" && track.FolderID != query.FolderID {
 		return false
 	}
@@ -137,8 +144,10 @@ func trackMatchesQuery(track domain.Track, query TrackQuery) bool {
 			return false
 		}
 	}
-	if query.Health != "" && track.Health != query.Health {
-		return false
+	if query.Health != "" && query.Health != domain.HealthMissing {
+		if track.SyncState == domain.SyncDraft || track.Health != query.Health {
+			return false
+		}
 	}
 	if query.Format != "" && track.Format != query.Format {
 		return false

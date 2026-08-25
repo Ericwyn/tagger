@@ -103,7 +103,12 @@ func (m *Manager) loop(ctx context.Context, fsw *fsnotify.Watcher, root string) 
 			if event.Op&fsnotify.Create != 0 {
 				if info, err := filepath.Abs(event.Name); err == nil {
 					if stat, statErr := fsStat(info); statErr == nil && stat.IsDir() {
-						_ = addDirectories(fsw, info)
+						if addErr := addDirectories(fsw, info); addErr != nil {
+							select {
+							case m.watchErr <- fmt.Errorf("watch new library directory: %w", addErr):
+							default:
+							}
+						}
 					}
 				}
 			}

@@ -713,9 +713,10 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void runLibraryScan('full')}>完整扫描</button>
                   <button className="secondary-button" disabled={!library || libraryScanning} onClick={() => void cleanMissing()}>清理缺失索引</button>
                 </div>
-                <div className="library-setting-grid">
-                  <div><span>自动发现变化</span><strong>已启用 · 目录事件合并 5 秒</strong></div>
-                  <div><span>快速扫描</span><strong>仅读取新增或变化文件</strong></div>
+				<div className="library-setting-grid">
+				  <div><span>自动发现变化</span><strong>{library?.watchState === 'polling' ? '目录轮询 · 当前目录 5 秒' : library?.watchState === 'degraded' ? library.watchMode === 'events' ? '事件监听异常 · 未启用轮询' : '监听降级 · 轮询兜底' : 'fsnotify 实时监听'}</strong></div>
+				  <div><span>监听模式</span><strong>{library?.watchMode ?? 'auto'} · 由 --watch-mode / TAGGER_WATCH_MODE 决定</strong></div>
+				  <div><span>快速扫描</span><strong>仅读取新增或变化文件</strong></div>
                   <div><span>完整扫描</span><strong>仅手动触发 · 不自动清理缺失索引</strong></div>
                 </div>
                 <div className="ignore-box"><span>默认忽略规则</span><code>@eaDir/　.Trash-*/　.DS_Store</code><small>监听和扫描器使用同一套安全边界；符号链接不跟随</small></div>

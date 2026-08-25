@@ -125,6 +125,26 @@ func (m *Manager) HasActive(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// HasBlockingFileWork is narrower than HasActive. A review job is durable UI
+// state, not an executing file mutation, and must not prevent fsnotify changes
+// from reaching the library index.
+func (m *Manager) HasBlockingFileWork(ctx context.Context) (bool, error) {
+	items, err := m.repo.ListJobs(ctx, 200)
+	if err != nil {
+		return false, err
+	}
+	for _, job := range items {
+		if job.State != domain.JobWaiting && job.State != domain.JobRunning {
+			continue
+		}
+		switch job.Kind {
+		case domain.JobScan, domain.JobWrite, domain.JobBatchEdit:
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Cancel requests cooperative cancellation. Waiting/review jobs can be
 // cancelled immediately; running handlers receive a child context cancellation
 // and are finalized as cancelled once they return.

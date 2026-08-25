@@ -129,6 +129,8 @@ func (s *Server) routes() {
 	api.POST("/libraries/probe", s.handleLibraryProbe)
 	api.POST("/libraries/:id/switch", s.handleLibrarySwitch)
 	api.POST("/libraries/:id/scans", s.handleRescan)
+	api.POST("/libraries/:id/reconcile", s.handleLibraryReconcile)
+	api.GET("/libraries/:id/events", s.handleLibraryEvents)
 	api.DELETE("/libraries/:id", s.handleLibraryDelete)
 	api.POST("/libraries/:id/missing/purge", s.handlePurgeMissing)
 	api.GET("/tracks", s.handleTracks)
@@ -368,6 +370,14 @@ func (s *Server) handleLibraries(ctx context.Context, c *app.RequestContext) {
 			s.writeError(c, consts.StatusInternalServerError, "libraries_failed", err.Error())
 			return
 		}
+		current := s.library.Library()
+		for index := range libraries {
+			if libraries[index].ID == current.ID {
+				active := libraries[index].Active
+				libraries[index] = current
+				libraries[index].Active = active
+			}
+		}
 		s.writeData(c, libraries)
 		return
 	}
@@ -377,6 +387,89 @@ func (s *Server) handleLibraries(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	s.writeData(c, []domain.LibrarySummary{current})
+}
+
+type libraryReconcileRequest struct {
+	FolderPath string `json:"folderPath"`
+}
+
+type libraryReconcileResponse struct {
+	library.ReconcileResult
+	Job *jobResponse `json:"job,omitempty"`
+}
+
+func (s *Server) handleLibraryReconcile(ctx context.Context, c *app.RequestContext) {
+	current := s.library.Library()
+	if strings.TrimSpace(c.Param("id")) != current.ID {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	var request libraryReconcileRequest
+	if len(c.Request.Body()) > 0 {
+		if err := json.Unmarshal(c.Request.Body(), &request); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "目录对账请求 JSON 无效")
+			return
+		}
+	}
+	result, err := s.library.ReconcileDirectory(ctx, request.FolderPath)
+	if err != nil {
+		s.writeError(c, consts.StatusUnprocessableEntity, "directory_reconcile_failed", err.Error())
+		return
+	}
+	response := libraryReconcileResponse{ReconcileResult: result}
+	if s.jobs != nil && len(result.Pending) > 0 {
+		blocking, blockingErr := s.jobs.HasBlockingFileWork(ctx)
+		if blockingErr != nil {
+			s.writeError(c, consts.StatusInternalServerError, "jobs_failed", blockingErr.Error())
+			return
+		}
+		if !blocking {
+			payload, _ := json.Marshal(scanRequest{Mode: scanner.ScanTarget, Targets: result.Pending})
+			job, enqueueErr := s.jobs.Enqueue(ctx, domain.Job{
+				Kind: domain.JobScan, LibraryID: current.ID, Title: current.Name + " 实时索引",
+				Detail: "等待实时索引 worker", Total: len(result.Pending), Payload: string(payload),
+			})
+			if enqueueErr != nil {
+				s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", enqueueErr.Error())
+				return
+			}
+			jobView := toJobResponse(job)
+			response.Job = &jobView
+		}
+	}
+	s.writeData(c, response)
+}
+
+func (s *Server) handleLibraryEvents(ctx context.Context, c *app.RequestContext) {
+	current := s.library.Library()
+	if strings.TrimSpace(c.Param("id")) != current.ID {
+		s.writeError(c, consts.StatusNotFound, "library_not_found", "曲库不存在")
+		return
+	}
+	events, unsubscribe := s.library.SubscribeEvents()
+	defer unsubscribe()
+	writer := sse.NewWriter(c)
+	defer writer.Close()
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(event)
+			if err != nil || writer.WriteEvent(strconv.FormatUint(event.Generation, 10), "library", payload) != nil {
+				return
+			}
+		case <-ticker.C:
+			if writer.WriteKeepAlive() != nil {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 type libraryProbeRequest struct {
@@ -912,6 +1005,17 @@ func (s *Server) handleMatchBatch(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "单次最多处理 1000 首曲目")
 		return
 	}
+	tracks, err := s.library.ResolveTracksByIDs(request.TrackIDs)
+	if err != nil {
+		s.writeError(c, consts.StatusNotFound, "track_not_found", err.Error())
+		return
+	}
+	for _, track := range tracks {
+		if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+			s.writeError(c, consts.StatusConflict, "track_not_indexed", "曲目仍在索引，请稍后重试")
+			return
+		}
+	}
 	payload, _ := json.Marshal(request)
 	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobMatch, LibraryID: s.library.Library().ID, Title: "批量抓取元数据", Detail: "等待匹配 worker", Total: len(request.TrackIDs), Payload: string(payload)})
 	if err != nil {
@@ -985,6 +1089,10 @@ func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) 
 	}
 	if err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "track_failed", err.Error())
+		return
+	}
+	if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+		s.writeError(c, consts.StatusConflict, "track_not_indexed", "曲目仍在索引，请稍后重试")
 		return
 	}
 	query := providers.Query{
@@ -1462,6 +1570,9 @@ func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) erro
 		}
 		if err != nil {
 			return err
+		}
+		if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+			return fmt.Errorf("曲目仍在索引：%s", item.TrackID)
 		}
 		if item.BaseRevision == "" {
 			item.BaseRevision = track.Revision
@@ -2915,6 +3026,10 @@ func (s *Server) handleMatchSearch(ctx context.Context, c *app.RequestContext) {
 		}
 		if err != nil {
 			s.writeError(c, consts.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+			s.writeError(c, consts.StatusConflict, "track_not_indexed", "曲目仍在索引，请稍后重试")
 			return
 		}
 		if query.Title == "" {

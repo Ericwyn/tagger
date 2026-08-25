@@ -15,6 +15,7 @@ import (
 )
 
 var ErrTrackNotFound = errors.New("track not found")
+var ErrTrackNotIndexed = errors.New("track metadata is not indexed")
 
 type FileRef struct {
 	ID           string
@@ -60,10 +61,17 @@ type Service struct {
 	orderedMu    sync.RWMutex
 	ordered      map[TrackSort][]domain.Track
 	orderVersion uint64
+
+	eventMu      sync.RWMutex
+	eventSubs    map[chan Event]struct{}
+	eventVersion uint64
 }
 
 func New(ctx context.Context, scanner *scanner.Scanner, repositories ...Repository) (*Service, error) {
-	service := &Service{scanner: scanner, ordered: make(map[TrackSort][]domain.Track), orderVersion: 1}
+	service := &Service{
+		scanner: scanner, ordered: make(map[TrackSort][]domain.Track), orderVersion: 1,
+		eventSubs: make(map[chan Event]struct{}), eventVersion: 1,
+	}
 	if len(repositories) > 0 {
 		service.repo = repositories[0]
 	}
@@ -105,7 +113,7 @@ func (s *Service) rescan(ctx context.Context, mode scanner.ScanMode, targets []s
 	existing := cloneTracks(s.tracks)
 	s.mu.RUnlock()
 	if mode == scanner.ScanFull {
-		result, err = currentScanner.Scan(ctx)
+		result, err = currentScanner.ScanFull(ctx, existing)
 	} else {
 		result, err = currentScanner.ScanIncremental(ctx, existing, targets)
 	}
@@ -126,6 +134,7 @@ func (s *Service) rescan(ctx context.Context, mode scanner.ScanMode, targets []s
 		}
 	}
 	s.apply(result)
+	s.publishEvent(Event{Kind: EventMetadata})
 	return nil
 }
 
@@ -260,12 +269,29 @@ func (s *Service) SwitchRoot(ctx context.Context, root string) error {
 }
 
 func (s *Service) apply(result scanner.Result) {
+	for index := range result.Library.Folders {
+		folder := &result.Library.Folders[index]
+		if folder.Path == "" && folder.ID != "folder-root" {
+			folder.Path = strings.ReplaceAll(folder.Name, " · ", "/")
+		}
+	}
 	byID := make(map[string]domain.Track, len(result.Tracks))
-	for _, track := range result.Tracks {
+	for index := range result.Tracks {
+		track := result.Tracks[index]
+		if track.SyncState == "" {
+			track.SyncState = domain.SyncIndexed
+			result.Tracks[index] = track
+		}
 		byID[track.ID] = cloneTrack(track)
 	}
 
 	s.mu.Lock()
+	if result.Library.WatchMode == "" {
+		result.Library.WatchMode = s.library.WatchMode
+	}
+	if result.Library.WatchState == "" {
+		result.Library.WatchState = s.library.WatchState
+	}
 	s.library = cloneLibrary(result.Library)
 	s.tracks = cloneTracks(result.Tracks)
 	s.byID = byID
@@ -275,6 +301,9 @@ func (s *Service) apply(result scanner.Result) {
 }
 
 func (s *Service) applyTrack(track domain.Track) {
+	if track.SyncState == "" {
+		track.SyncState = domain.SyncIndexed
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.byID == nil {
@@ -292,6 +321,7 @@ func (s *Service) applyTrack(track domain.Track) {
 	s.library.LastScanLabel = now.Format("2006-01-02 15:04")
 	s.report.CompletedAt = now.Format(time.RFC3339)
 	s.invalidateTrackOrder()
+	go s.publishEvent(Event{Kind: EventMetadata, Paths: []string{track.RelativePath}})
 }
 
 func (s *Service) snapshotResult() scanner.Result {
@@ -320,11 +350,20 @@ func (s *Service) ListTracks(filter TrackFilter) []domain.Track {
 	query := strings.ToLower(strings.TrimSpace(filter.Query))
 	result := make([]domain.Track, 0, len(s.tracks))
 	for _, track := range s.tracks {
+		if filter.Health == domain.HealthMissing {
+			if !track.Missing {
+				continue
+			}
+		} else if track.Missing {
+			continue
+		}
 		if filter.FolderID != "" && track.FolderID != filter.FolderID {
 			continue
 		}
-		if filter.Health != "" && track.Health != filter.Health {
-			continue
+		if filter.Health != "" && filter.Health != domain.HealthMissing {
+			if track.SyncState == domain.SyncDraft || track.Health != filter.Health {
+				continue
+			}
 		}
 		if filter.Format != "" && track.Format != filter.Format {
 			continue
@@ -496,6 +535,9 @@ func (s *Service) FileRef(id string) (FileRef, error) {
 	if err != nil {
 		return FileRef{}, err
 	}
+	if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+		return FileRef{}, ErrTrackNotIndexed
+	}
 	root := s.Root()
 	return FileRef{
 		ID:           track.ID,
@@ -568,7 +610,7 @@ func changedTracks(previous []domain.Track, current []domain.Track) []domain.Tra
 	changed := make([]domain.Track, 0)
 	for _, track := range current {
 		prior, found := old[track.RelativePath]
-		if !found || prior.Revision != track.Revision || prior.Missing != track.Missing || prior.Health != track.Health {
+		if !found || prior.Revision != track.Revision || prior.Missing != track.Missing || prior.Health != track.Health || prior.SyncState != track.SyncState || prior.FileFingerprint != track.FileFingerprint {
 			changed = append(changed, track)
 		}
 	}
@@ -580,6 +622,9 @@ func buildFoldersForTracks(tracks []domain.Track) []domain.FolderNode {
 	// current in-memory summary after an explicit missing-index purge.
 	counts := make(map[string]domain.FolderNode)
 	for _, track := range tracks {
+		if track.Missing {
+			continue
+		}
 		folder := counts[track.FolderID]
 		folder.ID = track.FolderID
 		folder.Count++
@@ -588,6 +633,7 @@ func buildFoldersForTracks(tracks []domain.Track) []domain.FolderNode {
 			folder.Name = "根目录单曲"
 			if directory != "." {
 				folder.Name = strings.ReplaceAll(directory, "/", " · ")
+				folder.Path = directory
 			}
 		}
 		counts[track.FolderID] = folder

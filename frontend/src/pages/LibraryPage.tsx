@@ -25,13 +25,15 @@ import {
   apiReadMode,
   applyCandidateArtwork,
   createBatchEditJob,
-  listLibraries,
-  listTrackPage,
-  resolveTracks,
+	  listLibraries,
+	  listTrackPage,
+	  reconcileLibrary,
+	  resolveTracks,
   rescanLibrary,
   rescanTrack,
   searchCandidates,
-  switchLibrary,
+	  switchLibrary,
+	  subscribeLibraryEvents,
   updateArtwork,
 	updateTrack,
 	waitForJob,
@@ -140,6 +142,19 @@ function trackQueryFromState(state: Pick<LibraryBrowseState, 'folderId' | 'folde
   };
 }
 
+function folderPathOf(folder: LibrarySummary['folders'][number]): string {
+  if (typeof folder.path === 'string') return folder.path;
+  return folder.id === 'folder-root' ? '' : folder.name.split(' · ').join('/');
+}
+
+function isTrackIndexed(track: Track | undefined | null): boolean {
+  return Boolean(track && (!track.syncState || track.syncState === 'indexed'));
+}
+
+export function shouldPollLibrary(library: Pick<LibrarySummary, 'watchMode' | 'watchState'>): boolean {
+  return library.watchMode === 'poll' || library.watchState === 'polling' || (library.watchState === 'degraded' && library.watchMode !== 'events');
+}
+
 function mergeTrackPages(current: Track[], incoming: Track[]): Track[] {
   const updates = new Map(incoming.map((track) => [track.id, track]));
   const merged = current.map((track) => updates.get(track.id) ?? track);
@@ -200,7 +215,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   const loadingMoreRef = useRef(false);
   const requestIDRef = useRef(0);
   const abortRef = useRef<AbortController | undefined>(undefined);
-  const viewportStateRef = useRef<StateSnapshot | undefined>(undefined);
+	  const viewportStateRef = useRef<StateSnapshot | undefined>(undefined);
+	  const liveRefreshTimerRef = useRef<number>();
+	  const reconcileInFlightRef = useRef(false);
+	  const libraryGenerationRef = useRef(0);
+	  const liveRefreshInFlightRef = useRef(false);
+	  const liveRefreshQueuedRef = useRef(false);
   const viewRef = useRef<{
     library?: LibrarySummary;
     tracks: Track[];
@@ -298,6 +318,75 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
   };
 
+  const refreshLiveView = async (): Promise<void> => {
+    const currentLibrary = viewRef.current.library;
+	if (!currentLibrary) return;
+	if (liveRefreshInFlightRef.current) {
+	  liveRefreshQueuedRef.current = true;
+	  return;
+	}
+    liveRefreshInFlightRef.current = true;
+    try {
+      const nextLibraries = await listLibraries();
+      const nextLibrary = nextLibraries.find((item) => item.id === currentLibrary.id) ?? nextLibraries.find((item) => item.active);
+      if (!nextLibrary || nextLibrary.id !== currentLibrary.id) return;
+      setLibraries(nextLibraries.map((item) => ({...item, active: item.id === nextLibrary.id})));
+      setLibrary({...nextLibrary, active: true});
+	  const targetCount = Math.max(pageSize, viewRef.current.tracks.length);
+	  const refreshed: Track[] = [];
+	  let cursor = '';
+	  let page = await listTrackPage(viewRef.current.query, '', pageSize);
+	  refreshed.push(...page.tracks);
+	  while (page.hasMore && page.nextCursor && refreshed.length < targetCount) {
+		cursor = page.nextCursor;
+		page = await listTrackPage(viewRef.current.query, cursor, pageSize);
+		page.tracks.forEach((track) => {
+		  if (!refreshed.some((item) => item.id === track.id)) refreshed.push(track);
+		});
+	  }
+	  const pinnedIDs = [...new Set([...(viewRef.current.selectedIds ?? []), ...(viewRef.current.activeTrackId ? [viewRef.current.activeTrackId] : [])])].slice(0, 1000);
+	  let validPinned: Track[] = [];
+	  let pinnedResolved = false;
+	  if (pinnedIDs.length > 0) {
+		try {
+		  const resolved = await resolveTracks({ids: pinnedIDs});
+		  pinnedResolved = true;
+		  validPinned = resolved.tracks.filter((track) => !track.missing);
+		  const existing = new Set(refreshed.map((track) => track.id));
+		  validPinned.forEach((track) => { if (!existing.has(track.id) && track.id === viewRef.current.activeTrackId) refreshed.push(track); });
+		} catch {
+		  validPinned = [];
+		}
+	  }
+	  setTracks(refreshed);
+	  setPageTotal(page.total);
+	  setNextCursor(page.nextCursor ?? '');
+	  setHasMore(page.hasMore);
+	  if (pinnedIDs.length > 0 && pinnedResolved) {
+		const validSelected = validPinned.filter((track) => viewRef.current.selectedIds.has(track.id));
+		setSelectedIds(new Set(validSelected.map((track) => track.id)));
+		setSelectedDetails(new Map(validSelected.map((track) => [track.id, track])));
+		setResultSelectionActive(validSelected.length > 0 && validSelected.length === page.total);
+	  }
+	  setActiveTrackId((current) => current && refreshed.some((track) => track.id === current) ? current : refreshed[0]?.id);
+      clearLibraryViewSnapshot(currentLibrary.id);
+    } finally {
+      liveRefreshInFlightRef.current = false;
+	  if (liveRefreshQueuedRef.current) {
+		liveRefreshQueuedRef.current = false;
+		window.setTimeout(() => void refreshLiveView().catch(() => undefined), 0);
+	  }
+    }
+  };
+
+  const scheduleLiveRefresh = () => {
+    if (liveRefreshTimerRef.current !== undefined) window.clearTimeout(liveRefreshTimerRef.current);
+    liveRefreshTimerRef.current = window.setTimeout(() => {
+      liveRefreshTimerRef.current = undefined;
+      void refreshLiveView().catch(() => undefined);
+    }, 150);
+  };
+
   const loadData = async (preserveSelection = false) => {
     setLoading(true);
     setLoadError('');
@@ -316,14 +405,19 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       const cached = preserveSelection ? undefined : getLibraryViewSnapshot(nextLibrary.id);
       const storedBrowseState = cached ? {} : (preserveSelection ? {} : readBrowseState(nextLibrary.id));
       const cachedQuery = cached?.query;
-      const requestedFolderID = (cachedQuery?.folderId ?? storedBrowseState.folderId ?? (preserveSelection ? activeFolder : undefined)) || '';
-      const nextFolder = requestedFolderID && nextLibrary.folders.some((folder) => folder.id === requestedFolderID) ? requestedFolderID : null;
-      const storedFolderPath = typeof storedBrowseState.folderPath === 'string' ? storedBrowseState.folderPath.trim() : '';
-      const requestedFolderPath = (cachedQuery?.folderPath ?? (preserveSelection ? activeFolderPath : storedFolderPath))?.trim() ?? '';
-      const validFolderPath = requestedFolderPath && nextLibrary.folders.some((folder) => folder.name === requestedFolderPath || folder.name.startsWith(`${requestedFolderPath} · `))
-        ? requestedFolderPath
-        : '';
-      const nextFolderPath = validFolderPath || (nextFolder ? nextLibrary.folders.find((folder) => folder.id === nextFolder)?.name ?? null : null);
+	      const requestedFolderID = (cachedQuery?.folderId ?? storedBrowseState.folderId ?? (preserveSelection ? activeFolder : undefined)) || '';
+	      const nextFolder = requestedFolderID && nextLibrary.folders.some((folder) => folder.id === requestedFolderID) ? requestedFolderID : null;
+	      const storedFolderPath = typeof storedBrowseState.folderPath === 'string' ? storedBrowseState.folderPath.trim() : '';
+	      const requestedFolderPath = (cachedQuery?.folderPath ?? (preserveSelection ? activeFolderPath : storedFolderPath))?.trim() ?? '';
+	      const exactPathFolder = requestedFolderPath
+	        ? nextLibrary.folders.find((folder) => folderPathOf(folder) === requestedFolderPath || folder.name === requestedFolderPath)
+	        : undefined;
+	      const normalizedRequestedPath = exactPathFolder ? folderPathOf(exactPathFolder) : requestedFolderPath;
+	      const validFolderPath = normalizedRequestedPath && nextLibrary.folders.some((folder) => {
+	        const path = folderPathOf(folder);
+	        return path === normalizedRequestedPath || path.startsWith(`${normalizedRequestedPath}/`);
+	      }) ? normalizedRequestedPath : '';
+	      const nextFolderPath = validFolderPath || (nextFolder ? folderPathOf(nextLibrary.folders.find((folder) => folder.id === nextFolder)!) : null);
       const nextIncludeSubfolders = cachedQuery?.includeSubfolders ?? (preserveSelection ? includeSubfolders : Boolean(storedBrowseState.includeSubfolders));
       const nextSearch = cachedQuery?.q ?? (preserveSelection ? search : storedBrowseState.search ?? '');
       const nextFilter = (cachedQuery?.health ?? (preserveSelection ? activeFilter : storedBrowseState.health ?? 'all')) as SidebarFilter;
@@ -421,6 +515,53 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   }, []);
 
   useEffect(() => {
+    if (apiReadMode === 'mock' || !library?.id) return;
+    libraryGenerationRef.current = 0;
+    return subscribeLibraryEvents(library.id, (event) => {
+      if (event.libraryId !== library.id || event.generation <= libraryGenerationRef.current) return;
+      libraryGenerationRef.current = event.generation;
+      if (event.watchMode || event.watchState) {
+        setLibrary((current) => current ? {
+          ...current,
+          watchMode: event.watchMode ?? current.watchMode,
+          watchState: event.watchState ?? current.watchState,
+        } : current);
+      }
+      if (event.kind !== 'snapshot') scheduleLiveRefresh();
+    });
+  }, [library?.id]);
+
+  useEffect(() => {
+    if (apiReadMode === 'mock' || !library?.id) return;
+    let disposed = false;
+    const reconcileCurrentDirectory = async () => {
+      if (disposed || document.hidden || reconcileInFlightRef.current) return;
+      reconcileInFlightRef.current = true;
+      try {
+        const result = await reconcileLibrary(library.id, activeFolderPath ?? '');
+        if (!disposed && result.changed) scheduleLiveRefresh();
+      } catch {
+        // Watcher/SSE remain the primary path. A later focus or polling tick retries.
+      } finally {
+        reconcileInFlightRef.current = false;
+      }
+    };
+    const onFocus = () => void reconcileCurrentDirectory();
+    const onVisibility = () => { if (!document.hidden) void reconcileCurrentDirectory(); };
+    void reconcileCurrentDirectory();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+	const shouldPoll = shouldPollLibrary(library);
+    const timer = shouldPoll ? window.setInterval(() => void reconcileCurrentDirectory(), 5000) : undefined;
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+  }, [library?.id, library?.watchMode, library?.watchState, activeFolderPath]);
+
+  useEffect(() => {
     if (!initializedRef.current || hydratedQueryKeyRef.current === queryKey) return;
     const timer = window.setTimeout(() => {
       if (library?.id) clearLibraryViewSnapshot(library.id);
@@ -449,6 +590,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
   useEffect(() => () => {
     abortRef.current?.abort();
+	if (liveRefreshTimerRef.current !== undefined) window.clearTimeout(liveRefreshTimerRef.current);
     const current = viewRef.current;
     if (!current.library) return;
     const viewportState = viewportStateRef.current;
@@ -495,10 +637,13 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
   const activeTrack = tracks.find((track) => track.id === activeTrackId) ?? null;
   const visibleTracks = tracks;
+	const hasVisibleUnindexed = visibleTracks.some((track) => !isTrackIndexed(track));
   const selectedTracks = useMemo(() => {
     const loaded = new Map(tracks.map((track) => [track.id, track]));
     return [...selectedIds].map((id) => selectedDetails.get(id) ?? loaded.get(id)).filter((track): track is Track => Boolean(track));
   }, [selectedDetails, selectedIds, tracks]);
+	const activeTrackIndexed = isTrackIndexed(activeTrack);
+	const hasUnindexedSelection = selectedTracks.some((track) => !isTrackIndexed(track));
   const snapshotTracks = selectedIds.size > 0 ? selectedTracks : visibleTracks;
   const hasActiveToolbarFilters = formatFilter !== 'all' || activeFilter !== 'all' || includeSubfolders || sortMode !== 'album';
 
@@ -522,8 +667,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     options: LyricsSaveOptions = {},
     notice = apiReadMode === 'real' ? '标签已通过安全写入流程保存到音乐文件' : '标签草稿已写入 Mock 数据层',
 	provenance?: UpdateProvenance,
-  ): Promise<Track | undefined> => {
-	if (!activeTrack) return undefined;
+	  ): Promise<Track | undefined> => {
+		if (!activeTrack) return undefined;
+		if (!activeTrackIndexed) {
+		  onNotice('当前文件仍在索引，完成后才能编辑标签');
+		  return undefined;
+		}
     const writeTag = options.writeTag ?? true;
     if (!writeTag) {
       onNotice('未选择“写入音频标签”，文件未修改');
@@ -545,8 +694,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
   };
 
-	const applyCandidate = async (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean; artworkMaxSize?: number}) => {
-	  if (!activeTrack) return;
+		const applyCandidate = async (patch: TrackPatch, candidate: MatchCandidate, options: {artwork: boolean; artworkMaxSize?: number}) => {
+		  if (!activeTrack) return;
+		  if (!activeTrackIndexed) {
+			onNotice('当前文件仍在索引，完成后才能应用候选资料');
+			return;
+		  }
 	  setSaving(true);
 	  let tagsApplied = false;
 	  try {
@@ -566,8 +719,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 	  }
 	};
 
-  const openCandidateSearch = async (focus: 'metadata' | 'lyrics' = 'metadata', query?: CandidateSearchQuery) => {
-    if (!activeTrack) return;
+	  const openCandidateSearch = async (focus: 'metadata' | 'lyrics' = 'metadata', query?: CandidateSearchQuery) => {
+	    if (!activeTrack) return;
+	    if (!activeTrackIndexed) {
+	      onNotice('当前文件仍在索引，完成后才能抓取元数据');
+	      return;
+	    }
     setCandidateFocus(focus);
     setCandidateOpen(true);
     setCandidateLoading(true);
@@ -586,8 +743,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
   };
 
-	const changeArtwork = async (file: File | null, maxSize = 0) => {
-	  if (!activeTrack) return;
+		const changeArtwork = async (file: File | null, maxSize = 0) => {
+		  if (!activeTrack) return;
+		  if (!activeTrackIndexed) {
+			onNotice('当前文件仍在索引，完成后才能修改封面');
+			return;
+		  }
 	  setSaving(true);
 	  try {
 		const updated = await updateArtwork(activeTrack.id, file, maxSize);
@@ -656,12 +817,16 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       onNotice('当前选择超过 1000 首，请缩小范围后再批量补全');
       return;
     }
-    try {
-      const resolved = selectedIds.size > 0 ? await resolveTracks({ids: [...selectedIds]}) : await resolveTracks({query});
-      if (resolved.tracks.length === 0) {
+	    try {
+	      const resolved = selectedIds.size > 0 ? await resolveTracks({ids: [...selectedIds]}) : await resolveTracks({query});
+	      if (resolved.tracks.length === 0) {
         onNotice('当前筛选没有可补全的曲目');
-        return;
-      }
+	        return;
+	      }
+	      if (resolved.tracks.some((track) => !isTrackIndexed(track))) {
+	        onNotice('选择中包含正在索引的文件，请等待索引完成后再批量补全');
+	        return;
+	      }
       setSelectedIds(new Set(resolved.tracks.map((track) => track.id)));
       setSelectedDetails(new Map(resolved.tracks.map((track) => [track.id, track])));
       onOpenReview(resolved.tracks.map((track) => track.id));
@@ -670,8 +835,12 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
   };
 
-	const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
-    const selectedTracksForJob = selectedTracks;
+		const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
+	    const selectedTracksForJob = selectedTracks;
+	    if (selectedTracksForJob.some((track) => !isTrackIndexed(track))) {
+	      onNotice('选择中包含正在索引的文件，请等待完成后再批量编辑');
+	      return;
+	    }
     const failed = new Set<string>();
     let succeeded = 0;
     setSaving(true);
@@ -805,8 +974,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   }
 
   const currentLabel = activeFolderPath
-    || (activeFolder ? library.folders.find((folder) => folder.id === activeFolder)?.name : undefined)
-    || filterLabels[activeFilter];
+    ? activeFolderPath.split('/').join(' / ')
+    : (activeFolder ? library.folders.find((folder) => folder.id === activeFolder)?.name : undefined)
+      || filterLabels[activeFilter];
 
   return (
     <div className="library-page">
@@ -827,7 +997,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         onOpenSettings={onOpenSettings}
         onSelectFolder={(id) => {
           setActiveFolder(id);
-          const nextFolderPath = id ? library.folders.find((folder) => folder.id === id)?.name ?? null : null;
+          const selectedFolder = id ? library.folders.find((folder) => folder.id === id) : undefined;
+          const nextFolderPath = selectedFolder ? folderPathOf(selectedFolder) : null;
           setActiveFolderPath(nextFolderPath);
           setActiveFilter('all');
           setIncludeSubfolders(false);
@@ -869,7 +1040,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
                 <RefreshCw size={15} className={scanning ? 'spin' : undefined} /> {scanning ? '扫描中…' : '快速扫描'}
               </button>
               {snapshotUndo && <button className="secondary-button" disabled={saving} onClick={() => void undoSnapshot()}><Undo2 size={15} /> 撤销导入</button>}
-              <button className="primary-button" disabled={pageTotal === 0} onClick={() => void openReviewSelection()}>
+			<button className="primary-button" disabled={pageTotal === 0 || hasVisibleUnindexed} title={hasVisibleUnindexed ? '索引完成后可批量补全' : undefined} onClick={() => void openReviewSelection()}>
                 <Sparkles size={15} /> 批量补全
               </button>
             </div>
@@ -882,7 +1053,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
                   <RefreshCw size={15} className={scanning ? 'spin' : undefined} /> {scanning ? '扫描中…' : '快速扫描'}
                 </button>
                 {snapshotUndo && <button className="secondary-button" disabled={saving} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); void undoSnapshot(); }}><Undo2 size={15} /> 撤销导入</button>}
-                <button className="primary-button" disabled={pageTotal === 0} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); void openReviewSelection(); }}>
+				<button className="primary-button" disabled={pageTotal === 0 || hasVisibleUnindexed} title={hasVisibleUnindexed ? '索引完成后可批量补全' : undefined} onClick={(event) => { event.currentTarget.closest('details')?.removeAttribute('open'); void openReviewSelection(); }}>
                   <Sparkles size={15} /> 批量补全
                 </button>
               </div>
@@ -913,7 +1084,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
               <SlidersHorizontal size={15} /> <span>筛选</span>
             </button>
             <div className="track-filter-controls" id="track-filter-controls">
-              <button className="toolbar-button" aria-label="打开标签快照" title="打开标签快照" disabled={snapshotTracks.length === 0} onClick={() => setSnapshotOpen(true)}><Archive size={15} /> 标签快照</button>
+			  <button className="toolbar-button" aria-label="打开标签快照" title={snapshotTracks.some((track) => !isTrackIndexed(track)) ? '索引完成后可使用标签快照' : '打开标签快照'} disabled={snapshotTracks.length === 0 || snapshotTracks.some((track) => !isTrackIndexed(track))} onClick={() => setSnapshotOpen(true)}><Archive size={15} /> 标签快照</button>
               <label className="toolbar-filter">
                 <SlidersHorizontal size={15} />
                 <span>格式</span>
@@ -986,16 +1157,17 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
           onViewportState={(state) => { viewportStateRef.current = state; }}
         />
 
-        <div className="workspace-foot">
-          <span>已加载 {visibleTracks.length} / 共 {pageTotal} 首</span>
-          <span><i className="status-dot healthy" /> 索引健康</span>
+		<div className="workspace-foot">
+		  <span>已加载 {visibleTracks.length} / 共 {pageTotal} 首</span>
+		  <span><i className={cn('status-dot', library.watchState === 'healthy' ? 'healthy' : 'warning')} /> {library.watchState === 'polling' ? '目录轮询' : library.watchState === 'degraded' ? '监听降级' : '实时监听'}</span>
           <span>{apiReadMode === 'real' ? 'Go API · 安全写入' : 'Mock API · rev 0.1'}</span>
         </div>
       </section>
 
-      <TrackInspector
-        track={activeTrack}
-        saving={saving}
+	      <TrackInspector
+	        track={activeTrack}
+	        saving={saving}
+		indexing={Boolean(activeTrack && !activeTrackIndexed)}
 		mobileOpen={mobileInspector}
 		onCloseMobile={() => setMobileInspector(false)}
 		onSearch={openCandidateSearch}
@@ -1019,8 +1191,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
             <span>首已选择</span>
           </div>
           <span className="selection-divider" />
-          <button onClick={() => setBatchEditOpen(true)}><Tags size={16} /> 批量编辑</button>
-          <button className="is-accent" onClick={() => void openReviewSelection()}>
+		  <button disabled={hasUnindexedSelection} title={hasUnindexedSelection ? '索引完成后可批量编辑' : undefined} onClick={() => setBatchEditOpen(true)}><Tags size={16} /> 批量编辑</button>
+		  <button className="is-accent" disabled={hasUnindexedSelection} title={hasUnindexedSelection ? '索引完成后可抓取元数据' : undefined} onClick={() => void openReviewSelection()}>
             <Sparkles size={16} /> 抓取元数据
           </button>
           <button className="selection-clear" title="清除选择" onClick={() => { setSelectedIds(new Set()); setSelectedDetails(new Map()); setResultSelectionActive(false); }}><X size={18} /></button>

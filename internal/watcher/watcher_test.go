@@ -84,3 +84,41 @@ func TestManagerRetriesBusyBatch(t *testing.T) {
 		t.Fatal("busy watcher batch was not retried")
 	}
 }
+
+func TestManagerWatchesPrepopulatedDirectoryMovedIntoRoot(t *testing.T) {
+	root := t.TempDir()
+	stagingRoot := t.TempDir()
+	staging := filepath.Join(stagingRoot, "Album")
+	if err := os.MkdirAll(filepath.Join(staging, "Disc 1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "Disc 1", "song.flac"), []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changes := make(chan []string, 1)
+	manager := New(20*time.Millisecond, func(_ context.Context, targets []string) error {
+		changes <- targets
+		return nil
+	})
+	if err := manager.Start(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Stop()
+	if err := os.Rename(staging, filepath.Join(root, "Album")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case targets := <-changes:
+		found := false
+		for _, target := range targets {
+			if target == "Album" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("targets=%v, want Album", targets)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("watcher did not report moved directory")
+	}
+}

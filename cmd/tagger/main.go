@@ -202,9 +202,14 @@ func main() {
 			if err := tagWriter.SetRoot(payload.Root); err != nil {
 				return err
 			}
-			if libraryWatcher != nil {
+			if cfg.WatchMode == domain.WatchModePoll {
+				libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStatePolling)
+			} else if libraryWatcher != nil {
 				if err := libraryWatcher.Start(watchContext, payload.Root); err != nil {
 					logger.Warn("restart library watcher after switch", "error", err)
+					libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateDegraded)
+				} else {
+					libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateHealthy)
 				}
 			}
 			total := libraryService.Library().TrackCount
@@ -247,6 +252,9 @@ func main() {
 		providerQueries, candidateCount := 0, 0
 		for index, trackID := range payload.TrackIDs {
 			track, err := libraryService.Track(trackID)
+			if err == nil && track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+				err = library.ErrTrackNotIndexed
+			}
 			if err != nil {
 				failed++
 				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()})
@@ -432,7 +440,7 @@ func main() {
 		if current.ID == "" {
 			return nil
 		}
-		active, err := jobManager.HasActive(ctx)
+		active, err := jobManager.HasBlockingFileWork(ctx)
 		if err != nil {
 			return err
 		}
@@ -449,18 +457,39 @@ func main() {
 		})
 		return err
 	}
-	libraryWatcher = watcher.New(cfg.WatcherWait, func(ctx context.Context, targets []string) error {
-		return enqueueScan(ctx, scanner.ScanTarget, targets, " 文件变化扫描")
-	})
-	if err := libraryWatcher.Start(watchContext, libraryService.Root()); err != nil {
-		logger.Warn("initialize library watcher; manual scans remain available", "error", err)
-	}
-	go func() {
-		for err := range libraryWatcher.Errors() {
-			logger.Warn("library watcher error", "error", err)
+	if cfg.WatchMode == domain.WatchModePoll {
+		libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStatePolling)
+	} else {
+		libraryWatcher = watcher.New(cfg.WatcherWait, func(ctx context.Context, targets []string) error {
+			result, err := libraryService.ReconcileTargets(ctx, targets)
+			if err != nil {
+				return err
+			}
+			libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateHealthy)
+			if len(result.Pending) == 0 {
+				return nil
+			}
+			return enqueueScan(ctx, scanner.ScanTarget, result.Pending, " 文件变化扫描")
+		})
+		if err := libraryWatcher.Start(watchContext, libraryService.Root()); err != nil {
+			logger.Warn("initialize library watcher; directory polling fallback enabled", "error", err)
+			libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateDegraded)
+		} else {
+			libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateHealthy)
 		}
-	}()
-	defer libraryWatcher.Stop()
+		go func() {
+			for err := range libraryWatcher.Errors() {
+				logger.Warn("library watcher error; directory polling fallback enabled", "error", err)
+				libraryService.SetWatchStatus(cfg.WatchMode, domain.WatchStateDegraded)
+			}
+		}()
+		defer libraryWatcher.Stop()
+	}
+	if pending := libraryService.PendingPaths(); len(pending) > 0 {
+		if err := enqueueScan(context.Background(), scanner.ScanTarget, pending, " 恢复待索引文件"); err != nil && !errors.Is(err, watcher.ErrBusy) {
+			logger.Warn("enqueue persisted draft metadata scan", "error", err)
+		}
+	}
 	if cfg.ReconcileInterval > 0 {
 		go func() {
 			ticker := time.NewTicker(cfg.ReconcileInterval)

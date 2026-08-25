@@ -58,7 +58,6 @@ func TestServiceFiltersAndReturnsDefensiveCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	flac := service.ListTracks(TrackFilter{Format: domain.FormatFLAC})
 	if len(flac) != 1 || flac[0].Title != "Beta" {
 		t.Fatalf("flac filter = %#v", flac)
@@ -201,6 +200,83 @@ func TestServiceQuickScanSkipsUnchangedFilesAndMarksMissing(t *testing.T) {
 	missing := service.ListTracks(TrackFilter{Health: domain.HealthMissing})
 	if len(missing) != 1 || missing[0].RelativePath != "Second.flac" {
 		t.Fatalf("missing tracks=%#v", missing)
+	}
+}
+
+func TestReconcileDirectoryExposesDraftBeforeMetadataScan(t *testing.T) {
+	root := t.TempDir()
+	engine := &countingServiceEngine{}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe := service.SubscribeEvents()
+	defer unsubscribe()
+	<-events // initial recoverable snapshot
+	album := filepath.Join(root, "Artist", "Album")
+	if err := os.MkdirAll(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(album, "New.flac")
+	if err := os.WriteFile(path, []byte("new audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := service.ReconcileDirectory(context.Background(), "Artist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.reads.Load() != 0 {
+		t.Fatalf("filesystem reconcile read tags %d times", engine.reads.Load())
+	}
+	if !result.Changed || len(result.Pending) != 1 || result.Pending[0] != "Artist/Album/New.flac" {
+		t.Fatalf("reconcile result=%#v", result)
+	}
+	select {
+	case event := <-events:
+		if event.Kind != EventInventory || event.Generation != result.Generation {
+			t.Fatalf("inventory event=%#v result=%#v", event, result)
+		}
+	default:
+		t.Fatal("inventory event was not published")
+	}
+	page, err := service.ListTrackPage(TrackQuery{}, "", 100)
+	if err != nil || len(page.Tracks) != 1 || page.Tracks[0].SyncState != domain.SyncDraft {
+		t.Fatalf("draft page=%#v err=%v", page, err)
+	}
+	if _, err := service.FileRef(page.Tracks[0].ID); err != ErrTrackNotIndexed {
+		t.Fatalf("draft file ref error=%v", err)
+	}
+	if err := service.QuickScan(context.Background(), result.Pending); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-events:
+		if event.Kind != EventMetadata {
+			t.Fatalf("metadata event=%#v", event)
+		}
+	default:
+		t.Fatal("metadata event was not published")
+	}
+	indexed, err := service.Track(page.Tracks[0].ID)
+	if err != nil || indexed.SyncState != domain.SyncIndexed || engine.reads.Load() != 1 {
+		t.Fatalf("indexed track=%#v reads=%d err=%v", indexed, engine.reads.Load(), err)
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReconcileDirectory(context.Background(), "Artist/Album"); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ := service.ListTrackPage(TrackQuery{}, "", 100)
+	missing, _ := service.ListTrackPage(TrackQuery{Health: domain.HealthMissing}, "", 100)
+	if visible.Total != 0 || missing.Total != 1 {
+		t.Fatalf("visible=%#v missing=%#v", visible, missing)
 	}
 }
 

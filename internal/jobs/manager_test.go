@@ -137,6 +137,38 @@ func TestManagerRetriesFailedJob(t *testing.T) {
 	}
 }
 
+func TestReviewJobsDoNotBlockFilesystemRefresh(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	review, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobMatch, Title: "Review", Detail: "review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review.State = domain.JobReview
+	if err := repository.UpdateJob(context.Background(), review); err != nil {
+		t.Fatal(err)
+	}
+	active, err := manager.HasActive(context.Background())
+	if err != nil || !active {
+		t.Fatalf("review active=%v err=%v", active, err)
+	}
+	blocking, err := manager.HasBlockingFileWork(context.Background())
+	if err != nil || blocking {
+		t.Fatalf("review blocking=%v err=%v", blocking, err)
+	}
+	if _, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobScan, Title: "Scan", Detail: "waiting"}); err != nil {
+		t.Fatal(err)
+	}
+	blocking, err = manager.HasBlockingFileWork(context.Background())
+	if err != nil || !blocking {
+		t.Fatalf("scan blocking=%v err=%v", blocking, err)
+	}
+}
+
 func waitForState(t *testing.T, manager *jobs.Manager, id string, state domain.JobState) domain.Job {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
