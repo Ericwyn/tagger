@@ -1,0 +1,144 @@
+name: Build Linux x86_64
+
+on:
+  push:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  build_linux_amd64:
+    name: Build linux/amd64
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+      archive_name: ${{ steps.metadata.outputs.archive_name }}
+      checksum_name: ${{ steps.metadata.outputs.checksum_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Resolve build metadata
+        id: metadata
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            version="${RELEASE_TAG#v}"
+          else
+            version="dev-${GITHUB_SHA:0:7}"
+          fi
+
+          if [[ -z "$version" ]]; then
+            echo "::error::Could not determine the build version"
+            exit 1
+          fi
+
+          asset_version="${version//\//-}"
+          archive_name="tagger_${asset_version}_linux_amd64.tar.gz"
+          checksum_name="${archive_name}.sha256"
+          artifact_name="tagger-linux-amd64-${GITHUB_SHA}"
+
+          {
+            echo "version=$version"
+            echo "archive_name=$archive_name"
+            echo "checksum_name=$checksum_name"
+            echo "artifact_name=$artifact_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build embedded frontend and Linux binary
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: '0'
+        run: make build VERSION="$VERSION" BINARY=tagger
+
+      - name: Verify tests and static checks
+        run: |
+          make test
+          make lint
+
+      - name: Verify Linux x86_64 executable
+        shell: bash
+        run: |
+          test -x dist/tagger
+          file dist/tagger
+          file dist/tagger | grep -q 'ELF 64-bit.*x86-64'
+
+      - name: Package binary and checksum
+        shell: bash
+        env:
+          ARCHIVE_NAME: ${{ steps.metadata.outputs.archive_name }}
+          CHECKSUM_NAME: ${{ steps.metadata.outputs.checksum_name }}
+        run: |
+          mkdir -p release
+          tar -C dist -czf "release/$ARCHIVE_NAME" tagger
+          cd release
+          sha256sum "$ARCHIVE_NAME" > "$CHECKSUM_NAME"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: |
+            release/${{ steps.metadata.outputs.archive_name }}
+            release/${{ steps.metadata.outputs.checksum_name }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish_release:
+    name: Attach assets to GitHub Release
+    if: ${{ github.event_name == 'release' }}
+    needs:
+      - build_linux_amd64
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Download verified build artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ needs.build_linux_amd64.outputs.artifact_name }}
+          path: release
+
+      - name: Verify downloaded checksum
+        working-directory: release
+        env:
+          CHECKSUM_NAME: ${{ needs.build_linux_amd64.outputs.checksum_name }}
+        run: sha256sum --check "$CHECKSUM_NAME"
+
+      - name: Upload assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          ARCHIVE_NAME: ${{ needs.build_linux_amd64.outputs.archive_name }}
+          CHECKSUM_NAME: ${{ needs.build_linux_amd64.outputs.checksum_name }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "release/$ARCHIVE_NAME#Linux x86_64 (amd64)" \
+            "release/$CHECKSUM_NAME#SHA-256 checksum" \
+            --clobber \
+            --repo "$GH_REPO"
