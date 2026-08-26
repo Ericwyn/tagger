@@ -167,6 +167,27 @@ make build
 
 然后在设置页探测并添加音乐库。配置过的活动曲库会保存在 SQLite 中，后续启动时自动恢复；如果目录已经失效，Tagger 会保留旧索引并明确显示“未配置活动曲库”。
 
+### 使用 Docker
+
+正式发布的多架构镜像位于 `ghcr.io/ericwyn/tagger`，支持 `linux/amd64` 和 `linux/arm64`。音乐目录和运行数据需要分别挂载：
+
+```bash
+docker run -d \
+  --name tagger \
+  --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v /path/to/music:/music:rw \
+  -v /path/to/tagger-data:/data:rw \
+  -e TAGGER_MUSIC_DIR=/music \
+  -e TAGGER_DATA_DIR=/data \
+  -e TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' \
+  ghcr.io/ericwyn/tagger:latest
+```
+
+镜像默认设置 `TAGGER_LISTEN=0.0.0.0:8080`、`TAGGER_MUSIC_DIR=/music` 和 `TAGGER_DATA_DIR=/data`；这些值及 `TAGGER_AUTH_TOKEN` 都可以在运行容器时覆盖。镜像以 UID/GID `10001` 的非 root 用户运行，宿主机挂载目录必须允许该用户读写；首次只想检查标签时，可以先把音乐目录挂载为只读的 `/music:ro`。
+
+默认分支构建会发布 `edge` 和 `sha-<commit>` 标签。正式 GitHub Release 会发布完整、主次版本标签以及 `latest`；预发布版本只更新其精确版本标签，不覆盖 `latest`。
+
 ### 启用单用户访问令牌
 
 默认不启用鉴权。需要时可以在启动参数或环境变量中配置一个实例级令牌：
