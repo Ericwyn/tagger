@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -191,6 +192,7 @@ func (m *Manager) Retry(ctx context.Context, id, payload string) (domain.Job, er
 	if payload != "" {
 		job.Payload = payload
 	}
+	job.Total = retryPayloadTotal(job.Kind, job.Payload, job.Total)
 	job.State = domain.JobWaiting
 	job.Detail = "等待重试 worker"
 	job.Error = ""
@@ -279,6 +281,9 @@ func (m *Manager) execute(ctx context.Context, job domain.Job) {
 		cancel()
 	}
 	progress := func(processed, total, succeeded, failed int, detail string) error {
+		if err := validateProgress(processed, total, succeeded, failed); err != nil {
+			return err
+		}
 		job.Processed, job.Total, job.Succeeded, job.Failed, job.Detail = processed, total, succeeded, failed, detail
 		if err := m.repo.UpdateJob(jobCtx, job); err != nil {
 			return err
@@ -310,31 +315,94 @@ func (m *Manager) execute(ctx context.Context, job domain.Job) {
 	}
 	job.CompletedAt = m.now().UTC()
 	if errors.Is(err, ErrNeedsReview) {
-		job.State, job.Error = domain.JobReview, ""
-		if job.Total > 0 {
-			job.Processed = job.Total
-			job.Succeeded = job.Total - job.Failed
+		if completionErr := validateCompletedProgress(job); completionErr != nil {
+			finishFailedJob(&job, completionErr)
+		} else if job.Succeeded == 0 {
+			finishFailedJob(&job, errors.New("任务没有可审核的成功项"))
+		} else {
+			job.State, job.Error = domain.JobReview, ""
 		}
 		_ = m.repo.UpdateJob(context.Background(), job)
 		m.publish(job)
 		return
 	}
 	if err != nil {
-		job.State, job.Error, job.Failed = domain.JobFailed, err.Error(), max(1, job.Failed)
-		job.Detail = "任务失败：" + err.Error()
-	} else if job.Failed > 0 {
+		finishFailedJob(&job, err)
+	} else if completionErr := validateCompletedProgress(job); completionErr != nil {
+		finishFailedJob(&job, completionErr)
+	} else if job.Failed > 0 && job.Succeeded > 0 {
 		job.State, job.Error = domain.JobPartial, ""
-		if job.Total > 0 {
-			job.Processed, job.Succeeded = job.Total, job.Total-job.Failed
-		}
+	} else if job.Failed > 0 {
+		job.State, job.Error = domain.JobFailed, ""
 	} else {
 		job.State, job.Error = domain.JobSucceeded, ""
-		if job.Total > 0 {
-			job.Processed, job.Succeeded = job.Total, job.Total
-		}
 	}
 	_ = m.repo.UpdateJob(context.Background(), job)
 	m.publish(job)
+}
+
+func validateProgress(processed, total, succeeded, failed int) error {
+	if processed < 0 || total < 0 || succeeded < 0 || failed < 0 {
+		return errors.New("job progress counters cannot be negative")
+	}
+	if processed > total {
+		return fmt.Errorf("job processed count %d exceeds total %d", processed, total)
+	}
+	if succeeded+failed > processed {
+		return fmt.Errorf("job outcome count %d exceeds processed %d", succeeded+failed, processed)
+	}
+	return nil
+}
+
+func validateCompletedProgress(job domain.Job) error {
+	if err := validateProgress(job.Processed, job.Total, job.Succeeded, job.Failed); err != nil {
+		return err
+	}
+	if job.Processed != job.Total {
+		return fmt.Errorf("任务提前结束：仅处理 %d/%d 项", job.Processed, job.Total)
+	}
+	if job.Succeeded+job.Failed != job.Processed {
+		return fmt.Errorf("任务结果计数不完整：已处理 %d 项，成功 %d 项，失败 %d 项", job.Processed, job.Succeeded, job.Failed)
+	}
+	return nil
+}
+
+func finishFailedJob(job *domain.Job, err error) {
+	if job == nil || err == nil {
+		return
+	}
+	job.Error = err.Error()
+	if job.Succeeded > 0 {
+		job.State = domain.JobPartial
+		job.Detail = "任务部分完成：" + err.Error()
+		return
+	}
+	job.State = domain.JobFailed
+	job.Detail = "任务失败：" + err.Error()
+}
+
+func retryPayloadTotal(kind domain.JobKind, payload string, fallback int) int {
+	if payload == "" {
+		return fallback
+	}
+	var counts struct {
+		TrackIDs []json.RawMessage `json:"trackIds"`
+		Items    []json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(payload), &counts); err != nil {
+		return fallback
+	}
+	switch kind {
+	case domain.JobMatch:
+		if len(counts.TrackIDs) > 0 {
+			return len(counts.TrackIDs)
+		}
+	case domain.JobWrite, domain.JobBatchEdit:
+		if len(counts.Items) > 0 {
+			return len(counts.Items)
+		}
+	}
+	return fallback
 }
 
 func (m *Manager) registerRunning(id string, cancel context.CancelFunc) {

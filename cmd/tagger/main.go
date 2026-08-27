@@ -169,11 +169,12 @@ func main() {
 	} else {
 		artworkCache = cache
 	}
-	cachedArtworkDownloader := defaultArtworkDownloader
+	configuredArtworkDownloader := artworkDownloader(providerRegistry.DownloadArtwork)
+	cachedArtworkDownloader := configuredArtworkDownloader
 	if artworkCache != nil {
 		cachedArtworkDownloader = func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
 			return artworkCache.Get(ctx, reference.URL, func() (artwork.Asset, error) {
-				return defaultArtworkDownloader(ctx, reference)
+				return configuredArtworkDownloader(ctx, reference)
 			})
 		}
 	}
@@ -234,7 +235,7 @@ func main() {
 			total = before
 		}
 		succeeded := report.Parsed + report.Unchanged
-		return progress(total, total, succeeded, report.Failed, fmt.Sprintf("%s扫描完成：变化 %d 首，未变化 %d 首，缺失 %d 首", scanModeLabel(payload.Mode), report.Changed, report.Unchanged, report.Missing))
+		return progress(total, total, succeeded, report.Failed, fmt.Sprintf("%s扫描完成：变化 %d 首，未变化 %d 首，解析失败 %d 首，缺失 %d 首", scanModeLabel(payload.Mode), report.Changed, report.Unchanged, report.Failed, report.Missing))
 	})
 	jobManager.Register(domain.JobMatch, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
 		var payload struct {
@@ -257,12 +258,16 @@ func main() {
 			}
 			if err != nil {
 				failed++
-				_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()})
+				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()}); persistErr != nil {
+					return fmt.Errorf("persist failed match item %s: %w", trackID, persistErr)
+				}
 			} else {
 				result, searchErr := providerRegistry.SearchTrack(ctx, track, providers.Query{}, payload.ProviderIDs, payload.Limit)
 				if searchErr != nil {
 					failed++
-					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()})
+					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()}); persistErr != nil {
+						return fmt.Errorf("persist failed match item %s: %w", trackID, persistErr)
+					}
 				} else {
 					providerQueries += len(result.Providers)
 					candidateCount += len(result.Candidates)
@@ -273,18 +278,23 @@ func main() {
 					} else {
 						succeeded++
 					}
-					candidateJSON, _ := json.Marshal(result.Candidates)
-					_ = dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON})
+					candidateJSON, marshalErr := json.Marshal(result.Candidates)
+					if marshalErr != nil {
+						return fmt.Errorf("encode match candidates for %s: %w", trackID, marshalErr)
+					}
+					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON}); persistErr != nil {
+						return fmt.Errorf("persist match item %s: %w", trackID, persistErr)
+					}
 				}
 			}
-			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, formatMatchProgress(index+1, len(payload.TrackIDs), providerQueries, candidateCount)); err != nil {
+			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, formatMatchProgress(index+1, len(payload.TrackIDs), providerQueries, candidateCount, failed)); err != nil {
 				return err
 			}
 		}
-		if failed > 0 {
-			return nil
+		if succeeded > 0 {
+			return jobs.ErrNeedsReview
 		}
-		return jobs.ErrNeedsReview
+		return nil
 	})
 	jobManager.Register(domain.JobWrite, func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
 		var payload struct {
@@ -308,7 +318,8 @@ func main() {
 			artworkResult *filewrite.ArtworkResult
 		}
 		completed := make([]completedWrite, 0, len(payload.Items))
-		failed := 0
+		succeeded, failed := 0, 0
+		var lastFailure error
 		for index, item := range payload.Items {
 			matchItem, err := dataStore.MatchItem(ctx, payload.MatchJobID, item.TrackID)
 			var candidate providers.MatchCandidate
@@ -365,12 +376,16 @@ func main() {
 								artworkResult = &result
 							}
 						}
+						// Keep every track whose tag phase completed so it can be
+						// rescanned and recorded even when the requested artwork phase
+						// failed. It is still one failed item in the job counters.
 						completed = append(completed, completedWrite{trackID: item.TrackID, candidate: candidate, tagResult: tagResult, artworkResult: artworkResult})
 					}
 				}
 			}
 			if err != nil {
 				failed++
+				lastFailure = err
 				state := "write_failed"
 				if artworkFailedAfterTags {
 					state = "artwork_failed"
@@ -382,8 +397,9 @@ func main() {
 				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{ID: matchItem.ID, JobID: payload.MatchJobID, TrackID: item.TrackID, State: "written", Candidates: matchItem.Candidates, SelectedCandidateID: item.CandidateID, ReviewFields: append([]string(nil), item.Fields...), ReviewArtwork: item.Artwork, ReviewArtworkMaxSize: item.ArtworkMaxSize}); persistErr != nil {
 					return fmt.Errorf("persist written match item %s: %w", item.TrackID, persistErr)
 				}
+				succeeded++
 			}
-			if err := progress(index+1, len(payload.Items), len(completed), failed, fmt.Sprintf("已写入 %d/%d 首曲目", index+1, len(payload.Items))); err != nil {
+			if err := progress(index+1, len(payload.Items), succeeded, failed, formatItemProgress("写入", index+1, len(payload.Items), succeeded, failed, lastFailure)); err != nil {
 				return err
 			}
 		}
@@ -531,8 +547,25 @@ func main() {
 	srv.Spin()
 }
 
-func formatMatchProgress(processed, total, providerQueries, candidateCount int) string {
-	return fmt.Sprintf("已分析 %d/%d 首曲目 · 已查询 %d 次数据源 · 返回 %d 个候选", processed, total, providerQueries, candidateCount)
+func formatMatchProgress(processed, total, providerQueries, candidateCount, failed int) string {
+	detail := fmt.Sprintf("已分析 %d/%d 首曲目 · 已查询 %d 次数据源 · 返回 %d 个候选", processed, total, providerQueries, candidateCount)
+	if failed > 0 {
+		detail += fmt.Sprintf(" · %d 首失败或无匹配", failed)
+	}
+	return detail
+}
+
+func formatItemProgress(action string, processed, total, succeeded, failed int, lastFailure error) string {
+	detail := fmt.Sprintf("已处理 %d/%d 首曲目 · %s成功 %d 首 · 失败 %d 首", processed, total, action, succeeded, failed)
+	if lastFailure == nil {
+		return detail
+	}
+	message := strings.Join(strings.Fields(lastFailure.Error()), " ")
+	characters := []rune(message)
+	if len(characters) > 160 {
+		message = string(characters[:157]) + "…"
+	}
+	return detail + " · 最近失败：" + message
 }
 
 func scanModeLabel(mode scanner.ScanMode) string {
@@ -558,7 +591,7 @@ func finalizeMatchJobAfterWrite(ctx context.Context, manager *jobs.Manager, data
 	if err != nil {
 		return err
 	}
-	if matchJob.Kind != domain.JobMatch || (matchJob.State != domain.JobReview && matchJob.State != domain.JobPartial) {
+	if !domain.IsMatchReviewable(matchJob) {
 		return nil
 	}
 	items, err := dataStore.ListMatchItems(ctx, matchJobID)
@@ -592,21 +625,27 @@ func finalizeMatchJobAfterWrite(ctx context.Context, manager *jobs.Manager, data
 	if pending {
 		return nil
 	}
-	if matchJob.Failed > failures {
-		// Preserve failures from an earlier matching pass even if an old
-		// database snapshot does not contain a corresponding match item.
-		failures = matchJob.Failed
-	}
 	if matchJob.Total == 0 {
 		matchJob.Total = len(items)
 	}
-	matchJob.Processed = matchJob.Total
+	if len(items) > matchJob.Total {
+		matchJob.Total = len(items)
+	}
+	// A legacy/incomplete snapshot can be missing item rows. Count only those
+	// unrepresented tracks as failures; an item that was successfully rematched
+	// must be allowed to clear its earlier failure count.
+	failures += max(0, matchJob.Total-len(items))
+	resolved := written + skipped
+	matchJob.Processed = resolved + failures
 	matchJob.Failed = failures
-	matchJob.Succeeded = max(0, matchJob.Total-failures)
+	matchJob.Succeeded = resolved
 	matchJob.CompletedAt = time.Now().UTC()
-	if failures > 0 {
+	if failures > 0 && resolved > 0 {
 		matchJob.State = domain.JobPartial
 		matchJob.Detail = fmt.Sprintf("审核完成：已写入 %d 首，%d 首失败", written, failures)
+	} else if failures > 0 {
+		matchJob.State = domain.JobFailed
+		matchJob.Detail = fmt.Sprintf("审核失败：已写入 %d 首，%d 首失败", written, failures)
 	} else {
 		matchJob.State = domain.JobSucceeded
 		matchJob.Detail = fmt.Sprintf("审核完成：已写入 %d 首", written)
@@ -646,11 +685,13 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 			result        filewrite.Result
 			artworkResult *filewrite.ArtworkResult
 		}, 0, len(payload.Items))
-		failed := 0
+		succeeded, failed := 0, 0
+		var lastFailure error
 		for index, item := range payload.Items {
 			track, err := libraryService.Track(item.TrackID)
 			var result filewrite.Result
 			var completedArtworkResult *filewrite.ArtworkResult
+			tagPhaseCompleted := false
 			if err == nil {
 				ref, refErr := libraryService.FileRef(item.TrackID)
 				if refErr != nil {
@@ -661,6 +702,7 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 						baseRevision = track.Revision
 					}
 					result, err = tagWriter.Write(ctx, ref, baseRevision, patchFromBatchEdit(track, payload.Operations, payload.SequenceTracks, index, len(payload.Items)), false)
+					tagPhaseCompleted = err == nil
 					if err == nil && payload.Artwork != nil {
 						var target *artwork.Asset
 						if payload.Artwork.Action == domain.BatchArtworkReplace {
@@ -680,9 +722,19 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 					}
 				}
 			}
+			if tagPhaseCompleted {
+				// Preserve successful tag mutations for rescan/history even when
+				// a following artwork phase makes the overall item fail.
+				completed = append(completed, struct {
+					track         domain.Track
+					result        filewrite.Result
+					artworkResult *filewrite.ArtworkResult
+				}{track: track, result: result, artworkResult: completedArtworkResult})
+			}
 			state := "written"
 			if err != nil {
 				failed++
+				lastFailure = err
 				state = "failed"
 			}
 			diff, marshalErr := json.Marshal(result.Diff)
@@ -693,13 +745,9 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 				return fmt.Errorf("persist batch edit item %s: %w", item.TrackID, persistErr)
 			}
 			if err == nil {
-				completed = append(completed, struct {
-					track         domain.Track
-					result        filewrite.Result
-					artworkResult *filewrite.ArtworkResult
-				}{track: track, result: result, artworkResult: completedArtworkResult})
+				succeeded++
 			}
-			if progressErr := progress(index+1, len(payload.Items), len(completed), failed, fmt.Sprintf("已编辑 %d/%d 首曲目", index+1, len(payload.Items))); progressErr != nil {
+			if progressErr := progress(index+1, len(payload.Items), succeeded, failed, formatItemProgress("编辑", index+1, len(payload.Items), succeeded, failed, lastFailure)); progressErr != nil {
 				return progressErr
 			}
 		}
@@ -863,10 +911,6 @@ func splitBatchValues(value string) []string {
 }
 
 type artworkDownloader func(context.Context, providers.ArtworkReference) (artwork.Asset, error)
-
-func defaultArtworkDownloader(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
-	return providers.DownloadArtwork(ctx, reference, nil)
-}
 
 func artworkRevisionSnapshot(asset *artwork.Asset) *domain.ArtworkSnapshot {
 	if asset == nil {

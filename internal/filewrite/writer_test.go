@@ -132,6 +132,42 @@ func (e *memoryEngine) Write(_ context.Context, path string, updates map[string]
 
 func (e *memoryEngine) Version() string { return "memory" }
 
+func TestWriterValidateWritableChecksTemporarySiblingPermission(t *testing.T) {
+	root := t.TempDir()
+	album := filepath.Join(root, "album")
+	if err := os.Mkdir(album, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(album, "song.mp3")
+	if err := os.WriteFile(path, []byte("fake audio"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	engine := newMemoryEngine(map[string][]string{"TITLE": {"Song"}})
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatMP3, engine)
+
+	// Atomic replacement only needs to read the source; a read-only source file
+	// remains writable when its containing directory permits replacement.
+	if err := writer.ValidateWritable([]library.FileRef{ref}); err != nil {
+		t.Fatalf("writable directory preflight: %v", err)
+	}
+	if leftovers, err := filepath.Glob(filepath.Join(album, ".tagger-write-check-*")); err != nil || len(leftovers) != 0 {
+		t.Fatalf("permission probes leaked: %v err=%v", leftovers, err)
+	}
+
+	if err := os.Chmod(album, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(album, 0o755) })
+	err = writer.ValidateWritable([]library.FileRef{ref})
+	if !errors.Is(err, ErrTargetNotWritable) || !strings.Contains(err.Error(), "temporary sibling") {
+		t.Fatalf("read-only directory preflight error = %v", err)
+	}
+}
+
 func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "song.mp3")

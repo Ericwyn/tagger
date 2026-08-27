@@ -39,6 +39,41 @@ func TestSearchBuildsOfficialRecordingQueryAndMapsResponse(t *testing.T) {
 	}
 }
 
+func TestArchiveDownloadBaseURLConfiguration(t *testing.T) {
+	client := New(Config{})
+	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != providers.DefaultArchiveDownloadBaseURL {
+		t.Fatalf("default archive download base = %q", got)
+	}
+	var field providers.ConfigField
+	for _, candidate := range client.ConfigFields() {
+		if candidate.Key == "archiveDownloadBaseUrl" {
+			field = candidate
+			break
+		}
+	}
+	if field.Value != providers.DefaultArchiveDownloadBaseURL || !field.Required || field.Type != "url" {
+		t.Fatalf("archive download config field = %#v", field)
+	}
+	if err := client.Configure(map[string]string{"archiveDownloadBaseUrl": "https://vercel-proxy.example.test/https/archive.org/"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != "https://vercel-proxy.example.test/https/archive.org" {
+		t.Fatalf("configured archive download base = %q", got)
+	}
+	if err := client.Configure(map[string]string{"archiveDownloadBaseUrl": "http://mirror.example.test"}); err == nil {
+		t.Fatal("insecure archive mirror was accepted")
+	}
+	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != "https://vercel-proxy.example.test/https/archive.org" {
+		t.Fatalf("invalid update changed archive download base to %q", got)
+	}
+	if err := client.ResetConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != providers.DefaultArchiveDownloadBaseURL {
+		t.Fatalf("reset archive download base = %q", got)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

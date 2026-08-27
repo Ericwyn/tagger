@@ -87,6 +87,59 @@ func TestEmbeddedTagProjectionMigrationMarksPresentFilesDraft(t *testing.T) {
 	}
 }
 
+func TestJobStateConsistencyMigrationMarksAllFailedJobsFailed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "job-state.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationMu.Lock()
+	goose.SetBaseFS(migrationFiles)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		migrationMu.Unlock()
+		t.Fatal(err)
+	}
+	err = goose.UpToContext(context.Background(), db, "migrations", 15, goose.WithNoColor(true))
+	migrationMu.Unlock()
+	if err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	const timestamp = "2026-08-28T08:03:01Z"
+	if _, err := db.Exec(`
+		INSERT INTO jobs(id, kind, state, library_id, title, detail, processed, total, succeeded, failed, error_text, payload_json, created_at, updated_at)
+		VALUES
+			('job-all-failed', 'write', 'partial', 'lib-1', 'Write', '已写入 8/8 首曲目', 8, 8, 0, 8, '', '{}', ?, ?),
+			('job-mixed', 'write', 'partial', 'lib-1', 'Write', 'mixed result', 8, 8, 3, 5, '', '{}', ?, ?)`,
+		timestamp, timestamp, timestamp, timestamp); err != nil {
+		_ = db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dataStore, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	failedJob, err := dataStore.Job(context.Background(), "job-all-failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedJob.State != domain.JobFailed || failedJob.Detail != "处理完成：成功 0 项，失败 8 项" {
+		t.Fatalf("migrated all-failed job = %#v", failedJob)
+	}
+	mixedJob, err := dataStore.Job(context.Background(), "job-mixed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mixedJob.State != domain.JobPartial || mixedJob.Detail != "mixed result" {
+		t.Fatalf("migration changed mixed job = %#v", mixedJob)
+	}
+}
+
 func TestSaveLoadAndReplaceScan(t *testing.T) {
 	dataStore := openTestStore(t)
 	root := "/music/archive"

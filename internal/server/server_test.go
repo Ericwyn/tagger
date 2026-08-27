@@ -611,6 +611,110 @@ func TestJobRetryAPIOnlyResubmitsFailedMatchItems(t *testing.T) {
 	if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.TrackIDs) != 1 || filtered.TrackIDs[0] != "trk-failed" {
 		t.Fatalf("retry payload = %q", retried.Payload)
 	}
+	if retried.Total != 1 {
+		t.Fatalf("retry total = %d, want filtered total 1", retried.Total)
+	}
+}
+
+func TestJobRetryAPIIncludesUnprocessedCancelledItems(t *testing.T) {
+	t.Run("match item without a durable row", func(t *testing.T) {
+		s := newTestServer(t)
+		manager := jobs.New(s.store)
+		s.SetJobManager(manager)
+		tracks := s.library.ListTracks(library.TrackFilter{})
+		payload := mustJSON(matchBatchRequest{TrackIDs: []string{tracks[0].ID, tracks[1].ID}, Limit: 5})
+		job, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobMatch, State: domain.JobCancelled, Title: "Match", Total: 2, Payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: job.ID, TrackID: tracks[0].ID, State: "review"}); err != nil {
+			t.Fatal(err)
+		}
+
+		response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+job.ID+"/retry", nil)
+		if response.Code != 202 {
+			t.Fatalf("match retry = %d %s", response.Code, response.Body.String())
+		}
+		retried, err := s.store.Job(context.Background(), job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filtered matchBatchRequest
+		if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.TrackIDs) != 1 || filtered.TrackIDs[0] != tracks[1].ID || retried.Total != 1 {
+			t.Fatalf("filtered match retry = %#v job=%#v err=%v", filtered, retried, err)
+		}
+	})
+
+	t.Run("write item left pending", func(t *testing.T) {
+		s := newTestServer(t)
+		manager := jobs.New(s.store)
+		s.SetJobManager(manager)
+		tracks := s.library.ListTracks(library.TrackFilter{})
+		parent, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobMatch, State: domain.JobReview, Title: "Match", Total: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: parent.ID, TrackID: tracks[0].ID, State: "written"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{JobID: parent.ID, TrackID: tracks[1].ID, State: "write_pending"}); err != nil {
+			t.Fatal(err)
+		}
+		payload := mustJSON(struct {
+			MatchJobID string           `json:"matchJobId"`
+			Items      []writeSelection `json:"items"`
+		}{parent.ID, []writeSelection{{TrackID: tracks[0].ID}, {TrackID: tracks[1].ID}}})
+		job, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobWrite, State: domain.JobCancelled, Title: "Write", Total: 2, Payload: payload})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+job.ID+"/retry", nil)
+		if response.Code != 202 {
+			t.Fatalf("write retry = %d %s", response.Code, response.Body.String())
+		}
+		retried, err := s.store.Job(context.Background(), job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filtered struct {
+			Items []writeSelection `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.Items) != 1 || filtered.Items[0].TrackID != tracks[1].ID || retried.Total != 1 {
+			t.Fatalf("filtered write retry = %#v job=%#v err=%v", filtered, retried, err)
+		}
+	})
+
+	t.Run("batch item without a durable row", func(t *testing.T) {
+		s := newTestServer(t)
+		manager := jobs.New(s.store)
+		s.SetJobManager(manager)
+		tracks := s.library.ListTracks(library.TrackFilter{})
+		payload := domain.BatchEditPayload{
+			Items:      []domain.BatchEditItem{{TrackID: tracks[0].ID}, {TrackID: tracks[1].ID}},
+			Operations: []domain.BatchEditOperation{{Field: "genres", Mode: domain.BatchEditAppend, Value: "Live"}},
+		}
+		job, err := manager.Enqueue(context.Background(), domain.Job{Kind: domain.JobBatchEdit, State: domain.JobCancelled, Title: "Batch", Total: 2, Payload: mustJSON(payload)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.store.UpsertBatchEditItem(context.Background(), store.BatchEditItem{JobID: job.ID, TrackID: tracks[0].ID, State: "written"}); err != nil {
+			t.Fatal(err)
+		}
+
+		response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/jobs/"+job.ID+"/retry", nil)
+		if response.Code != 202 {
+			t.Fatalf("batch retry = %d %s", response.Code, response.Body.String())
+		}
+		retried, err := s.store.Job(context.Background(), job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var filtered domain.BatchEditPayload
+		if err := json.Unmarshal([]byte(retried.Payload), &filtered); err != nil || len(filtered.Items) != 1 || filtered.Items[0].TrackID != tracks[1].ID || filtered.Items[0].BaseRevision != tracks[1].Revision || retried.Total != 1 {
+			t.Fatalf("filtered batch retry = %#v job=%#v err=%v", filtered, retried, err)
+		}
+	})
 }
 
 func TestJobRetryAPIResubmitsArtworkFailureWithCurrentRevision(t *testing.T) {
@@ -627,7 +731,7 @@ func TestJobRetryAPIResubmitsArtworkFailureWithCurrentRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePayload := `{"matchJobId":"` + matchJob.ID + `","items":[{"trackId":"` + track.ID + `","candidateId":"cand-artwork","baseRevision":"stale-revision","fields":["title"],"artwork":true}]}`
-	writeJob, err := manager.Enqueue(context.Background(), domain.Job{ID: "job-write-artwork", Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "Write", Detail: "partial", State: domain.JobPartial, Payload: writePayload, Total: 1, Processed: 1, Failed: 1})
+	writeJob, err := manager.Enqueue(context.Background(), domain.Job{ID: "job-write-artwork", Kind: domain.JobWrite, LibraryID: s.library.Library().ID, Title: "Write", Detail: "failed", State: domain.JobFailed, Payload: writePayload, Total: 1, Processed: 1, Failed: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,6 +829,32 @@ func TestBatchEditAPIQueuesRevisionGuardedJob(t *testing.T) {
 		&ut.Body{Body: bytes.NewReader(numericReplaceBody), Len: len(numericReplaceBody)}, ut.Header{Key: "content-type", Value: "application/json"})
 	if numericReplace.Code != 400 || !containsJSON(numericReplace.Body.Bytes(), `不支持查找替换`) {
 		t.Fatalf("numeric replace = %d %s", numericReplace.Code, numericReplace.Body.String())
+	}
+}
+
+func TestBatchEditAPIRejectsUnwritableMusicDirectoryBeforeEnqueue(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	root := s.library.Root()
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, info.Mode().Perm()) })
+	body := []byte(`{"items":[{"trackId":"` + track.ID + `","baseRevision":"` + track.Revision + `"}],"operations":[{"field":"genres","mode":"append","value":"Live"}]}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/batch-edit",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 422 || !containsJSON(response.Body.Bytes(), `"code":"write_target_unwritable"`) || !containsJSON(response.Body.Bytes(), `同目录临时副本`) {
+		t.Fatalf("unwritable batch edit = %d %s", response.Code, response.Body.String())
+	}
+	listed, err := manager.List(context.Background(), 10)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("preflight failure enqueued jobs: %#v err=%v", listed, err)
 	}
 }
 
@@ -886,6 +1016,58 @@ func TestMatchWriteAPIMarksAcceptedItemsWritePending(t *testing.T) {
 	}
 	if item.State != "write_pending" || item.SelectedCandidateID != "candidate-accepted" {
 		t.Fatalf("match item after write enqueue = %#v", item)
+	}
+}
+
+func TestFailedMatchWritePreflightKeepsReviewStateUntilDirectoryIsWritable(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-failed-review", Kind: domain.JobMatch, LibraryID: s.library.Library().ID,
+		Title: "Match", Detail: "failed", State: domain.JobFailed, Total: 1, Processed: 1, Failed: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, _ := json.Marshal([]providers.MatchCandidate{{
+		ID: "candidate-retry", ProviderID: "test-provider",
+		Title: providers.Field[string]{Value: track.Title, Source: "Test"},
+	}})
+	if err := s.store.UpsertMatchItem(context.Background(), store.MatchItem{
+		JobID: matchJob.ID, TrackID: track.ID, State: "review", Candidates: candidates,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"items":[{"trackId":"` + track.ID + `","candidateId":"candidate-retry","baseRevision":"` + track.Revision + `","fields":["title"]}]}`)
+	root := s.library.Root()
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, info.Mode().Perm()) })
+
+	unwritable := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/jobs/"+matchJob.ID+"/write",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if unwritable.Code != 422 || !containsJSON(unwritable.Body.Bytes(), `"code":"write_target_unwritable"`) {
+		t.Fatalf("unwritable match write = %d %s", unwritable.Code, unwritable.Body.String())
+	}
+	item, err := s.store.MatchItem(context.Background(), matchJob.ID, track.ID)
+	if err != nil || item.State != "review" {
+		t.Fatalf("preflight mutated review item = %#v err=%v", item, err)
+	}
+
+	if err := os.Chmod(root, info.Mode().Perm()); err != nil {
+		t.Fatal(err)
+	}
+	writable := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/jobs/"+matchJob.ID+"/write",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if writable.Code != 202 || !containsJSON(writable.Body.Bytes(), `"kind":"write"`) {
+		t.Fatalf("resubmitted failed match write = %d %s", writable.Code, writable.Body.String())
 	}
 }
 

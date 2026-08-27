@@ -240,6 +240,7 @@ export const providerConfigs: ProviderConfig[] = [
     quotaLabel: '1 req/s · 正常',
     config: [
       {key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/'},
+      {key: 'archiveDownloadBaseUrl', label: 'Internet Archive 下载基址', type: 'url', value: 'https://archive.org', required: true, description: '支持镜像 origin 或带路径的代理前缀，末尾会拼接 /download/ 路径'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: musicBrainzUserAgent, description: 'MusicBrainz 要求保留可联系的应用标识'},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '1000'},
     ],

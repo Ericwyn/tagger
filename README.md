@@ -125,6 +125,8 @@ flowchart LR
 | 酷狗音乐 | 中文曲库、LRC 歌词和封面补充 | 实验性，默认关闭 |
 | [LrcApi](https://github.com/HisAtri/LrcApi) | 可自托管的歌词/封面聚合接口 | 实验性，默认关闭 |
 
+MusicBrainz 的结构化查询和封面下载分别配置：`API Base URL` 用于查询 recording，`Internet Archive 下载基址` 用于改写 Cover Art Archive 返回的 `archive.org/download/...` 地址。后者默认是 `https://archive.org`，既可以填写兼容 `/download/{item}/{file}` 的 HTTPS 镜像 origin，也可以填写会继续拼接该路径的代理前缀，例如 `https://vercel-proxy.example/https/archive.org`。
+
 所有远程封面都会经过安全代理、MIME/尺寸校验和短期磁盘缓存；来源没有可用封面时，界面默认显示空白，不使用自动生成图片干扰审核。网易云、酷我、酷狗等非官方接口可能随时变化，是否启用由用户自己决定。
 
 ## 安全写入模型
@@ -185,6 +187,50 @@ docker run -d \
 ```
 
 镜像默认设置 `TAGGER_LISTEN=0.0.0.0:8080`、`TAGGER_MUSIC_DIR=/music` 和 `TAGGER_DATA_DIR=/data`；这些值及 `TAGGER_AUTH_TOKEN` 都可以在运行容器时覆盖。镜像以 UID/GID `10001` 的非 root 用户运行，宿主机挂载目录必须允许该用户读写；首次只想检查标签时，可以先把音乐目录挂载为只读的 `/music:ro`。
+
+#### 使用宿主机 UID/GID
+
+如果宿主机或 NAS 上的音乐目录不属于 `10001:10001`，推荐在创建容器时通过 Docker 原生的 `--user UID:GID` 覆盖默认身份。先查看当前用户以及音乐目录的数字所有者：
+
+```bash
+id
+id -u
+id -g
+stat -c '%u:%g' /path/to/music
+```
+
+例如，让 Tagger 使用当前登录用户的 UID/GID：
+
+```bash
+docker run -d \
+  --name tagger \
+  --restart unless-stopped \
+  --user "$(id -u):$(id -g)" \
+  -p 127.0.0.1:8080:8080 \
+  -v /path/to/music:/music:rw \
+  -v /path/to/tagger-data:/data:rw \
+  -e TAGGER_AUTH_TOKEN='replace-with-a-long-random-token' \
+  ghcr.io/ericwyn/tagger:latest
+```
+
+Docker Compose 可以使用 `.env` 中的变量：
+
+```yaml
+services:
+  tagger:
+    image: ghcr.io/ericwyn/tagger:latest
+    user: "${TAGGER_UID:-10001}:${TAGGER_GID:-10001}"
+    volumes:
+      - /path/to/music:/music:rw
+      - /path/to/tagger-data:/data:rw
+```
+
+```dotenv
+TAGGER_UID=1000
+TAGGER_GID=1000
+```
+
+`/music` 中每个目标文件的父目录必须允许该身份读取、写入和进入，`/data` 也必须可写。Tagger 的安全写入会在音乐文件同目录创建临时副本，因此只修改文件本身的权限还不够。如果目录依赖共享组权限，可以额外使用 Docker 的 `--group-add <GID>`。不建议自动递归修改整个音乐库的所有者；对 NAS、NFS 或 SMB 挂载，应优先保持宿主机现有权限模型并选择匹配的 UID/GID。容器启动后可用 `docker exec tagger id` 确认实际身份。
 
 默认分支构建会发布 `edge` 和 `sha-<commit>` 标签。正式 GitHub Release 会发布完整、主次版本标签以及 `latest`；预发布版本只更新其精确版本标签，不覆盖 `latest`。
 

@@ -38,3 +38,19 @@ type Job struct {
 	CompletedAt time.Time
 	UpdatedAt   time.Time
 }
+
+// IsMatchReviewable reports whether a persisted matching workflow can still
+// be opened to inspect, rematch, skip, or resubmit items. Failed and partial
+// workflows remain reviewable so a write permission fix does not force users
+// to discard otherwise valid candidates.
+func IsMatchReviewable(job Job) bool {
+	if job.Kind != JobMatch {
+		return false
+	}
+	switch job.State {
+	case JobReview, JobPartial, JobFailed:
+		return true
+	default:
+		return false
+	}
+}

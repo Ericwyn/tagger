@@ -842,7 +842,10 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   };
 
 		const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
-	    const selectedTracksForJob = selectedTracks;
+	    // Match the drawer's "应用到 N 首" contract: tracks already known to
+	    // be read-only are excluded, while the backend still performs an
+	    // authoritative effective-permission preflight before enqueueing.
+	    const selectedTracksForJob = selectedTracks.filter((track) => track.writable);
 	    if (selectedTracksForJob.some((track) => !isTrackIndexed(track))) {
 	      onNotice('选择中包含正在索引的文件，请等待完成后再批量编辑');
 	      return;

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ericwyn/tagger/internal/artwork"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -310,6 +311,26 @@ func (r *Registry) ArtworkReference(candidateID string) (ArtworkReference, error
 		return ArtworkReference{}, ErrArtworkReferenceNotFound
 	}
 	return reference, nil
+}
+
+// DownloadArtwork applies strategy-owned transport settings after resolving a
+// candidate reference. This keeps provider diagnostics, previews and write
+// jobs on the same configured download path.
+func (r *Registry) DownloadArtwork(ctx context.Context, reference ArtworkReference) (artwork.Asset, error) {
+	if r == nil {
+		return DownloadArtwork(ctx, reference, nil)
+	}
+	return DownloadArtworkWithOptions(ctx, reference, nil, r.artworkDownloadOptions(reference.ProviderID))
+}
+
+func (r *Registry) artworkDownloadOptions(providerID string) ArtworkDownloadOptions {
+	options := ArtworkDownloadOptions{}
+	if strategy, found := r.strategies[providerID]; found {
+		if source, ok := strategy.(ArtworkDownloadOptionsProvider); ok {
+			options = source.ArtworkDownloadOptions()
+		}
+	}
+	return options
 }
 
 // ClearArtworkReferences drops the in-memory mirror after the persistence

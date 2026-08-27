@@ -57,19 +57,23 @@ func New(listen string, libraryService *library.Service, writer *filewrite.Write
 		hserver.WithHostPorts(listen),
 		hserver.WithMaxRequestBodySize(artwork.MaxBytes+1<<20),
 	)
+	downloadArtwork := func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+		return providers.DownloadArtwork(ctx, reference, nil)
+	}
+	if providerRegistry != nil {
+		downloadArtwork = providerRegistry.DownloadArtwork
+	}
 	s := &Server{
-		h:             h,
-		library:       libraryService,
-		writer:        writer,
-		providers:     providerRegistry,
-		store:         dataStore,
-		frontend:      frontend,
-		listen:        listen,
-		version:       version,
-		tagEngineInfo: tagEngineInfo,
-		downloadArtwork: func(ctx context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
-			return providers.DownloadArtwork(ctx, reference, nil)
-		},
+		h:               h,
+		library:         libraryService,
+		writer:          writer,
+		providers:       providerRegistry,
+		store:           dataStore,
+		frontend:        frontend,
+		listen:          listen,
+		version:         version,
+		tagEngineInfo:   tagEngineInfo,
+		downloadArtwork: downloadArtwork,
 	}
 	s.routes()
 	return s
@@ -835,15 +839,14 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		if err != nil {
 			return "", err
 		}
-		failed := make(map[string]struct{}, len(items))
+		states := make(map[string]string, len(items))
 		for _, item := range items {
-			if item.State == "failed" || item.State == "no_match" {
-				failed[item.TrackID] = struct{}{}
-			}
+			states[item.TrackID] = item.State
 		}
 		trackIDs := make([]string, 0, len(payload.TrackIDs))
 		for _, trackID := range payload.TrackIDs {
-			if _, ok := failed[trackID]; ok {
+			state, found := states[trackID]
+			if !found || state == "failed" || state == "no_match" {
 				trackIDs = append(trackIDs, trackID)
 			}
 		}
@@ -865,18 +868,15 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		if err != nil {
 			return "", err
 		}
-		failed := make(map[string]struct{}, len(failedItems))
-		failedStates := make(map[string]string, len(failedItems))
+		states := make(map[string]string, len(failedItems))
 		for _, item := range failedItems {
-			if item.State == "write_failed" || item.State == "artwork_failed" {
-				failedStates[item.TrackID] = item.State
-				failed[item.TrackID] = struct{}{}
-			}
+			states[item.TrackID] = item.State
 		}
 		items := make([]writeSelection, 0, len(payload.Items))
 		for _, item := range payload.Items {
-			if _, ok := failed[item.TrackID]; ok {
-				if failedStates[item.TrackID] == "artwork_failed" {
+			state, found := states[item.TrackID]
+			if !found || state == "write_failed" || state == "artwork_failed" || state == "write_pending" {
+				if state == "artwork_failed" {
 					track, trackErr := s.library.Track(item.TrackID)
 					if trackErr != nil {
 						return "", trackErr
@@ -903,15 +903,14 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		if err != nil {
 			return "", err
 		}
-		failed := make(map[string]struct{}, len(failedItems))
+		states := make(map[string]string, len(failedItems))
 		for _, item := range failedItems {
-			if item.State == "failed" {
-				failed[item.TrackID] = struct{}{}
-			}
+			states[item.TrackID] = item.State
 		}
 		items := make([]domain.BatchEditItem, 0, len(payload.Items))
 		for _, item := range payload.Items {
-			if _, ok := failed[item.TrackID]; !ok {
+			state, found := states[item.TrackID]
+			if found && state != "failed" && state != "pending" {
 				continue
 			}
 			track, trackErr := s.library.Track(item.TrackID)
@@ -1073,7 +1072,7 @@ func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) 
 		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
 		return
 	}
-	if job.Kind != domain.JobMatch || (job.State != domain.JobReview && job.State != domain.JobPartial) {
+	if !domain.IsMatchReviewable(job) {
 		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务当前不允许重新匹配")
 		return
 	}
@@ -1155,7 +1154,7 @@ func (s *Server) handleMatchReviewUpdate(ctx context.Context, c *app.RequestCont
 		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
 		return
 	}
-	if job.Kind != domain.JobMatch || (job.State != domain.JobReview && job.State != domain.JobPartial) {
+	if !domain.IsMatchReviewable(job) {
 		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务当前不允许修改审核状态")
 		return
 	}
@@ -1250,7 +1249,7 @@ type matchWriteRequest struct {
 }
 
 func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
-	if s.jobs == nil || s.store == nil {
+	if s.jobs == nil || s.store == nil || s.library == nil || s.writer == nil {
 		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "写入任务队列尚未启用")
 		return
 	}
@@ -1263,7 +1262,7 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusInternalServerError, "jobs_failed", err.Error())
 		return
 	}
-	if matchJob.Kind != domain.JobMatch || (matchJob.State != domain.JobReview && matchJob.State != domain.JobPartial) {
+	if !domain.IsMatchReviewable(matchJob) {
 		s.writeError(c, consts.StatusConflict, "job_not_reviewable", "匹配任务尚未进入审核状态")
 		return
 	}
@@ -1281,6 +1280,24 @@ func (s *Server) handleMatchWrite(ctx context.Context, c *app.RequestContext) {
 			s.writeError(c, consts.StatusBadRequest, "invalid_artwork_resize", "未选择写入封面时不能设置封面尺寸")
 			return
 		}
+	}
+	trackIDs := make([]string, 0, len(request.Items))
+	seenTrackIDs := make(map[string]struct{}, len(request.Items))
+	for _, selection := range request.Items {
+		if strings.TrimSpace(selection.TrackID) == "" || strings.TrimSpace(selection.CandidateID) == "" {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "trackId 和 candidateId 不能为空")
+			return
+		}
+		if _, duplicate := seenTrackIDs[selection.TrackID]; duplicate {
+			s.writeError(c, consts.StatusBadRequest, "invalid_request", "trackId 不能重复："+selection.TrackID)
+			return
+		}
+		seenTrackIDs[selection.TrackID] = struct{}{}
+		trackIDs = append(trackIDs, selection.TrackID)
+	}
+	if err := s.validateWritableTracks(trackIDs); err != nil {
+		s.writeWritablePreflightError(c, err)
+		return
 	}
 	// Mark review items as pending before waking the write worker. Enqueue
 	// signals the worker immediately; doing this in the opposite order can let
@@ -1450,7 +1467,7 @@ func (s *Server) handleTrackScan(ctx context.Context, c *app.RequestContext) {
 }
 
 func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {
-	if s.jobs == nil {
+	if s.jobs == nil || s.library == nil || s.writer == nil {
 		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "任务队列尚未启用")
 		return
 	}
@@ -1463,12 +1480,40 @@ func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
+	trackIDs := make([]string, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		trackIDs = append(trackIDs, item.TrackID)
+	}
+	if err := s.validateWritableTracks(trackIDs); err != nil {
+		s.writeWritablePreflightError(c, err)
+		return
+	}
 	job, err := s.jobs.Enqueue(ctx, domain.Job{Kind: domain.JobBatchEdit, LibraryID: s.library.Library().ID, Title: "批量编辑标签", Detail: "等待批量编辑 worker", Total: len(payload.Items), Payload: mustJSON(payload)})
 	if err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
 		return
 	}
 	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
+}
+
+func (s *Server) validateWritableTracks(trackIDs []string) error {
+	refs := make([]library.FileRef, 0, len(trackIDs))
+	for _, trackID := range trackIDs {
+		ref, err := s.library.FileRef(trackID)
+		if err != nil {
+			return fmt.Errorf("resolve write target %s: %w", trackID, err)
+		}
+		refs = append(refs, ref)
+	}
+	return s.writer.ValidateWritable(refs)
+}
+
+func (s *Server) writeWritablePreflightError(c *app.RequestContext, err error) {
+	if errors.Is(err, filewrite.ErrTargetNotWritable) {
+		s.writeError(c, consts.StatusUnprocessableEntity, "write_target_unwritable", "音乐目录不可写，Tagger 无法创建安全写入所需的同目录临时副本。请检查容器挂载是否为只读，并确认目录对运行 Tagger 的 UID/GID 可写。详情："+err.Error())
+		return
+	}
+	s.writeError(c, consts.StatusUnprocessableEntity, "write_preflight_failed", "写入目标预检失败："+err.Error())
 }
 
 func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) error {

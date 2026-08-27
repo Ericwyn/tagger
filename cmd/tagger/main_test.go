@@ -2,19 +2,68 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
+	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/jobs"
+	"github.com/ericwyn/tagger/internal/library"
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/store"
+	"github.com/ericwyn/tagger/internal/tags"
 )
 
 type artworkTestStrategy struct{}
+
+type failingArtworkWriteEngine struct {
+	mu  sync.Mutex
+	raw map[string][]string
+}
+
+func (e *failingArtworkWriteEngine) Read(context.Context, string) (tags.Snapshot, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return tags.Snapshot{Raw: cloneTestTags(e.raw), DurationSeconds: 120}, nil
+}
+
+func (e *failingArtworkWriteEngine) Write(_ context.Context, _ string, updates map[string][]string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for key, values := range updates {
+		if len(values) == 0 {
+			delete(e.raw, key)
+			continue
+		}
+		e.raw[key] = append([]string(nil), values...)
+	}
+	return nil
+}
+
+func (*failingArtworkWriteEngine) Version() string { return "failing-artwork-test" }
+
+func (*failingArtworkWriteEngine) ReadArtwork(context.Context, string, int) ([]byte, error) {
+	return nil, nil
+}
+
+func (*failingArtworkWriteEngine) WriteArtwork(context.Context, string, int, []byte, string) error {
+	return errors.New("simulated artwork write failure")
+}
+
+func cloneTestTags(raw map[string][]string) map[string][]string {
+	clone := make(map[string][]string, len(raw))
+	for key, values := range raw {
+		clone[key] = append([]string(nil), values...)
+	}
+	return clone
+}
 
 func (artworkTestStrategy) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "artwork-test", Name: "Artwork Test", Enabled: true, Health: providers.HealthReady}
@@ -48,8 +97,20 @@ func TestPatchFromCandidateDistinguishesOmittedAndEmptyFieldLists(t *testing.T) 
 }
 
 func TestFormatMatchProgressIncludesProviderAndCandidateCounts(t *testing.T) {
-	if got := formatMatchProgress(3, 10, 9, 14); got != "已分析 3/10 首曲目 · 已查询 9 次数据源 · 返回 14 个候选" {
+	if got := formatMatchProgress(3, 10, 9, 14, 0); got != "已分析 3/10 首曲目 · 已查询 9 次数据源 · 返回 14 个候选" {
 		t.Fatalf("progress = %q", got)
+	}
+	if got := formatMatchProgress(10, 10, 20, 14, 2); !strings.Contains(got, "2 首失败或无匹配") {
+		t.Fatalf("failed progress = %q", got)
+	}
+}
+
+func TestFormatItemProgressSeparatesProcessedAndSucceeded(t *testing.T) {
+	got := formatItemProgress("写入", 8, 8, 0, 8, errors.New("create temporary copy: permission denied"))
+	for _, want := range []string{"已处理 8/8 首曲目", "写入成功 0 首", "失败 8 首", "最近失败：create temporary copy: permission denied"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("progress %q does not contain %q", got, want)
+		}
 	}
 }
 
@@ -146,6 +207,138 @@ func TestFinalizeMatchJobAfterWriteMarksFailuresPartial(t *testing.T) {
 	}
 	if updated.State != domain.JobPartial || updated.Succeeded != 1 || updated.Failed != 1 || !strings.Contains(updated.Detail, "1 首失败") {
 		t.Fatalf("partial match job = %#v", updated)
+	}
+}
+
+func TestFinalizeMatchJobAfterWriteMarksAllFailuresFailed(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-all-failed", Kind: domain.JobMatch, State: domain.JobReview,
+		Title: "批量抓取元数据", Detail: "等待审核", Total: 2, Processed: 2, Succeeded: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, trackID := range []string{"failed-1", "failed-2"} {
+		if err := repository.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: trackID, State: "write_failed"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := finalizeMatchJobAfterWrite(context.Background(), manager, repository, matchJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Get(context.Background(), matchJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != domain.JobFailed || updated.Succeeded != 0 || updated.Failed != 2 || !strings.Contains(updated.Detail, "审核失败") {
+		t.Fatalf("all-failed match job = %#v", updated)
+	}
+}
+
+func TestFinalizeMatchJobAfterWriteClearsEarlierFailureAfterRematch(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	matchJob, err := manager.Enqueue(context.Background(), domain.Job{
+		ID: "job-match-rematched", Kind: domain.JobMatch, State: domain.JobFailed,
+		Title: "批量抓取元数据", Detail: "匹配失败", Total: 1, Processed: 1, Failed: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.UpsertMatchItem(context.Background(), store.MatchItem{JobID: matchJob.ID, TrackID: "rematched-1", State: "written"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := finalizeMatchJobAfterWrite(context.Background(), manager, repository, matchJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := manager.Get(context.Background(), matchJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State != domain.JobSucceeded || updated.Succeeded != 1 || updated.Failed != 0 {
+		t.Fatalf("rematched job retained stale failure = %#v", updated)
+	}
+}
+
+func TestBatchEditCountsArtworkFailureOnceAndReindexesWrittenTags(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "song.mp3"), []byte("fake audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	engine := &failingArtworkWriteEngine{raw: map[string][]string{
+		"TITLE": {"Old title"}, "ARTIST": {"Artist"}, "ALBUM": {"Album"}, "ALBUMARTIST": {"Artist"},
+	}}
+	musicScanner, err := scanner.New(engine, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	service, err := library.New(context.Background(), musicScanner, repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := filewrite.New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := service.ListTracks(library.TrackFilter{})[0]
+	payload := domain.BatchEditPayload{
+		Items:      []domain.BatchEditItem{{TrackID: track.ID, BaseRevision: track.Revision}},
+		Operations: []domain.BatchEditOperation{{Field: "title", Mode: domain.BatchEditSet, Value: "New title"}},
+		Artwork: &domain.BatchArtwork{
+			Action: domain.BatchArtworkReplace, Data: batchArtworkData(t), MIME: "image/png",
+		},
+	}
+	manager := jobs.New(repository)
+	manager.Register(domain.JobBatchEdit, newBatchEditHandler(service, writer, repository))
+	if err := manager.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := manager.Enqueue(context.Background(), domain.Job{
+		Kind: domain.JobBatchEdit, Title: "Batch", Total: 1, Payload: string(payloadJSON),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitBatchEditJob(t, manager, created.ID)
+	if job.State != domain.JobFailed || job.Processed != 1 || job.Succeeded != 0 || job.Failed != 1 {
+		t.Fatalf("artwork failure counters = %#v", job)
+	}
+	updated, err := service.Track(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != "New title" {
+		t.Fatalf("successful tag phase was not reindexed: %#v", updated)
+	}
+	items, err := repository.ListBatchEditItems(context.Background(), created.ID)
+	if err != nil || len(items) != 1 || items[0].State != "failed" || !strings.Contains(items[0].Error, "simulated artwork write failure") {
+		t.Fatalf("batch item = %#v err=%v", items, err)
+	}
+	revisions, err := repository.ListRevisions(context.Background(), 10)
+	if err != nil || len(revisions) != 1 || revisions[0].Action != "批量编辑标签" {
+		t.Fatalf("tag-phase revision = %#v err=%v", revisions, err)
 	}
 }
 

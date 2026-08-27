@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +138,117 @@ func TestManagerRetriesFailedJob(t *testing.T) {
 	}
 }
 
+func TestManagerClassifiesTerminalCountersWithoutRewritingThem(t *testing.T) {
+	tests := []struct {
+		name      string
+		handler   jobs.Handler
+		wantState domain.JobState
+		processed int
+		succeeded int
+		failed    int
+		wantError string
+	}{
+		{
+			name: "all items failed",
+			handler: func(_ context.Context, _ domain.Job, progress jobs.Progress) error {
+				return progress(8, 8, 0, 8, "已处理 8/8 首曲目 · 写入成功 0 首 · 失败 8 首")
+			},
+			wantState: domain.JobFailed, processed: 8, succeeded: 0, failed: 8,
+		},
+		{
+			name: "mixed item outcomes",
+			handler: func(_ context.Context, _ domain.Job, progress jobs.Progress) error {
+				return progress(8, 8, 3, 5, "已处理 8/8 首曲目 · 写入成功 3 首 · 失败 5 首")
+			},
+			wantState: domain.JobPartial, processed: 8, succeeded: 3, failed: 5,
+		},
+		{
+			name: "mixed match outcomes remain reviewable",
+			handler: func(_ context.Context, _ domain.Job, progress jobs.Progress) error {
+				if err := progress(8, 8, 3, 5, "已分析 8/8 首曲目"); err != nil {
+					return err
+				}
+				return jobs.ErrNeedsReview
+			},
+			wantState: domain.JobReview, processed: 8, succeeded: 3, failed: 5,
+		},
+		{
+			name: "task error after some item success",
+			handler: func(_ context.Context, _ domain.Job, progress jobs.Progress) error {
+				if err := progress(1, 2, 1, 0, "已处理 1/2 首曲目"); err != nil {
+					return err
+				}
+				return errors.New("post-processing failed")
+			},
+			wantState: domain.JobPartial, processed: 1, succeeded: 1, failed: 0, wantError: "post-processing failed",
+		},
+		{
+			name: "silent early completion is rejected",
+			handler: func(_ context.Context, _ domain.Job, progress jobs.Progress) error {
+				return progress(1, 2, 1, 0, "已处理 1/2 首曲目")
+			},
+			wantState: domain.JobPartial, processed: 1, succeeded: 1, failed: 0, wantError: "任务提前结束",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := jobs.New(repository)
+			kind := domain.JobWrite
+			if test.wantState == domain.JobReview {
+				kind = domain.JobMatch
+			}
+			manager.Register(kind, test.handler)
+			if err := manager.Start(context.Background()); err != nil {
+				_ = repository.Close()
+				t.Fatal(err)
+			}
+			defer func() {
+				manager.Close()
+				_ = repository.Close()
+			}()
+			created, err := manager.Enqueue(context.Background(), domain.Job{Kind: kind, Title: test.name, Total: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			job := waitForTerminalState(t, manager, created.ID)
+			if job.State != test.wantState || job.Processed != test.processed || job.Succeeded != test.succeeded || job.Failed != test.failed {
+				t.Fatalf("terminal job = %#v", job)
+			}
+			if test.wantError != "" && !strings.Contains(job.Error, test.wantError) {
+				t.Fatalf("terminal error = %q, want %q", job.Error, test.wantError)
+			}
+		})
+	}
+}
+
+func TestManagerRetryUsesFilteredPayloadTotal(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	manager := jobs.New(repository)
+	created, err := manager.Enqueue(context.Background(), domain.Job{
+		Kind: domain.JobWrite, State: domain.JobFailed, Title: "Filtered retry", Total: 8,
+		Processed: 8, Failed: 8, Payload: `{"items":[{"trackId":"one"},{"trackId":"two"}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried, err := manager.Retry(context.Background(), created.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.Total != 2 || retried.Processed != 0 || retried.Succeeded != 0 || retried.Failed != 0 {
+		t.Fatalf("retried counters = %#v", retried)
+	}
+}
+
 func TestReviewJobsDoNotBlockFilesystemRefresh(t *testing.T) {
 	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
 	if err != nil {
@@ -245,5 +357,22 @@ func waitForState(t *testing.T, manager *jobs.Manager, id string, state domain.J
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not reach %s", id, state)
+	return domain.Job{}
+}
+
+func waitForTerminalState(t *testing.T, manager *jobs.Manager, id string) domain.Job {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err := manager.Get(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.State != domain.JobWaiting && job.State != domain.JobRunning {
+			return job
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach a terminal state", id)
 	return domain.Job{}
 }

@@ -27,6 +27,7 @@ var (
 	ErrInvalidPatch       = errors.New("invalid tag patch")
 	ErrVerification       = errors.New("write verification failed")
 	ErrUnsupportedFormat  = errors.New("unwritable format")
+	ErrTargetNotWritable  = errors.New("write target is not writable")
 	ErrArtworkUnavailable = errors.New("artwork operations unavailable")
 	ErrArtworkNotFound    = errors.New("artwork not found")
 	ErrArtworkIndex       = errors.New("invalid artwork index")
@@ -151,6 +152,50 @@ func (w *Writer) SetRoot(root string) error {
 	w.rootMu.Lock()
 	w.root = root
 	w.rootMu.Unlock()
+	return nil
+}
+
+// ValidateWritable verifies the effective process permissions required by the
+// atomic writer: every source must be readable and each containing
+// directory must allow creating and removing a temporary sibling. Directory
+// probes are deduplicated so a large album batch creates only one short-lived
+// check file per folder.
+func (w *Writer) ValidateWritable(refs []library.FileRef) error {
+	checkedDirectories := make(map[string]struct{})
+	for _, ref := range refs {
+		if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+			return fmt.Errorf("%w: %s: %w", ErrTargetNotWritable, ref.RelativePath, ErrUnsupportedFormat)
+		}
+		path, err := w.containedPath(ref)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrTargetNotWritable, ref.RelativePath, err)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("%w: %s: cannot read source: %v", ErrTargetNotWritable, ref.RelativePath, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("%w: %s: close permission probe: %v", ErrTargetNotWritable, ref.RelativePath, err)
+		}
+		directory := filepath.Dir(path)
+		if _, checked := checkedDirectories[directory]; checked {
+			continue
+		}
+		probe, err := os.CreateTemp(directory, ".tagger-write-check-*")
+		if err != nil {
+			return fmt.Errorf("%w: %s: cannot create temporary sibling: %v", ErrTargetNotWritable, ref.RelativePath, err)
+		}
+		probePath := probe.Name()
+		closeErr := probe.Close()
+		removeErr := os.Remove(probePath)
+		if closeErr != nil {
+			return fmt.Errorf("%w: %s: close temporary permission probe: %v", ErrTargetNotWritable, ref.RelativePath, closeErr)
+		}
+		if removeErr != nil {
+			return fmt.Errorf("%w: %s: remove temporary permission probe: %v", ErrTargetNotWritable, ref.RelativePath, removeErr)
+		}
+		checkedDirectories[directory] = struct{}{}
+	}
 	return nil
 }
 

@@ -5015,10 +5015,22 @@ button:disabled {
 }
 
 .job-detail-progress {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 15px;
-  margin: 22px 0;
+  margin: 30px 0 22px;
+}
+
+.job-detail-progress-label {
+  position: absolute;
+  top: -15px;
+  left: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: .08em;
 }
 
 .job-detail-progress strong {

@@ -39,6 +39,23 @@ describe('JobsPage', () => {
     expect(api.listBatchEditItems).toHaveBeenCalledWith('job-edit');
   });
 
+  it('labels 100 percent as processing progress while showing an all-failed task as failed', async () => {
+    api.listJobs.mockResolvedValue([{
+      id: 'job-write-failed', kind: 'write', state: 'failed', title: '批量安全写入标签',
+      detail: '已处理 8/8 首曲目 · 写入成功 0 首 · 失败 8 首',
+      processed: 8, total: 8, succeeded: 0, failed: 8, startedAt: '刚刚',
+    }]);
+
+    render(<JobsPage onOpenReview={() => {}} />);
+
+    expect(await screen.findByRole('heading', {name: '批量安全写入标签'})).toBeInTheDocument();
+    expect(screen.getByLabelText('处理进度 100%')).toBeInTheDocument();
+    expect(screen.getByText('已处理 8 / 8 项 · 处理进度 100%')).toBeInTheDocument();
+    expect(screen.getByText('成功').parentElement).toHaveTextContent('成功0');
+    expect(screen.getByText('失败', {selector: 'dt'}).parentElement).toHaveTextContent('失败8');
+    expect(screen.getAllByText('失败').length).toBeGreaterThanOrEqual(1);
+  });
+
   it('filters the task list when a status tab is selected', async () => {
     const user = (await import('@testing-library/user-event')).default.setup();
     render(<JobsPage onOpenReview={() => {}} />);
@@ -84,5 +101,20 @@ describe('JobsPage', () => {
     expect(screen.getByRole('dialog', {name: '丢弃待审核结果？'})).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '确认丢弃'}));
     await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith('job-review'));
+  });
+
+  it('keeps a failed matching workflow open for rematch or write retry', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup();
+    const onOpenReview = vi.fn();
+    api.listJobs.mockResolvedValue([{
+      id: 'job-match-failed', kind: 'match', state: 'failed', title: '批量抓取元数据', detail: '审核失败：1 首失败',
+      processed: 1, total: 1, succeeded: 0, failed: 1, startedAt: '刚刚',
+    }]);
+
+    render(<JobsPage onOpenReview={onOpenReview} />);
+    await user.click(await screen.findByRole('button', {name: '打开审核页'}));
+
+    expect(onOpenReview).toHaveBeenCalledWith('job-match-failed');
+    expect(screen.queryByRole('button', {name: '丢弃审核任务'})).not.toBeInTheDocument();
   });
 });

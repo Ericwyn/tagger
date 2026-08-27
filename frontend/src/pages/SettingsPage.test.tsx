@@ -29,7 +29,10 @@ import {SettingsPage} from '@/pages/SettingsPage';
 const provider: ProviderConfig = {
   id: 'musicbrainz', name: 'MusicBrainz', shortName: 'MB', description: '结构化音乐资料',
   capabilities: ['歌曲', '封面'], health: 'ready', enabled: true, accent: '#e84b2c', quotaLabel: '1 req/s',
-  config: [{key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/', required: true}],
+  config: [
+    {key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/', required: true},
+    {key: 'archiveDownloadBaseUrl', label: 'Internet Archive 下载基址', type: 'url', value: 'https://archive.org', required: true},
+  ],
 };
 
 const library: LibrarySummary = {
@@ -60,7 +63,10 @@ describe('SettingsPage provider diagnostics', () => {
     localStorage.removeItem('tagger-provider-test-query-v1');
     api.listProviders.mockResolvedValue([provider]);
     api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
-    api.resetProvider.mockImplementation((item: ProviderConfig) => Promise.resolve({...item, config: item.config?.map((field) => ({...field, value: field.key === 'baseUrl' ? 'https://musicbrainz.org/ws/2/recording/' : field.value}))}));
+    api.resetProvider.mockImplementation((item: ProviderConfig) => Promise.resolve({...item, config: item.config?.map((field) => ({
+      ...field,
+      value: field.key === 'baseUrl' ? 'https://musicbrainz.org/ws/2/recording/' : field.key === 'archiveDownloadBaseUrl' ? 'https://archive.org' : field.value,
+    }))}));
     api.getLibrary.mockResolvedValue(library);
     api.listLibraries.mockResolvedValue([{...library, active: true}]);
     api.probeLibrary.mockResolvedValue({path: '/home/ericwyn/Downloads/TestMusic', name: 'TestMusic', readable: true, writable: true, audioFiles: 24, folders: 3, formats: {mp3: 9, flac: 15, wav: 0}, warnings: []});
@@ -69,7 +75,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.purgeMissing.mockResolvedValue({removed: 2});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
-    api.getSystem.mockResolvedValue({version: '1.0.1', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
+    api.getSystem.mockResolvedValue({version: '1.0.2', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
     api.clearRuntimeCache.mockResolvedValue({databaseBytes: 1024 * 1024, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 1024 * 1024});
     api.updateSystemSettings.mockResolvedValue({historyRetention: 20, writeHistory: true});
     api.testProvider.mockResolvedValue({
@@ -144,8 +150,15 @@ describe('SettingsPage provider diagnostics', () => {
     const baseURL = screen.getByRole('textbox', {name: 'API Base URL'});
     await user.clear(baseURL);
     await user.type(baseURL, 'https://mirror.example.test/recording/');
+    const archiveDownloadBaseURL = screen.getByRole('textbox', {name: 'Internet Archive 下载基址'});
+    expect(archiveDownloadBaseURL).toHaveValue('https://archive.org');
+    await user.clear(archiveDownloadBaseURL);
+    await user.type(archiveDownloadBaseURL, 'https://vercel-proxy.bytelen.com/https/archive.org');
     await user.click(screen.getByRole('button', {name: '保存并应用'}));
-    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(provider, true, {baseUrl: 'https://mirror.example.test/recording/'}));
+    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(provider, true, {
+      baseUrl: 'https://mirror.example.test/recording/',
+      archiveDownloadBaseUrl: 'https://vercel-proxy.bytelen.com/https/archive.org',
+    }));
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('配置已保存'));
   });
 
@@ -249,7 +262,7 @@ describe('SettingsPage provider diagnostics', () => {
     render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
 
     await user.click(screen.getByRole('button', {name: /系统/}));
-    expect(await screen.findByText('1.0.1')).toBeInTheDocument();
+    expect(await screen.findByText('1.0.2')).toBeInTheDocument();
     expect(screen.getByRole('link', {name: /github\.com\/Ericwyn\/tagger/i})).toHaveAttribute('href', 'https://github.com/Ericwyn/tagger');
     expect(screen.getByRole('link', {name: /github\.com\/Ericwyn\/tagger/i})).toHaveAttribute('target', '_blank');
     expect(await screen.findByText('127.0.0.1:8090')).toBeInTheDocument();

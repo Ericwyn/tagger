@@ -67,6 +67,15 @@ function formatBatchValue(value: unknown): string {
   return String(value);
 }
 
+function jobProgress(job: Job): number {
+  if (job.total <= 0) return job.state === 'succeeded' ? 100 : 0;
+  return Math.min(100, Math.max(0, Math.round((job.processed / job.total) * 100)));
+}
+
+function isMatchReviewable(job: Job): boolean {
+  return job.kind === 'match' && (job.state === 'review' || job.state === 'partial' || job.state === 'failed');
+}
+
 export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -134,6 +143,10 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
 	const active = visibleJobs.find((job) => job.id === selectedId) ?? (jobFilter === 'all' ? jobs.find((job) => job.id === selectedId) : undefined);
 	const activeJobId = active?.id;
 	const activeJobKind = active?.kind;
+	const activeProgress = active ? jobProgress(active) : 0;
+	const canRetryActive = Boolean(active && apiReadMode === 'real' &&
+	  (active.state === 'partial' || active.state === 'failed' || active.state === 'cancelled') &&
+	  (active.kind === 'scan' || active.state === 'cancelled' || active.failed > 0 || active.processed < active.total));
 
 	useEffect(() => {
 	  if (apiReadMode === 'mock' || activeJobKind !== 'batch_edit' || !activeJobId) {
@@ -186,7 +199,7 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
             const KindIcon = kindIcon[job.kind];
             const meta = stateMeta[job.state];
             const StateIcon = meta.icon;
-            const progress = job.total ? Math.round((job.processed / job.total) * 100) : 0;
+			const progress = jobProgress(job);
             return (
               <button
                 key={job.id}
@@ -198,7 +211,7 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
                   <span><strong>{job.title}</strong><small>{job.startedAt}</small></span>
                   <p>{job.detail}</p>
                   <span className="job-progress"><i style={{width: `${progress}%`}} /></span>
-                  <span className="job-numbers">{job.processed} / {job.total} 项 · {progress}%</span>
+				  <span className="job-numbers">已处理 {job.processed} / {job.total} 项 · 处理进度 {progress}%</span>
                 </span>
                 <span className={cn('job-state', `state-${job.state}`)}>
                   <StateIcon size={13} className={job.state === 'running' ? 'spin' : undefined} />
@@ -215,9 +228,10 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
             <div className="eyebrow">JOB / {active.id.toUpperCase()}</div>
             <h2>{active.title}</h2>
             <p>{active.detail}</p>
-            <div className="job-detail-progress">
-			  <strong>{active.total ? Math.round((active.processed / active.total) * 100) : 0}<small>%</small></strong>
-			  <div><span style={{width: `${active.total ? (active.processed / active.total) * 100 : 0}%`}} /></div>
+			<div className="job-detail-progress" aria-label={`处理进度 ${activeProgress}%`}>
+			  <em className="job-detail-progress-label">处理进度</em>
+			  <strong>{activeProgress}<small>%</small></strong>
+			  <div><span style={{width: `${activeProgress}%`}} /></div>
             </div>
             <dl>
               <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : active.kind === 'write' ? '安全写入' : '批量编辑'}</dd></div>
@@ -259,16 +273,12 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
 				)}
 			  </section>
 			)}
-            {active.state === 'review' && (
-              <>
-                <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
-                  <Sparkles size={15} /> 打开审核页
-                </button>
-                {apiReadMode === 'real' && <button className="danger-quiet full-button" onClick={() => { setDiscardError(''); setDiscardJob(active); }}>
-                  <X size={15} /> 丢弃审核任务
-                </button>}
-              </>
-            )}
+			{isMatchReviewable(active) && <button className="primary-button full-button" onClick={() => onOpenReview(active.id)}>
+			  <Sparkles size={15} /> 打开审核页
+			</button>}
+			{active.state === 'review' && apiReadMode === 'real' && <button className="danger-quiet full-button" onClick={() => { setDiscardError(''); setDiscardJob(active); }}>
+			  <X size={15} /> 丢弃审核任务
+			</button>}
 			{(active.state === 'running' || active.state === 'waiting') && apiReadMode === 'real' && (
 			  <button className="danger-quiet full-button" onClick={() => {
 				setActionError('');
@@ -277,12 +287,12 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
 				<X size={15} /> 取消任务
 			  </button>
 			)}
-			{(active.state === 'partial' || active.state === 'failed' || active.state === 'cancelled') && apiReadMode === 'real' && (
+			{canRetryActive && (
 			  <button className="secondary-button full-button" onClick={() => {
 				setActionError('');
 				void retryJob(active.id).then((next) => { if (next) updateJob(next); }).catch((error) => setActionError(error instanceof Error ? error.message : '重试任务失败'));
 			  }}>
-				<RefreshCw size={15} /> 重试失败项
+				<RefreshCw size={15} /> {active.kind === 'scan' || active.state === 'cancelled' ? '重试任务' : '重试失败项'}
 			  </button>
 			)}
 			{actionError && <p className="restore-error">{actionError}</p>}

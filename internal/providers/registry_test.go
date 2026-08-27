@@ -37,6 +37,15 @@ type resettableConfigStrategy struct {
 	config map[string]string
 }
 
+type artworkOptionsStrategy struct {
+	fakeStrategy
+	archiveDownloadBaseURL string
+}
+
+func (strategy artworkOptionsStrategy) ArtworkDownloadOptions() ArtworkDownloadOptions {
+	return ArtworkDownloadOptions{ArchiveDownloadBaseURL: strategy.archiveDownloadBaseURL}
+}
+
 func (strategy *configurableStrategy) Descriptor() Descriptor {
 	return Descriptor{ID: "configurable", Name: "Configurable", Enabled: true, Health: HealthReady}
 }
@@ -146,6 +155,20 @@ func TestRegistryRejectsUnknownProvider(t *testing.T) {
 	_, err := registry.Search(context.Background(), Query{Title: "Song"}, []string{"missing"}, 5)
 	if !errors.Is(err, ErrProviderNotFound) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRegistryUsesStrategyArtworkDownloadOptions(t *testing.T) {
+	registry := NewRegistry(artworkOptionsStrategy{
+		fakeStrategy:           fakeStrategy{descriptor: Descriptor{ID: "musicbrainz", Name: "MusicBrainz", Enabled: true, Health: HealthReady}},
+		archiveDownloadBaseURL: "https://mirror.example.test",
+	})
+	options := registry.artworkDownloadOptions("musicbrainz")
+	if options.ArchiveDownloadBaseURL != "https://mirror.example.test" {
+		t.Fatalf("artwork download options = %#v", options)
+	}
+	if missing := registry.artworkDownloadOptions("missing"); missing.ArchiveDownloadBaseURL != "" {
+		t.Fatalf("missing provider options = %#v", missing)
 	}
 }
 

@@ -536,7 +536,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             <div>
               <span className="eyebrow">PROVIDER CONFIGURATION</span>
               <h3>配置 {provider.name}</h3>
-              <p>这些字段由当前策略声明，保存后会立即用于后续搜索；不会写入音乐文件。</p>
+              <p>这些字段由当前策略声明，保存后会立即用于后续搜索和资源下载；不会写入音乐文件。</p>
             </div>
             <button className="icon-button" title="关闭数据源配置" onClick={() => setConfigProviderId(undefined)}><X size={17} /></button>
           </div>

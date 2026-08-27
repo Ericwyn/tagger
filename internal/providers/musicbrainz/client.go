@@ -14,23 +14,28 @@ import (
 )
 
 type Config struct {
-	BaseURL      string
-	UserAgent    string
-	Client       *http.Client
-	RateInterval time.Duration
+	BaseURL                string
+	ArchiveDownloadBaseURL string
+	UserAgent              string
+	Client                 *http.Client
+	RateInterval           time.Duration
 }
 
 type Client struct {
-	mu        sync.RWMutex
-	baseURL   string
-	userAgent string
-	http      *http.Client
-	gate      *providers.Gate
+	mu                     sync.RWMutex
+	baseURL                string
+	archiveDownloadBaseURL string
+	userAgent              string
+	http                   *http.Client
+	gate                   *providers.Gate
 }
 
 func New(config Config) *Client {
 	if config.BaseURL == "" {
 		config.BaseURL = "https://musicbrainz.org/ws/2/recording/"
+	}
+	if config.ArchiveDownloadBaseURL == "" {
+		config.ArchiveDownloadBaseURL = providers.DefaultArchiveDownloadBaseURL
 	}
 	if config.UserAgent == "" {
 		config.UserAgent = providers.DefaultUserAgent("musicbrainz")
@@ -41,7 +46,10 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = time.Second
 	}
-	return &Client{baseURL: config.BaseURL, userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+	return &Client{
+		baseURL: config.BaseURL, archiveDownloadBaseURL: config.ArchiveDownloadBaseURL,
+		userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval),
+	}
 }
 
 // ResetConfig restores the provider's built-in endpoints and transport
@@ -50,6 +58,7 @@ func (c *Client) ResetConfig() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.baseURL = "https://musicbrainz.org/ws/2/recording/"
+	c.archiveDownloadBaseURL = providers.DefaultArchiveDownloadBaseURL
 	c.userAgent = providers.DefaultUserAgent("musicbrainz")
 	c.gate.SetInterval(time.Second)
 	return nil
@@ -69,6 +78,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 	defer c.mu.RUnlock()
 	return []providers.ConfigField{
 		{Key: "baseUrl", Label: "API Base URL", Type: "url", Value: c.baseURL, Required: true, Description: "MusicBrainz recording 查询地址"},
+		{Key: "archiveDownloadBaseUrl", Label: "Internet Archive 下载基址", Type: "url", Value: c.archiveDownloadBaseURL, Required: true, Description: "支持镜像 origin 或带路径的代理前缀；末尾会拼接 archive.org 的 /download/ 路径"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true, Description: "请保留可联系的应用标识"},
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10), Description: "避免触发官方 API 限流"},
 	}
@@ -85,6 +95,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return err
 			}
 			c.baseURL = strings.TrimRight(endpoint, "/") + "/"
+		case "archiveDownloadBaseUrl":
+			endpoint, err := providers.ValidateArtworkDownloadBaseURL(value, "archiveDownloadBaseUrl")
+			if err != nil {
+				return err
+			}
+			c.archiveDownloadBaseURL = endpoint
 		case "userAgent":
 			if strings.TrimSpace(value) == "" {
 				return fmt.Errorf("userAgent 不能为空")
@@ -101,6 +117,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.ArtworkDownloadOptions{ArchiveDownloadBaseURL: c.archiveDownloadBaseURL}
 }
 
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
