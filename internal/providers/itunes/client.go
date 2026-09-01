@@ -24,6 +24,8 @@ type Config struct {
 type Client struct {
 	mu                          sync.RWMutex
 	baseURL, country, userAgent string
+	proxyURL                    string
+	baseHTTP                    *http.Client
 	http                        *http.Client
 	gate                        *providers.Gate
 }
@@ -44,7 +46,11 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = 3 * time.Second
 	}
-	return &Client{baseURL: config.BaseURL, country: config.Country, userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+	gate := providers.NewGate(config.RateInterval)
+	return &Client{
+		baseURL: config.BaseURL, country: config.Country, userAgent: config.UserAgent,
+		baseHTTP: config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
+	}
 }
 
 // ResetConfig restores the public iTunes Search defaults while preserving the
@@ -56,7 +62,7 @@ func (c *Client) ResetConfig() error {
 	c.country = "CN"
 	c.userAgent = providers.DefaultUserAgent("apple")
 	c.gate.SetInterval(3 * time.Second)
-	return nil
+	return c.setProxyLocked("")
 }
 
 func (c *Client) Descriptor() providers.Descriptor {
@@ -75,6 +81,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "Search API URL", Type: "url", Value: c.baseURL, Required: true},
 		{Key: "country", Label: "地区代码", Type: "text", Value: c.country, Placeholder: "CN"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -101,6 +108,10 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "proxyUrl":
+			if err := c.setProxyLocked(value); err != nil {
+				return err
+			}
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -114,12 +125,33 @@ func (c *Client) Configure(values map[string]string) error {
 	return nil
 }
 
+func (c *Client) setProxyLocked(value string) error {
+	normalized, err := providers.ValidateProxyURL(value)
+	if err != nil {
+		return err
+	}
+	configured, err := providers.HTTPClientWithProxy(c.baseHTTP, c.gate, normalized)
+	if err != nil {
+		return err
+	}
+	previous := c.http
+	c.http = configured
+	c.proxyURL = normalized
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+	return nil
+}
+
+func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.ArtworkDownloadOptions{ProxyURL: c.proxyURL, Gate: c.gate}
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if err := c.gate.Wait(ctx); err != nil {
-		return nil, err
-	}
 	values := url.Values{}
 	values.Set("term", strings.TrimSpace(query.Title+" "+strings.Join(query.Artists, " ")))
 	values.Set("country", c.country)

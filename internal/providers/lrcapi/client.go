@@ -31,6 +31,8 @@ type Config struct {
 type Client struct {
 	mu                                 sync.RWMutex
 	baseURL, coverURL, auth, userAgent string
+	proxyURL                           string
+	baseHTTP                           *http.Client
 	http                               *http.Client
 	gate                               *providers.Gate
 }
@@ -51,9 +53,11 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = 500 * time.Millisecond
 	}
+	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, coverURL: config.CoverURL, auth: strings.TrimSpace(config.Auth),
-		userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval),
+		userAgent: config.UserAgent, baseHTTP: config.Client,
+		http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
 
@@ -67,7 +71,7 @@ func (c *Client) ResetConfig() error {
 	c.auth = ""
 	c.userAgent = providers.DefaultUserAgent("lrcapi")
 	c.gate.SetInterval(500 * time.Millisecond)
-	return nil
+	return c.setProxyLocked("")
 }
 
 func (c *Client) Descriptor() providers.Descriptor {
@@ -88,6 +92,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "coverUrl", Label: "封面 API URL", Type: "url", Value: c.coverURL, Required: true},
 		{Key: "auth", Label: "Authorization", Type: "password", Value: c.auth, Secret: true, Placeholder: "可选鉴权令牌"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -116,6 +121,10 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "proxyUrl":
+			if err := c.setProxyLocked(value); err != nil {
+				return err
+			}
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -129,6 +138,30 @@ func (c *Client) Configure(values map[string]string) error {
 	return nil
 }
 
+func (c *Client) setProxyLocked(value string) error {
+	normalized, err := providers.ValidateProxyURL(value)
+	if err != nil {
+		return err
+	}
+	configured, err := providers.HTTPClientWithProxy(c.baseHTTP, c.gate, normalized)
+	if err != nil {
+		return err
+	}
+	previous := c.http
+	c.http = configured
+	c.proxyURL = normalized
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+	return nil
+}
+
+func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.ArtworkDownloadOptions{ProxyURL: c.proxyURL, Gate: c.gate}
+}
+
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -140,9 +173,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	}
 	if limit > 20 {
 		limit = 20
-	}
-	if err := c.gate.Wait(ctx); err != nil {
-		return nil, err
 	}
 	endpoint, err := withQuery(c.baseURL, query)
 	if err != nil {

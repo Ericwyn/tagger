@@ -24,6 +24,8 @@ const DefaultArchiveDownloadBaseURL = "https://archive.org"
 // and redirects to Internet Archive only when the image is downloaded.
 type ArtworkDownloadOptions struct {
 	ArchiveDownloadBaseURL string
+	ProxyURL               string
+	Gate                   *Gate
 }
 
 // ArtworkDownloadOptionsProvider is an optional strategy capability used by
@@ -51,8 +53,15 @@ func DownloadArtworkWithOptions(ctx context.Context, reference ArtworkReference,
 		return artwork.Asset{}, err
 	}
 	if client == nil {
-		client = safeArtworkClient(reference.ProviderID, config)
+		client, err = safeArtworkClient(reference.ProviderID, config, options.Gate)
+		if err != nil {
+			return artwork.Asset{}, err
+		}
 	} else {
+		client, err = HTTPClientWithProxy(client, options.Gate, config.proxyURL)
+		if err != nil {
+			return artwork.Asset{}, err
+		}
 		client = withArtworkRedirectPolicy(client, reference.ProviderID, config)
 	}
 	body, err := GetBytesWithHeaders(ctx, client, parsed.String(), ArtworkUserAgent(reference.ProviderID), map[string]string{
@@ -79,11 +88,16 @@ func validateArtworkURL(providerID, value string) (*url.URL, error) {
 
 type artworkDownloadConfig struct {
 	archiveDownloadBase *url.URL
+	proxyURL            string
 }
 
 func parseArtworkDownloadConfig(providerID string, options ArtworkDownloadOptions) (artworkDownloadConfig, error) {
+	proxyURL, err := ValidateProxyURL(options.ProxyURL)
+	if err != nil {
+		return artworkDownloadConfig{}, err
+	}
 	if providerID != "musicbrainz" {
-		return artworkDownloadConfig{}, nil
+		return artworkDownloadConfig{proxyURL: proxyURL}, nil
 	}
 	baseURL := strings.TrimSpace(options.ArchiveDownloadBaseURL)
 	if baseURL == "" {
@@ -97,7 +111,7 @@ func parseArtworkDownloadConfig(providerID string, options ArtworkDownloadOption
 	if err != nil {
 		return artworkDownloadConfig{}, err
 	}
-	return artworkDownloadConfig{archiveDownloadBase: parsed}, nil
+	return artworkDownloadConfig{archiveDownloadBase: parsed, proxyURL: proxyURL}, nil
 }
 
 // ValidateArtworkDownloadBaseURL accepts an HTTPS origin with an optional path
@@ -202,7 +216,7 @@ func withArtworkRedirectPolicy(client *http.Client, providerID string, config ar
 	return &configured
 }
 
-func safeArtworkClient(providerID string, config artworkDownloadConfig) *http.Client {
+func safeArtworkClient(providerID string, config artworkDownloadConfig, gate *Gate) (*http.Client, error) {
 	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 15 * time.Second}
 	transport := &http.Transport{
 		TLSHandshakeTimeout: 5 * time.Second,
@@ -214,7 +228,10 @@ func safeArtworkClient(providerID string, config artworkDownloadConfig) *http.Cl
 	// proxy host, not the provider host, so the strict direct dialer below cannot
 	// be used in that case. The URL allowlist and redirect validation still
 	// constrain every requested provider URL.
-	if artworkProxyConfigured() {
+	if config.proxyURL != "" {
+		parsed, _ := url.Parse(config.proxyURL)
+		transport.Proxy = http.ProxyURL(parsed)
+	} else if artworkProxyConfigured() {
 		transport.Proxy = http.ProxyFromEnvironment
 	} else {
 		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -248,10 +265,11 @@ func safeArtworkClient(providerID string, config artworkDownloadConfig) *http.Cl
 			return nil, errors.Join(dialErrors...)
 		}
 	}
-	return withArtworkRedirectPolicy(&http.Client{
+	client := WrapHTTPClient(&http.Client{
 		Transport: transport,
 		Timeout:   15 * time.Second,
-	}, providerID, config)
+	}, gate)
+	return withArtworkRedirectPolicy(client, providerID, config), nil
 }
 
 func artworkProxyConfigured() bool {

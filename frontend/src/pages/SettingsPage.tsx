@@ -560,7 +560,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                 <button className="provider-config-reset-button" type="button" onClick={() => setConfigResetPending(true)} disabled={configSaving || configResetting}>恢复默认配置</button>
               ) : (
                 <span className="provider-config-reset-confirm">
-                  <small>会清除自定义地址和鉴权</small>
+                  <small>会清除自定义地址、代理和鉴权</small>
                   <button className="provider-config-reset-button" type="button" onClick={() => void resetProviderConfig()} disabled={configSaving || configResetting}>{configResetting ? '恢复中…' : '确认恢复'}</button>
                   <button className="secondary-button" type="button" onClick={() => setConfigResetPending(false)} disabled={configResetting}>保留当前</button>
                 </span>

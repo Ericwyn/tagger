@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -318,26 +319,51 @@ type Gate struct {
 	mu       sync.Mutex
 	next     time.Time
 	interval time.Duration
+	permit   chan struct{}
 }
 
-func NewGate(interval time.Duration) *Gate { return &Gate{interval: interval} }
+func NewGate(interval time.Duration) *Gate {
+	return &Gate{interval: interval, permit: make(chan struct{}, 1)}
+}
 
-func (g *Gate) Wait(ctx context.Context) error {
+// Acquire reserves the provider's single in-flight request slot and then
+// waits until the configured start interval allows the next request. The
+// returned release function must remain held until the response body reaches
+// EOF or is closed so redirects, retries, API calls and artwork downloads all
+// share one source-wide concurrency boundary.
+func (g *Gate) Acquire(ctx context.Context) (func(), error) {
 	if g == nil {
-		return nil
+		return func() {}, nil
 	}
 	g.mu.Lock()
+	if g.permit == nil {
+		g.permit = make(chan struct{}, 1)
+	}
+	permit := g.permit
+	g.mu.Unlock()
+	select {
+	case permit <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	released := sync.Once{}
+	release := func() {
+		released.Do(func() { <-permit })
+	}
+
+	g.mu.Lock()
 	interval := g.interval
-	if interval <= 0 {
-		g.mu.Unlock()
-		return nil
-	}
 	now := time.Now()
-	reserved := g.next
-	if reserved.Before(now) {
-		reserved = now
+	reserved := now
+	scheduledNext := time.Time{}
+	if interval > 0 {
+		reserved = g.next
+		if reserved.Before(now) {
+			reserved = now
+		}
+		scheduledNext = reserved.Add(interval)
+		g.next = scheduledNext
 	}
-	g.next = reserved.Add(interval)
 	g.mu.Unlock()
 
 	if delay := time.Until(reserved); delay > 0 {
@@ -346,9 +372,24 @@ func (g *Gate) Wait(ctx context.Context) error {
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
-			return ctx.Err()
+			g.mu.Lock()
+			if interval > 0 && g.next.Equal(scheduledNext) {
+				g.next = reserved
+			}
+			g.mu.Unlock()
+			release()
+			return nil, ctx.Err()
 		}
 	}
+	return release, nil
+}
+
+func (g *Gate) Wait(ctx context.Context) error {
+	release, err := g.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	release()
 	return nil
 }
 
@@ -368,4 +409,125 @@ func (g *Gate) Interval() time.Duration {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.interval
+}
+
+// ValidateProxyURL accepts an explicit unauthenticated HTTP(S) proxy origin.
+// Local addresses are deliberately allowed because desktop proxy services
+// commonly listen on loopback. Paths, credentials and query parameters are
+// rejected so the value has one unambiguous transport meaning.
+func ValidateProxyURL(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Opaque != "" {
+		return "", fmt.Errorf("proxyUrl 必须是 HTTP(S) 代理地址")
+	}
+	if parsed.User != nil {
+		return "", fmt.Errorf("proxyUrl 暂不支持用户名或密码")
+	}
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return "", fmt.Errorf("proxyUrl 不能包含路径、查询参数或片段")
+	}
+	parsed.Path = ""
+	parsed.RawPath = ""
+	return parsed.String(), nil
+}
+
+func ProxyConfigField(value string) ConfigField {
+	return ConfigField{
+		Key: "proxyUrl", Label: "HTTP 代理 URL", Type: "url", Value: value,
+		Placeholder: "http://127.0.0.1:7890",
+		Description: "可选；留空沿用 HTTP_PROXY、HTTPS_PROXY 与 NO_PROXY，仅支持无鉴权的 HTTP(S) 代理",
+	}
+}
+
+// HTTPClientWithProxy clones a provider's base client and installs a
+// source-wide rate-limited transport. An explicit proxy overrides environment
+// proxy selection for this provider; an empty value preserves the base
+// transport's ProxyFromEnvironment behavior.
+func HTTPClientWithProxy(base *http.Client, gate *Gate, proxyURL string) (*http.Client, error) {
+	normalized, err := ValidateProxyURL(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if base == nil {
+		base = &http.Client{}
+	}
+	configured := *base
+	transport := base.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	if standard, ok := transport.(*http.Transport); ok {
+		cloned := standard.Clone()
+		if normalized != "" {
+			parsed, _ := url.Parse(normalized)
+			cloned.Proxy = http.ProxyURL(parsed)
+		}
+		transport = cloned
+	} else if normalized != "" {
+		return nil, fmt.Errorf("proxyUrl 不能与自定义 HTTP transport 同时使用")
+	}
+	configured.Transport = &gatedRoundTripper{base: transport, gate: gate}
+	return &configured, nil
+}
+
+func WrapHTTPClient(base *http.Client, gate *Gate) *http.Client {
+	configured, _ := HTTPClientWithProxy(base, gate, "")
+	return configured
+}
+
+type gatedRoundTripper struct {
+	base http.RoundTripper
+	gate *Gate
+}
+
+func (transport *gatedRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	base := transport.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	release, err := transport.gate.Acquire(request.Context())
+	if err != nil {
+		return nil, err
+	}
+	response, err := base.RoundTrip(request)
+	if err != nil {
+		release()
+		return response, err
+	}
+	if response == nil || response.Body == nil {
+		release()
+		return response, nil
+	}
+	response.Body = &releaseReadCloser{ReadCloser: response.Body, release: release}
+	return response, nil
+}
+
+func (transport *gatedRoundTripper) CloseIdleConnections() {
+	if closer, ok := transport.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
+}
+
+type releaseReadCloser struct {
+	io.ReadCloser
+	once    sync.Once
+	release func()
+}
+
+func (body *releaseReadCloser) Read(buffer []byte) (int, error) {
+	count, err := body.ReadCloser.Read(buffer)
+	if errors.Is(err, io.EOF) {
+		body.once.Do(body.release)
+	}
+	return count, err
+}
+
+func (body *releaseReadCloser) Close() error {
+	err := body.ReadCloser.Close()
+	body.once.Do(body.release)
+	return err
 }

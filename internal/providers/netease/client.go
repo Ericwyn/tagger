@@ -26,10 +26,12 @@ type Config struct {
 }
 
 type Client struct {
-	mu     sync.RWMutex
-	config Config
-	http   *http.Client
-	gate   *providers.Gate
+	mu       sync.RWMutex
+	config   Config
+	proxyURL string
+	baseHTTP *http.Client
+	http     *http.Client
+	gate     *providers.Gate
 }
 
 func New(config Config) *Client {
@@ -51,7 +53,8 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = 180 * time.Millisecond
 	}
-	return &Client{config: config, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+	gate := providers.NewGate(config.RateInterval)
+	return &Client{config: config, baseHTTP: config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate}
 }
 
 // ResetConfig restores the public web endpoint defaults and clears optional
@@ -66,7 +69,7 @@ func (c *Client) ResetConfig() error {
 	c.config.Auth = ""
 	c.config.Cookie = ""
 	c.gate.SetInterval(180 * time.Millisecond)
-	return nil
+	return c.setProxyLocked("")
 }
 
 func (c *Client) Descriptor() providers.Descriptor {
@@ -89,6 +92,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
 		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "MUSIC_U=…"},
+		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -125,6 +129,10 @@ func (c *Client) Configure(values map[string]string) error {
 			c.config.Auth = strings.TrimSpace(value)
 		case "cookie":
 			c.config.Cookie = strings.TrimSpace(value)
+		case "proxyUrl":
+			if err := c.setProxyLocked(value); err != nil {
+				return err
+			}
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -136,6 +144,30 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) setProxyLocked(value string) error {
+	normalized, err := providers.ValidateProxyURL(value)
+	if err != nil {
+		return err
+	}
+	configured, err := providers.HTTPClientWithProxy(c.baseHTTP, c.gate, normalized)
+	if err != nil {
+		return err
+	}
+	previous := c.http
+	c.http = configured
+	c.proxyURL = normalized
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+	return nil
+}
+
+func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.ArtworkDownloadOptions{ProxyURL: c.proxyURL, Gate: c.gate}
 }
 
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
@@ -150,10 +182,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	if strings.TrimSpace(query.Title) == "" {
 		return []providers.Candidate{}, nil
 	}
-	if err := c.gate.Wait(ctx); err != nil {
-		return nil, err
-	}
-
 	// A full metadata keyword is useful for disambiguation, while a title-only
 	// retry catches files whose artist/album tags contain a translation or a
 	// collaboration spelling that NetEase does not index the same way.
@@ -168,11 +196,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	songs := make([]song, 0, fetchLimit)
 	seen := make(map[int64]struct{}, fetchLimit)
 	for index, keyword := range keywords {
-		if index > 0 {
-			if err := c.gate.Wait(ctx); err != nil {
-				return nil, err
-			}
-		}
 		values := url.Values{
 			"s":      {keyword},
 			"type":   {"1"},
@@ -255,9 +278,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 }
 
 func (c *Client) fetchLyrics(ctx context.Context, id int64) (string, error) {
-	if err := c.gate.Wait(ctx); err != nil {
-		return "", err
-	}
 	values := url.Values{"id": {strconv.FormatInt(id, 10)}, "lv": {"-1"}, "tv": {"-1"}}
 	var response lyricResponse
 	if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.LyricEndpoint+"?"+values.Encode(), c.config.UserAgent, neteaseHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
@@ -277,9 +297,6 @@ func (c *Client) fetchLyrics(ctx context.Context, id int64) (string, error) {
 }
 
 func (c *Client) fetchArtwork(ctx context.Context, albumID int64) (string, error) {
-	if err := c.gate.Wait(ctx); err != nil {
-		return "", err
-	}
 	var response struct {
 		Code    int    `json:"code"`
 		Message string `json:"msg"`

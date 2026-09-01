@@ -32,6 +32,10 @@ type serverProvider struct{}
 
 type failingServerProvider struct{}
 
+type countingServerProvider struct {
+	calls int
+}
+
 func (serverProvider) Descriptor() providers.Descriptor {
 	return providers.Descriptor{ID: "test-provider", Name: "Test Provider", Enabled: true, Health: providers.HealthReady}
 }
@@ -50,6 +54,18 @@ func (failingServerProvider) Descriptor() providers.Descriptor {
 
 func (failingServerProvider) Search(context.Context, providers.Query, int) ([]providers.Candidate, error) {
 	return nil, &providers.HTTPError{Status: 503, RetryAfter: 1500 * time.Millisecond, Message: "upstream busy"}
+}
+
+func (provider *countingServerProvider) Descriptor() providers.Descriptor {
+	return providers.Descriptor{ID: "counting-provider", Name: "Counting Provider", Enabled: true, Health: providers.HealthReady}
+}
+
+func (provider *countingServerProvider) Search(_ context.Context, query providers.Query, _ int) ([]providers.Candidate, error) {
+	provider.calls++
+	return []providers.Candidate{{
+		ProviderID: "counting-provider", ExternalID: "external-live", Title: query.Title,
+		Artists: query.Artists, ArtworkURL: "https://images.example.test/live-cover.jpg",
+	}}, nil
 }
 
 func (serverProvider) Search(_ context.Context, query providers.Query, _ int) ([]providers.Candidate, error) {
@@ -964,6 +980,61 @@ func TestProviderTestKeepsStructuredFailureDiagnostics(t *testing.T) {
 	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/failing-provider/test", nil)
 	if response.Code != 200 || !containsJSON(response.Body.Bytes(), `"status":"error"`) || !containsJSON(response.Body.Bytes(), `"retryable":true`) || !containsJSON(response.Body.Bytes(), `"retryAfterMs":1500`) || !containsJSON(response.Body.Bytes(), `"hint":"数据源服务暂时不可用`) || !containsJSON(response.Body.Bytes(), `"stage":"search"`) {
 		t.Fatalf("failure diagnostics = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestProviderTestBypassesSearchAndArtworkCaches(t *testing.T) {
+	s := newTestServer(t)
+	provider := &countingServerProvider{}
+	registry := providers.NewRegistry(provider)
+	if err := registry.SetPersistence(context.Background(), s.store); err != nil {
+		t.Fatal(err)
+	}
+	s.providers = registry
+	query := providers.Query{Title: "最佳歌手", Artists: []string{"许嵩"}}
+	prewarmed, err := registry.Search(context.Background(), query, []string{"counting-provider"}, 1)
+	if err != nil || provider.calls != 1 || len(prewarmed.Candidates) != 1 {
+		t.Fatalf("prewarm=%#v calls=%d err=%v", prewarmed, provider.calls, err)
+	}
+	if cached, err := registry.Search(context.Background(), query, []string{"counting-provider"}, 1); err != nil || !cached.Providers["counting-provider"].Cached || provider.calls != 1 {
+		t.Fatalf("cached=%#v calls=%d err=%v", cached.Providers, provider.calls, err)
+	}
+
+	cache, err := artwork.NewCache(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodeAsset := func(size int) artwork.Asset {
+		var data bytes.Buffer
+		if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, size, size))); err != nil {
+			t.Fatal(err)
+		}
+		asset, err := artwork.Validate(data.Bytes(), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return asset
+	}
+	cachedAsset := encodeAsset(3)
+	liveAsset := encodeAsset(7)
+	reference, err := registry.ArtworkReference(prewarmed.Candidates[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.Get(context.Background(), reference.URL, func() (artwork.Asset, error) { return cachedAsset, nil }); err != nil {
+		t.Fatal(err)
+	}
+	s.artworkCache = cache
+	artworkCalls := 0
+	s.downloadArtwork = func(context.Context, providers.ArtworkReference) (artwork.Asset, error) {
+		artworkCalls++
+		return liveAsset, nil
+	}
+
+	body := []byte(`{"query":{"title":"最佳歌手","artists":["许嵩"]},"limit":1,"probeArtwork":true}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/providers/counting-provider/test", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if response.Code != 200 || provider.calls != 2 || artworkCalls != 1 || !containsJSON(response.Body.Bytes(), `"width":7`) || containsJSON(response.Body.Bytes(), `"cached":true`) {
+		t.Fatalf("diagnostic = %d calls=%d artwork=%d body=%s", response.Code, provider.calls, artworkCalls, response.Body.String())
 	}
 }
 

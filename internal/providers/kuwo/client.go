@@ -27,10 +27,12 @@ type Config struct {
 	RateInterval       time.Duration
 }
 type Client struct {
-	mu     sync.RWMutex
-	config Config
-	http   *http.Client
-	gate   *providers.Gate
+	mu       sync.RWMutex
+	config   Config
+	proxyURL string
+	baseHTTP *http.Client
+	http     *http.Client
+	gate     *providers.Gate
 }
 
 func New(config Config) *Client {
@@ -55,7 +57,8 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = 180 * time.Millisecond
 	}
-	return &Client{config: config, http: config.Client, gate: providers.NewGate(config.RateInterval)}
+	gate := providers.NewGate(config.RateInterval)
+	return &Client{config: config, baseHTTP: config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate}
 }
 
 // ResetConfig restores the web endpoints and clears optional credentials
@@ -71,7 +74,7 @@ func (c *Client) ResetConfig() error {
 	c.config.Auth = ""
 	c.config.Cookie = ""
 	c.gate.SetInterval(180 * time.Millisecond)
-	return nil
+	return c.setProxyLocked("")
 }
 
 func (c *Client) Descriptor() providers.Descriptor {
@@ -89,6 +92,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
 		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "kw_token=…"},
+		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
 }
@@ -131,6 +135,10 @@ func (c *Client) Configure(values map[string]string) error {
 			c.config.Auth = strings.TrimSpace(value)
 		case "cookie":
 			c.config.Cookie = strings.TrimSpace(value)
+		case "proxyUrl":
+			if err := c.setProxyLocked(value); err != nil {
+				return err
+			}
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -142,6 +150,30 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) setProxyLocked(value string) error {
+	normalized, err := providers.ValidateProxyURL(value)
+	if err != nil {
+		return err
+	}
+	configured, err := providers.HTTPClientWithProxy(c.baseHTTP, c.gate, normalized)
+	if err != nil {
+		return err
+	}
+	previous := c.http
+	c.http = configured
+	c.proxyURL = normalized
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+	return nil
+}
+
+func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.ArtworkDownloadOptions{ProxyURL: c.proxyURL, Gate: c.gate}
 }
 
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
@@ -156,9 +188,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	if strings.TrimSpace(query.Title) == "" {
 		return []providers.Candidate{}, nil
 	}
-	if err := c.gate.Wait(ctx); err != nil {
-		return nil, err
-	}
 	keywords := searchKeywords(query)
 	fetchLimit := limit * 4
 	if fetchLimit < 20 {
@@ -171,11 +200,6 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	seen := make(map[string]struct{}, fetchLimit)
 	var firstErr error
 	for index, keyword := range keywords {
-		if index > 0 {
-			if err := c.gate.Wait(ctx); err != nil {
-				return nil, err
-			}
-		}
 		values := url.Values{"client": {"kt"}, "ft": {"music"}, "cluster": {"0"}, "strategy": {"2012"}, "encoding": {"utf8"}, "rformat": {"json"}, "mobi": {"1"}, "issubtitle": {"1"}, "pn": {"0"}, "rn": {strconv.Itoa(fetchLimit)}, "all": {keyword}}
 		var response struct {
 			Items   []kuwoItem      `json:"abslist"`
@@ -279,9 +303,6 @@ type lyricPayload struct {
 // interfaces and may change independently, so lyric failures never make an
 // otherwise valid song candidate disappear.
 func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
-	if err := c.gate.Wait(ctx); err != nil {
-		return "", err
-	}
 	numericID := strings.TrimPrefix(strings.TrimSpace(id), "MUSIC_")
 	values := url.Values{"musicId": {numericID}}
 	body, primaryErr := c.getBody(ctx, c.config.LyricsEndpoint+"?"+values.Encode(), map[string]string{"Accept": "application/json"})
@@ -305,16 +326,10 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 		}
 	}
 
-	if err := c.gate.Wait(ctx); err != nil {
-		return "", err
-	}
 	ridValues := url.Values{"rid": {"MUSIC_" + numericID}}
 	ridBody, ridErr := c.getBody(ctx, c.config.LyricsRIDEndpoint+"?"+ridValues.Encode(), map[string]string{"Accept": "application/xml, text/xml"})
 	if ridErr == nil {
 		if lyricKey := lyricKeyFromXML(ridBody); lyricKey != "" {
-			if err := c.gate.Wait(ctx); err != nil {
-				return "", err
-			}
 			lyricBody, lyricErr := c.getBody(ctx, c.config.LyricsFileEndpoint+"?"+lyricKey, map[string]string{"Accept": "text/plain, text/html"})
 			if lyricErr == nil {
 				lyrics := providers.NormalizeLyrics(string(lyricBody))

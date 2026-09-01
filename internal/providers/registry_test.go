@@ -29,6 +29,12 @@ type concurrentCountingStrategy struct {
 	delay      time.Duration
 }
 
+type barrierStrategy struct {
+	descriptor Descriptor
+	entered    chan<- string
+	release    <-chan struct{}
+}
+
 type configurableStrategy struct {
 	config map[string]string
 }
@@ -115,6 +121,21 @@ func (strategy *concurrentCountingStrategy) Search(context.Context, Query, int) 
 	return []Candidate{{ExternalID: "1", Title: "Song", Artists: []string{"Artist"}}}, nil
 }
 
+func (strategy barrierStrategy) Descriptor() Descriptor { return strategy.descriptor }
+func (strategy barrierStrategy) Search(ctx context.Context, _ Query, _ int) ([]Candidate, error) {
+	select {
+	case strategy.entered <- strategy.descriptor.ID:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-strategy.release:
+		return []Candidate{{ExternalID: strategy.descriptor.ID, Title: "Song"}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (f fakeStrategy) Descriptor() Descriptor { return f.descriptor }
 func (f fakeStrategy) Search(context.Context, Query, int) ([]Candidate, error) {
 	return f.candidates, f.err
@@ -155,6 +176,40 @@ func TestRegistryRejectsUnknownProvider(t *testing.T) {
 	_, err := registry.Search(context.Background(), Query{Title: "Song"}, []string{"missing"}, 5)
 	if !errors.Is(err, ErrProviderNotFound) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRegistryStartsSelectedProvidersInParallel(t *testing.T) {
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	registry := NewRegistry(
+		barrierStrategy{descriptor: Descriptor{ID: "source-a", Name: "A", Enabled: true, Health: HealthReady}, entered: entered, release: release},
+		barrierStrategy{descriptor: Descriptor{ID: "source-b", Name: "B", Enabled: true, Health: HealthReady}, entered: entered, release: release},
+	)
+	done := make(chan error, 1)
+	go func() {
+		result, err := registry.Search(context.Background(), Query{Title: "Song"}, nil, 1)
+		if err == nil && len(result.Providers) != 2 {
+			err = errors.New("parallel search did not return both providers")
+		}
+		done <- err
+	}()
+
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case id := <-entered:
+			seen[id] = true
+		case <-time.After(time.Second):
+			t.Fatal("providers did not both enter search before either was released")
+		}
+	}
+	if !seen["source-a"] || !seen["source-b"] {
+		t.Fatalf("entered providers = %v", seen)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -329,6 +384,35 @@ func TestRegistryCoalescesConcurrentColdSearches(t *testing.T) {
 	}
 	if calls := strategy.calls.Load(); calls != 1 {
 		t.Fatalf("strategy calls=%d, want one cold request", calls)
+	}
+}
+
+func TestRegistryBypassCacheForcesLiveSearchAndRefreshesCache(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	strategy := &countingStrategy{descriptor: Descriptor{ID: "live", Name: "Live", Enabled: true, Health: HealthReady}}
+	registry := NewRegistry(strategy)
+	if err := registry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	query := Query{Title: "Song", Artists: []string{"Artist"}}
+	if _, err := registry.Search(context.Background(), query, []string{"live"}, 1); err != nil {
+		t.Fatal(err)
+	}
+	cached, err := registry.Search(context.Background(), query, []string{"live"}, 1)
+	if err != nil || !cached.Providers["live"].Cached || strategy.calls != 1 {
+		t.Fatalf("cached=%#v calls=%d err=%v", cached.Providers, strategy.calls, err)
+	}
+	live, err := registry.SearchWithOptions(context.Background(), query, []string{"live"}, 1, SearchOptions{BypassCache: true})
+	if err != nil || live.Providers["live"].Cached || strategy.calls != 2 {
+		t.Fatalf("live=%#v calls=%d err=%v", live.Providers, strategy.calls, err)
+	}
+	refreshed, err := registry.Search(context.Background(), query, []string{"live"}, 1)
+	if err != nil || !refreshed.Providers["live"].Cached || strategy.calls != 2 {
+		t.Fatalf("refreshed=%#v calls=%d err=%v", refreshed.Providers, strategy.calls, err)
 	}
 }
 

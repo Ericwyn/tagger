@@ -84,6 +84,11 @@ const amphibiousFolder = 'folder-amphibious';
 const browserUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const mobileBrowserUserAgent = 'Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
 const musicBrainzUserAgent = 'Tagger/0.1 (https://github.com/ericwyn/tagger)';
+const providerProxyConfig = {
+  key: 'proxyUrl', label: 'HTTP 代理 URL', type: 'url' as const, value: '',
+  placeholder: 'http://127.0.0.1:7890',
+  description: '可选；留空沿用 HTTP_PROXY、HTTPS_PROXY 与 NO_PROXY，仅支持无鉴权的 HTTP(S) 代理',
+};
 
 export const seedTracks: Track[] = [
   track({
@@ -242,6 +247,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/'},
       {key: 'archiveDownloadBaseUrl', label: 'Internet Archive 下载基址', type: 'url', value: 'https://archive.org', required: true, description: '支持镜像 origin 或带路径的代理前缀，末尾会拼接 /download/ 路径'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: musicBrainzUserAgent, description: 'MusicBrainz 要求保留可联系的应用标识'},
+      {...providerProxyConfig},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '1000'},
     ],
   },
@@ -259,6 +265,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'baseUrl', label: '精确查询 URL', type: 'url', value: 'https://lrclib.net/api/get'},
       {key: 'searchUrl', label: '宽搜索 URL', type: 'url', value: 'https://lrclib.net/api/search'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
+      {...providerProxyConfig},
     ],
   },
   {
@@ -275,6 +282,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'baseUrl', label: 'Search API URL', type: 'url', value: 'https://itunes.apple.com/search'},
       {key: 'country', label: '地区代码', type: 'text', value: 'CN'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
+      {...providerProxyConfig},
     ],
   },
   {
@@ -293,6 +301,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'lyricEndpoint', label: '歌词 API URL', type: 'url', value: 'https://music.163.com/api/song/lyric'},
       {key: 'albumEndpoint', label: '专辑 API URL', type: 'url', value: 'https://music.163.com/api/album'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
+      {...providerProxyConfig},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '180'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
       {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
@@ -315,6 +324,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'lyricsRidEndpoint', label: '歌词 RID URL', type: 'url', value: 'https://player.kuwo.cn/webmusic/st/getNewMuiseByRid'},
       {key: 'lyricsFileEndpoint', label: '歌词文件 URL', type: 'url', value: 'https://newlyric.kuwo.cn/newlyric.lrc'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
+      {...providerProxyConfig},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '180'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
       {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
@@ -337,6 +347,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'lyricsDownloadUrl', label: '歌词下载 URL', type: 'url', value: 'https://lyrics.kugou.com/download'},
       {key: 'artworkEndpoint', label: '封面 API URL', type: 'url', value: 'https://wwwapi.kugou.com/yy/index.php'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: mobileBrowserUserAgent},
+      {...providerProxyConfig},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '180'},
       {key: 'auth', label: '鉴权头（可选）', type: 'password', secret: true, configured: false},
       {key: 'cookie', label: 'Cookie（可选）', type: 'password', secret: true, configured: false},
@@ -357,6 +368,7 @@ export const providerConfigs: ProviderConfig[] = [
       {key: 'baseUrl', label: '歌词 JSON API URL', type: 'url', value: 'https://api.lrc.cx/jsonapi'},
       {key: 'coverUrl', label: '封面 API URL', type: 'url', value: 'https://api.lrc.cx/cover'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
+      {...providerProxyConfig},
       {key: 'rateIntervalMs', label: '请求间隔（毫秒）', type: 'number', value: '500'},
       {key: 'auth', label: 'Authorization', type: 'password', secret: true, configured: false},
     ],

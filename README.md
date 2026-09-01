@@ -113,7 +113,9 @@ flowchart LR
 
 ## 数据源策略
 
-数据源是可配置的策略，而不是散落在页面里的特殊分支。每个策略可以声明自己的 API 地址、User-Agent、限流间隔和可选鉴权字段；敏感配置会在本地加密保存，界面返回时自动脱敏。
+数据源是可配置的策略，而不是散落在页面里的特殊分支。每个策略可以声明自己的 API 地址、User-Agent、限流间隔、可选 HTTP 代理和鉴权字段；敏感配置会在本地加密保存，界面返回时自动脱敏。
+
+同一首歌曲会并行查询所有已选数据源；同一个数据源则最多保留一个在途 HTTP 请求，搜索、歌词、自动重试和封面下载共同遵守该来源的请求间隔。批量抓取仍按曲目顺序处理，避免曲目并发绕过来源限流。
 
 | 数据源 | 主要用途 | 默认状态 |
 | --- | --- | --- |
@@ -125,7 +127,9 @@ flowchart LR
 | 酷狗音乐 | 中文曲库、LRC 歌词和封面补充 | 实验性，默认关闭 |
 | [LrcApi](https://github.com/HisAtri/LrcApi) | 可自托管的歌词/封面聚合接口 | 实验性，默认关闭 |
 
-MusicBrainz 的结构化查询和封面下载分别配置：`API Base URL` 用于查询 recording，`Internet Archive 下载基址` 用于改写 Cover Art Archive 返回的 `archive.org/download/...` 地址。后者默认是 `https://archive.org`，既可以填写兼容 `/download/{item}/{file}` 的 HTTPS 镜像 origin，也可以填写会继续拼接该路径的代理前缀，例如 `https://vercel-proxy.example/https/archive.org`。
+每个来源的 `HTTP 代理 URL` 接受无鉴权的 `http://` 或 `https://` 代理地址，例如 `http://127.0.0.1:7890`，并覆盖该来源的搜索、歌词、元数据与封面请求；留空时沿用进程的 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY`，未设置环境代理时直接连接。当前不支持 SOCKS、PAC 或在代理 URL 中携带用户名密码。
+
+MusicBrainz 的结构化查询和封面下载分别配置：`API Base URL` 用于查询 recording，`Internet Archive 下载基址` 用于改写 Cover Art Archive 返回的 `archive.org/download/...` 地址。后者默认是 `https://archive.org`，既可以填写兼容 `/download/{item}/{file}` 的 HTTPS 镜像 origin，也可以填写会继续拼接该路径的代理前缀，例如 `https://vercel-proxy.example/https/archive.org`；改写后的镜像请求仍会经过该来源配置的 HTTP 代理。
 
 所有远程封面都会经过安全代理、MIME/尺寸校验和短期磁盘缓存；来源没有可用封面时，界面默认显示空白，不使用自动生成图片干扰审核。网易云、酷我、酷狗等非官方接口可能随时变化，是否启用由用户自己决定。
 

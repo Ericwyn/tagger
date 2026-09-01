@@ -4,10 +4,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/store"
 )
 
 func TestSearchBuildsOfficialRecordingQueryAndMapsResponse(t *testing.T) {
@@ -71,6 +73,67 @@ func TestArchiveDownloadBaseURLConfiguration(t *testing.T) {
 	}
 	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != providers.DefaultArchiveDownloadBaseURL {
 		t.Fatalf("reset archive download base = %q", got)
+	}
+}
+
+func TestProxyConfigurationAppliesToSearchAndArtworkAndResets(t *testing.T) {
+	client := New(Config{})
+	options := client.ArtworkDownloadOptions()
+	if options.ProxyURL != "" || options.Gate == nil {
+		t.Fatalf("default artwork transport options = %#v", options)
+	}
+	var proxyField providers.ConfigField
+	for _, field := range client.ConfigFields() {
+		if field.Key == "proxyUrl" {
+			proxyField = field
+			break
+		}
+	}
+	if proxyField.Type != "url" || proxyField.Required || proxyField.Value != "" {
+		t.Fatalf("proxy field = %#v", proxyField)
+	}
+	if err := client.Configure(map[string]string{"proxyUrl": "http://127.0.0.1:7890/"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.ArtworkDownloadOptions(); got.ProxyURL != "http://127.0.0.1:7890" || got.Gate != options.Gate {
+		t.Fatalf("configured artwork transport options = %#v", got)
+	}
+	if err := client.Configure(map[string]string{"proxyUrl": "http://user:password@127.0.0.1:7890"}); err == nil {
+		t.Fatal("authenticated proxy unexpectedly accepted")
+	}
+	if got := client.ArtworkDownloadOptions().ProxyURL; got != "http://127.0.0.1:7890" {
+		t.Fatalf("invalid proxy update changed value to %q", got)
+	}
+	if err := client.ResetConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.ArtworkDownloadOptions().ProxyURL; got != "" {
+		t.Fatalf("reset proxy = %q", got)
+	}
+}
+
+func TestProxyConfigurationPersistsAcrossRegistryRestart(t *testing.T) {
+	repository, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "tagger.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	client := New(Config{})
+	registry := providers.NewRegistry(client)
+	if err := registry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.SetConfig(context.Background(), "musicbrainz", map[string]string{"proxyUrl": "http://127.0.0.1:7890"}); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := New(Config{})
+	restartedRegistry := providers.NewRegistry(restarted)
+	if err := restartedRegistry.SetPersistence(context.Background(), repository); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.ArtworkDownloadOptions().ProxyURL; got != "http://127.0.0.1:7890" {
+		t.Fatalf("restored proxy = %q", got)
 	}
 }
 

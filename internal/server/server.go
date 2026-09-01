@@ -2943,7 +2943,7 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 	logs = append(logs, providerTestLog{Level: "info", Stage: "query", Message: "已提交搜索查询", Details: map[string]any{
 		"title": query.Title, "artists": query.Artists, "album": query.Album, "durationSeconds": query.DurationSeconds, "limit": limit,
 	}})
-	result, err := s.providers.Search(ctx, query, []string{descriptor.ID}, limit)
+	result, err := s.providers.SearchWithOptions(ctx, query, []string{descriptor.ID}, limit, providers.SearchOptions{BypassCache: true})
 	if err != nil {
 		hint := providers.ErrorHint(err)
 		logs = append(logs, providerTestLog{Level: "error", Stage: "search", Message: "数据源搜索失败", Details: map[string]any{
@@ -3007,7 +3007,9 @@ func (s *Server) handleProviderTest(ctx context.Context, c *app.RequestContext) 
 			logs = append(logs, providerTestLog{Level: "warning", Stage: "artwork", Message: "候选封面引用不存在", Details: map[string]any{"candidateId": candidate.ID}})
 			continue
 		}
-		asset, artworkErr := s.fetchArtwork(ctx, reference)
+		// Diagnostics must exercise the currently configured provider transport,
+		// not a successful image cached before a proxy or endpoint change.
+		asset, artworkErr := s.downloadArtwork(ctx, reference)
 		if artworkErr != nil {
 			logs = append(logs, providerTestLog{Level: "error", Stage: "artwork", Message: "封面探测失败", Details: map[string]any{"candidateId": candidate.ID, "error": artworkErr.Error()}})
 			continue

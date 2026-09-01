@@ -378,7 +378,19 @@ func (r *Registry) Descriptor(id string) (Descriptor, bool) {
 	return r.descriptor(id), true
 }
 
+type SearchOptions struct {
+	// BypassCache forces a live provider request. It skips both persisted cache
+	// reads and singleflight coalescing so diagnostics cannot accidentally
+	// validate an earlier transport configuration. Successful results still
+	// refresh the normal cache entry.
+	BypassCache bool
+}
+
 func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string, limit int) (SearchResult, error) {
+	return r.SearchWithOptions(ctx, query, providerIDs, limit, SearchOptions{})
+}
+
+func (r *Registry) SearchWithOptions(ctx context.Context, query Query, providerIDs []string, limit int, options SearchOptions) (SearchResult, error) {
 	if query.Title == "" {
 		return SearchResult{}, fmt.Errorf("title is required")
 	}
@@ -417,8 +429,8 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 			started := time.Now()
 			descriptor := r.descriptor(strategy.Descriptor().ID)
 			cacheKey := providerCacheKey(descriptor.ID, query, limit)
-			value, err, _ := r.searchGroup.Do(cacheKey, func() (any, error) {
-				if r.persistence != nil {
+			search := func() (any, error) {
+				if !options.BypassCache && r.persistence != nil {
 					if payload, found, cacheErr := r.persistence.LoadProviderCache(ctx, cacheKey); cacheErr == nil && found {
 						var candidates []Candidate
 						if json.Unmarshal(payload, &candidates) == nil {
@@ -436,7 +448,14 @@ func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string
 					}
 				}
 				return providerSearchPayload{candidates: candidates}, nil
-			})
+			}
+			var value any
+			var err error
+			if options.BypassCache {
+				value, err = search()
+			} else {
+				value, err, _ = r.searchGroup.Do(cacheKey, search)
+			}
 			payload, ok := value.(providerSearchPayload)
 			if !ok && err == nil {
 				err = fmt.Errorf("provider %s returned an invalid search result", descriptor.ID)

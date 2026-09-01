@@ -26,6 +26,8 @@ type Client struct {
 	baseURL                string
 	archiveDownloadBaseURL string
 	userAgent              string
+	proxyURL               string
+	baseHTTP               *http.Client
 	http                   *http.Client
 	gate                   *providers.Gate
 }
@@ -46,9 +48,11 @@ func New(config Config) *Client {
 	if config.RateInterval == 0 {
 		config.RateInterval = time.Second
 	}
+	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, archiveDownloadBaseURL: config.ArchiveDownloadBaseURL,
-		userAgent: config.UserAgent, http: config.Client, gate: providers.NewGate(config.RateInterval),
+		userAgent: config.UserAgent, baseHTTP: config.Client,
+		http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
 
@@ -61,7 +65,7 @@ func (c *Client) ResetConfig() error {
 	c.archiveDownloadBaseURL = providers.DefaultArchiveDownloadBaseURL
 	c.userAgent = providers.DefaultUserAgent("musicbrainz")
 	c.gate.SetInterval(time.Second)
-	return nil
+	return c.setProxyLocked("")
 }
 
 func (c *Client) Descriptor() providers.Descriptor {
@@ -80,6 +84,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "API Base URL", Type: "url", Value: c.baseURL, Required: true, Description: "MusicBrainz recording 查询地址"},
 		{Key: "archiveDownloadBaseUrl", Label: "Internet Archive 下载基址", Type: "url", Value: c.archiveDownloadBaseURL, Required: true, Description: "支持镜像 origin 或带路径的代理前缀；末尾会拼接 archive.org 的 /download/ 路径"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true, Description: "请保留可联系的应用标识"},
+		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10), Description: "避免触发官方 API 限流"},
 	}
 }
@@ -106,6 +111,10 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "proxyUrl":
+			if err := c.setProxyLocked(value); err != nil {
+				return err
+			}
 		case "rateIntervalMs":
 			interval, err := providers.ParseRateInterval(value)
 			if err != nil {
@@ -119,18 +128,37 @@ func (c *Client) Configure(values map[string]string) error {
 	return nil
 }
 
+func (c *Client) setProxyLocked(value string) error {
+	normalized, err := providers.ValidateProxyURL(value)
+	if err != nil {
+		return err
+	}
+	configured, err := providers.HTTPClientWithProxy(c.baseHTTP, c.gate, normalized)
+	if err != nil {
+		return err
+	}
+	previous := c.http
+	c.http = configured
+	c.proxyURL = normalized
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+	return nil
+}
+
 func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return providers.ArtworkDownloadOptions{ArchiveDownloadBaseURL: c.archiveDownloadBaseURL}
+	return providers.ArtworkDownloadOptions{
+		ArchiveDownloadBaseURL: c.archiveDownloadBaseURL,
+		ProxyURL:               c.proxyURL,
+		Gate:                   c.gate,
+	}
 }
 
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if err := c.gate.Wait(ctx); err != nil {
-		return nil, err
-	}
 	parts := []string{`recording:"` + escapeLucene(query.Title) + `"`}
 	if len(query.Artists) > 0 {
 		parts = append(parts, `artist:"`+escapeLucene(strings.Join(query.Artists, " "))+`"`)

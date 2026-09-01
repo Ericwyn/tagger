@@ -32,6 +32,7 @@ const provider: ProviderConfig = {
   config: [
     {key: 'baseUrl', label: 'API Base URL', type: 'url', value: 'https://musicbrainz.org/ws/2/recording/', required: true},
     {key: 'archiveDownloadBaseUrl', label: 'Internet Archive 下载基址', type: 'url', value: 'https://archive.org', required: true},
+    {key: 'proxyUrl', label: 'HTTP 代理 URL', type: 'url', value: '', placeholder: 'http://127.0.0.1:7890'},
   ],
 };
 
@@ -65,7 +66,7 @@ describe('SettingsPage provider diagnostics', () => {
     api.updateProvider.mockImplementation((item: ProviderConfig, enabled: boolean, config?: Record<string, string>) => Promise.resolve({...item, enabled, config: config ? item.config?.map((field) => ({...field, value: config[field.key] ?? field.value})) : item.config}));
     api.resetProvider.mockImplementation((item: ProviderConfig) => Promise.resolve({...item, config: item.config?.map((field) => ({
       ...field,
-      value: field.key === 'baseUrl' ? 'https://musicbrainz.org/ws/2/recording/' : field.key === 'archiveDownloadBaseUrl' ? 'https://archive.org' : field.value,
+      value: field.key === 'baseUrl' ? 'https://musicbrainz.org/ws/2/recording/' : field.key === 'archiveDownloadBaseUrl' ? 'https://archive.org' : field.key === 'proxyUrl' ? '' : field.value,
     }))}));
     api.getLibrary.mockResolvedValue(library);
     api.listLibraries.mockResolvedValue([{...library, active: true}]);
@@ -154,12 +155,36 @@ describe('SettingsPage provider diagnostics', () => {
     expect(archiveDownloadBaseURL).toHaveValue('https://archive.org');
     await user.clear(archiveDownloadBaseURL);
     await user.type(archiveDownloadBaseURL, 'https://vercel-proxy.bytelen.com/https/archive.org');
+    const proxyURL = screen.getByRole('textbox', {name: 'HTTP 代理 URL'});
+    await user.type(proxyURL, 'http://127.0.0.1:7890');
     await user.click(screen.getByRole('button', {name: '保存并应用'}));
     await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(provider, true, {
       baseUrl: 'https://mirror.example.test/recording/',
       archiveDownloadBaseUrl: 'https://vercel-proxy.bytelen.com/https/archive.org',
+      proxyUrl: 'http://127.0.0.1:7890',
     }));
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('配置已保存'));
+  });
+
+  it('sends an empty proxy URL to restore environment proxy behavior', async () => {
+    const user = userEvent.setup();
+    const configuredProvider: ProviderConfig = {
+      ...provider,
+      config: provider.config?.map((field) => field.key === 'proxyUrl' ? {...field, value: 'http://127.0.0.1:7890'} : field),
+    };
+    api.listProviders.mockResolvedValueOnce([configuredProvider]);
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
+    await user.click(await screen.findByRole('button', {name: '配置'}));
+    const proxyURL = screen.getByRole('textbox', {name: 'HTTP 代理 URL'});
+    expect(proxyURL).toHaveValue('http://127.0.0.1:7890');
+    await user.clear(proxyURL);
+    await user.click(screen.getByRole('button', {name: '保存并应用'}));
+    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(configuredProvider, true, {
+      baseUrl: 'https://musicbrainz.org/ws/2/recording/',
+      archiveDownloadBaseUrl: 'https://archive.org',
+      proxyUrl: '',
+    }));
   });
 
   it('requires confirmation before restoring a provider configuration', async () => {
@@ -171,7 +196,7 @@ describe('SettingsPage provider diagnostics', () => {
     const resetButton = screen.getByRole('button', {name: '恢复默认配置'});
     expect(resetButton).toHaveClass('provider-config-reset-button');
     await user.click(resetButton);
-    expect(screen.getByText('会清除自定义地址和鉴权')).toBeInTheDocument();
+    expect(screen.getByText('会清除自定义地址、代理和鉴权')).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: '确认恢复'}));
     await waitFor(() => expect(api.resetProvider).toHaveBeenCalledWith(provider));
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('恢复默认配置'));

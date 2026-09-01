@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 type artworkRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -59,6 +60,50 @@ func TestPublicIPRejectsLocalAndPrivateRanges(t *testing.T) {
 	}
 	if !publicIP(net.ParseIP("1.1.1.1")) || !publicIP(net.ParseIP("2606:4700:4700::1111")) {
 		t.Fatal("public resolver addresses were rejected")
+	}
+}
+
+func TestSafeArtworkClientUsesConfiguredProxyAndProviderGate(t *testing.T) {
+	gate := NewGate(250 * time.Millisecond)
+	config, err := parseArtworkDownloadConfig("apple", ArtworkDownloadOptions{
+		ProxyURL: "http://127.0.0.1:7890",
+		Gate:     gate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := safeArtworkClient("apple", config, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gated, ok := client.Transport.(*gatedRoundTripper)
+	if !ok || gated.gate != gate {
+		t.Fatalf("artwork transport = %#v", client.Transport)
+	}
+	transport, ok := gated.base.(*http.Transport)
+	if !ok {
+		t.Fatalf("artwork base transport = %T", gated.base)
+	}
+	request, _ := http.NewRequest(http.MethodGet, "https://is1-ssl.mzstatic.com/image.jpg", nil)
+	proxy, err := transport.Proxy(request)
+	if err != nil || proxy.String() != "http://127.0.0.1:7890" {
+		t.Fatalf("artwork proxy = %v, %v", proxy, err)
+	}
+}
+
+func TestArtworkDownloadOptionsRejectUnsafeProxyWithoutWeakeningURLPolicy(t *testing.T) {
+	for _, proxyURL := range []string{"socks5://127.0.0.1:1080", "http://user:password@127.0.0.1:7890"} {
+		_, err := parseArtworkDownloadConfig("apple", ArtworkDownloadOptions{ProxyURL: proxyURL})
+		if err == nil {
+			t.Errorf("proxy %q unexpectedly accepted", proxyURL)
+		}
+	}
+	config, err := parseArtworkDownloadConfig("apple", ArtworkDownloadOptions{ProxyURL: "http://127.0.0.1:7890"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateArtworkURLWithConfig("apple", "https://evil.example.test/cover.jpg", config); !errors.Is(err, ErrUnsafeArtworkURL) {
+		t.Fatalf("proxy broadened artwork host policy: %v", err)
 	}
 }
 
