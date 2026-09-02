@@ -109,6 +109,48 @@ function candidateAssetSummary(candidate: MatchCandidate): string {
   return assets.length > 0 ? assets.join(' + ') : '仅元数据';
 }
 
+function recommendedCandidate(candidates: MatchCandidate[]): MatchCandidate | undefined {
+  return candidates.find((candidate) => candidate.recommended)
+    ?? candidates.find((candidate) => candidate.kind === 'smart')
+    ?? candidates[0];
+}
+
+function candidateFieldSource(candidate: MatchCandidate, field: string): string {
+  switch (field) {
+    case 'title': return candidate.title.source;
+    case 'artists': return candidate.artists.source;
+    case 'album': return candidate.album.source;
+    case 'albumArtists': return candidate.albumArtists.source;
+    case 'trackNumber': return candidate.trackNumber.source;
+    case 'year': return candidate.year.source;
+    case 'genres': return candidate.genres.source;
+    case 'comment': return candidate.comment?.source ?? candidate.providerName;
+    case 'composers': return candidate.composers?.source ?? candidate.providerName;
+    case 'conductor': return candidate.conductor?.source ?? candidate.providerName;
+    case 'lyricists': return candidate.lyricists?.source ?? candidate.providerName;
+    case 'copyright': return candidate.copyright?.source ?? candidate.providerName;
+    case 'bpm': return candidate.bpm?.source ?? candidate.providerName;
+    case 'isrc': return candidate.isrc?.source ?? candidate.providerName;
+    case 'musicbrainzTrackId': return candidate.musicbrainzTrackId?.source ?? candidate.providerName;
+    case 'musicbrainzReleaseId': return candidate.musicbrainzReleaseId?.source ?? candidate.providerName;
+    case 'musicbrainzArtistIds': return candidate.musicbrainzArtistIds?.source ?? candidate.providerName;
+    case 'acoustidId': return candidate.acoustidId?.source ?? candidate.providerName;
+    case 'acoustidFingerprint': return candidate.acoustidFingerprint?.source ?? candidate.providerName;
+    case 'lyrics': return candidate.lyrics?.source ?? candidate.providerName;
+    case 'artwork': return candidate.artworkSource?.providerName ?? candidate.providerName;
+    default: return candidate.providerName;
+  }
+}
+
+function candidateSourceSummary(candidate: MatchCandidate): string {
+  if (candidate.kind === 'smart') {
+    const count = candidate.evidence?.sourceCount ?? candidate.contributors?.length ?? 0;
+    return count > 0 ? `智能选择 · 综合 ${count} 个数据源` : '智能选择';
+  }
+  if (candidate.kind === 'ai') return 'AI 筛选';
+  return `${candidate.providerName} / ${candidate.externalId}`;
+}
+
 function candidateFieldValue(candidate: MatchCandidate, field: string): unknown {
   switch (field) {
     case 'title': return candidate.title.value;
@@ -184,6 +226,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   const [items, setItems] = useState<ReviewItem[]>([]);
   const [activeId, setActiveId] = useState<string>();
   const [loading, setLoading] = useState(true);
+	const [loadError, setLoadError] = useState('');
+	const [loadAttempt, setLoadAttempt] = useState(0);
   const [applying, setApplying] = useState(false);
   const [query, setQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>('all');
@@ -199,6 +243,8 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
   useEffect(() => {
     let active = true;
     let stopJobEvents: (() => void) | undefined;
+	setLoading(true);
+	setLoadError('');
     void (async () => {
       let next: Track[] = [];
       let persistedMatchItems: MatchItem[] | undefined;
@@ -263,7 +309,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       const reviewed = next.map((track) => {
         const candidates = apiReadMode === 'mock' ? candidatesFor(track) : (candidateOptionsByTrack.get(track.id) ?? []);
         const itemState = matchStateByTrack.get(track.id);
-        const candidate = candidates.find((item) => item.id === selectedCandidateByTrack.get(track.id)) ?? candidates[0];
+	        const candidate = candidates.find((item) => item.id === selectedCandidateByTrack.get(track.id)) ?? recommendedCandidate(candidates);
         const noMatch = !candidate || itemState === 'no_match' || itemState === 'failed';
         const persistedFields = reviewFieldsByTrack.get(track.id);
         const artworkTouched = reviewArtworkTouchedByTrack.get(track.id) ?? false;
@@ -277,22 +323,28 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           includeArtwork: artworkTouched ? (reviewArtworkByTrack.get(track.id) ?? false) : defaultIncludeArtwork,
 		  artworkMaxSize: reviewArtworkMaxSizeByTrack.get(track.id) ?? 0,
           error: errorByTrack.get(track.id),
-          state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : candidate && candidate.score >= 0.92 && availableFields(candidate).length > 0 && !suspiciousAlbumArtist(candidate) ? 'accepted' as const : 'review' as const,
+	          state: noMatch || itemState === 'skipped' ? 'skipped' as const : itemState === 'accepted' ? 'accepted' as const : itemState === 'review' ? 'review' as const : candidate?.autoAccept ? 'accepted' as const : 'review' as const,
         };
       });
       if (!active) return;
       setItems(reviewed);
       setActiveId(reviewed[0]?.track.id);
       setLoading(false);
-    })().catch(() => {
-      if (active) setLoading(false);
+	})().catch((error: unknown) => {
+	  if (!active) return;
+	  setItems([]);
+	  setActiveId(undefined);
+	  setLoadError(error instanceof Error ? error.message : '审核结果加载失败');
+	  setLoading(false);
     });
     return () => { active = false; stopJobEvents?.(); };
-  }, [matchJobId, trackIds]);
+	}, [loadAttempt, matchJobId, trackIds]);
 
-  const sourceOptions = useMemo(() => {
-    const providers = new Map<string, string>();
-    items.forEach((item) => item.candidates.forEach((candidate) => providers.set(candidate.providerId, candidate.providerName)));
+	  const sourceOptions = useMemo(() => {
+	    const providers = new Map<string, string>();
+	    items.forEach((item) => item.candidates.forEach((candidate) => {
+	      if (!candidate.kind || candidate.kind === 'source') providers.set(candidate.providerId, candidate.providerName);
+	    }));
     return [...providers.entries()].sort((left, right) => left[1].localeCompare(right[1]));
   }, [items]);
 
@@ -300,7 +352,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     const normalized = query.trim().toLocaleLowerCase();
     return items.filter(({track, candidates, state}) => {
       if (statusFilter !== 'all' && state !== statusFilter) return false;
-      if (sourceFilter !== 'all' && !candidates.some((candidate) => candidate.providerId === sourceFilter)) return false;
+	      if (sourceFilter !== 'all' && !candidates.some((candidate) => candidate.providerId === sourceFilter || candidate.contributors?.some((source) => source.providerId === sourceFilter))) return false;
       if (!normalized) return true;
       return [track.title, track.fileName, track.artists.join(' ')].some((value) => value.toLocaleLowerCase().includes(normalized));
     });
@@ -418,7 +470,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
       const result = await rematchMatchItem(job?.id ?? '', active.track.id, active.track);
       if (!result) return;
       const candidates = result.candidates ?? [];
-      const candidate = candidates[0];
+	      const candidate = candidates.find((item) => item.id === result.selectedCandidateId) ?? recommendedCandidate(candidates);
       setItems((current) => current.map((entry) => entry.track.id === active.track.id
         ? {
           ...entry,
@@ -428,7 +480,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
           includeArtwork: Boolean(candidate?.hasArtwork && active.track.artworkCount === 0),
           artworkTouched: false,
           artworkMaxSize: 0,
-          state: candidate ? 'review' : 'skipped',
+	          state: candidate ? (result.state === 'accepted' ? 'accepted' : 'review') : 'skipped',
           error: result.error,
         }
         : entry));
@@ -492,6 +544,30 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
     );
   }
 
+	if (loadError) {
+	  return (
+		<div className="app-loading app-error-state" role="alert">
+		  <strong>无法装载审核结果</strong>
+		  <span>{loadError}</span>
+		  {matchJobId && <small>任务：{matchJobId.toUpperCase()}</small>}
+		  <button className="primary-button" onClick={() => setLoadAttempt((value) => value + 1)}><RefreshCw size={15} /> 重试加载</button>
+		  <button className="secondary-button" onClick={onBack}><ArrowLeft size={15} /> 返回</button>
+		</div>
+	  );
+	}
+
+	if (items.length === 0) {
+	  return (
+		<div className="app-loading app-error-state">
+		  <strong>没有可显示的审核结果</strong>
+		  <span>{job?.detail || '任务没有保存曲目候选，或关联曲目已不在当前曲库。'}</span>
+		  {matchJobId && <small>任务：{matchJobId.toUpperCase()}</small>}
+		  <button className="primary-button" onClick={() => setLoadAttempt((value) => value + 1)}><RefreshCw size={15} /> 重新读取</button>
+		  <button className="secondary-button" onClick={onBack}><ArrowLeft size={15} /> 返回</button>
+		</div>
+	  );
+	}
+
   return (
     <div className="review-page">
       <header className="review-header">
@@ -532,15 +608,15 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
         </label>
         <span />
         <div className="review-toolbar-actions">
-          <button
-            className="secondary-button"
-            onClick={() => {
-              const highConfidence = items.filter((item) => item.candidate && item.candidate.score >= 0.92);
-              setItems((current) => current.map((item) => item.candidate && item.candidate.score >= 0.92 ? {...item, state: 'accepted'} : item));
-              highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0));
-            }}
-          >
-            <Check size={15} /> 接受所有高置信
+	          <button
+	            className="secondary-button"
+	            onClick={() => {
+	              const highConfidence = items.filter((item) => item.candidate?.autoAccept);
+	              setItems((current) => current.map((item) => item.candidate?.autoAccept ? {...item, state: 'accepted'} : item));
+	              highConfidence.forEach((item) => persistReviewState(item.track.id, 'accepted', item.candidate?.id, item.fields, item.includeArtwork, item.includeArtwork ? item.artworkMaxSize : 0));
+	            }}
+	          >
+	            <Check size={15} /> 接受所有自动推荐
           </button>
           <button className="secondary-button" onClick={onBack} disabled={applying}>保存草稿并返回</button>
           <button className="primary-button" disabled={accepted === 0 || applying} onClick={() => void confirmWrite()}>
@@ -608,7 +684,7 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
                 <button className="primary-button" onClick={acceptCurrent}><Check size={15} /> 接受候选</button>
               </div>
             </div>
-            <div className="review-detail-head">
+	            <div className="review-detail-head">
               <div className="record-comparison">
                 <CoverArt title={active.track.title} artist={active.track.artists[0]} tone={active.track.coverTone} missing={!showGeneratedCovers && active.track.artworkCount === 0} imageUrl={artworkURL(active.track)} blankOnImageError={!showGeneratedCovers} size="md" />
                 <div className="comparison-line"><span /><Sparkles size={16} /><span /></div>
@@ -618,11 +694,21 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
                 <span className="confidence-badge"><Check size={13} /> {active.candidate.scoreLabel} · {Math.round(active.candidate.score * 100)}%</span>
                 <h2>{active.track.title}</h2>
                 <p>{active.track.artists.join(' / ')} · {formatDuration(active.track.durationSeconds)}</p>
-                <small>候选来源：{active.candidate.providerName} / {active.candidate.externalId}</small>
-              </div>
-            </div>
+	                <small>候选来源：{candidateSourceSummary(active.candidate)}</small>
+	              </div>
+	            </div>
+	            {active.candidate.kind === 'smart' && (
+	              <div className="review-smart-evidence">
+	                <span className="review-smart-evidence-icon" aria-hidden="true"><Sparkles size={15} /></span>
+	                <div>
+	                  <strong>跨源智能选择</strong>
+	                  <span>{active.candidate.matchReasons.join(' · ')}</span>
+	                  {active.candidate.evidence && <small>录音匹配 {Math.round(active.candidate.evidence.identityScore * 100)}% · 发行匹配 {Math.round((active.candidate.evidence.releaseScore ?? 0) * 100)}% · 分差 {Math.round((active.candidate.evidence.margin ?? 0) * 100)}%</small>}
+	                </div>
+	              </div>
+	            )}
 
-            <div className="review-policy-note">
+	            <div className="review-policy-note">
               <FileCheck2 size={18} />
               <div>
                 <strong>当前策略：采用所选字段</strong>
@@ -637,36 +723,36 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 
             <div className="review-diff-table">
               <div className="review-diff-head"><span>采用</span><span>字段</span><span>当前值</span><span>候选值</span><span>来源</span></div>
-              <ReviewDiff field="title" label="标题" current={active.track.title} next={active.candidate.title.value} source={active.candidate.providerName} checked={active.fields.includes('title')} onToggle={() => toggleField(active.track.id, 'title')} />
-              <ReviewDiff field="artists" label="艺术家" current={active.track.artists.join(' / ')} next={active.candidate.artists.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('artists')} onToggle={() => toggleField(active.track.id, 'artists')} />
-              <ReviewDiff field="album" label="专辑" current={active.track.album || '空'} next={active.candidate.album.value} source={active.candidate.providerName} changed={!active.track.album} checked={active.fields.includes('album')} onToggle={() => toggleField(active.track.id, 'album')} />
-              <ReviewDiff field="albumArtists" label="专辑艺术家" current={active.track.albumArtists.join(' / ') || '空'} next={active.candidate.albumArtists.value.join(' / ') || '来源未提供'} source={active.candidate.providerName} checked={active.fields.includes('albumArtists')} onToggle={() => toggleField(active.track.id, 'albumArtists')} warning={suspiciousAlbumArtist(active.candidate) ? '候选值与专辑名相同、但与曲目艺术家不同，已默认取消采用' : undefined} />
+	              <ReviewDiff field="title" label="标题" current={active.track.title} next={active.candidate.title.value} source={candidateFieldSource(active.candidate, 'title')} checked={active.fields.includes('title')} onToggle={() => toggleField(active.track.id, 'title')} />
+	              <ReviewDiff field="artists" label="艺术家" current={active.track.artists.join(' / ')} next={active.candidate.artists.value.join(' / ')} source={candidateFieldSource(active.candidate, 'artists')} checked={active.fields.includes('artists')} onToggle={() => toggleField(active.track.id, 'artists')} />
+	              <ReviewDiff field="album" label="专辑" current={active.track.album || '空'} next={active.candidate.album.value} source={candidateFieldSource(active.candidate, 'album')} changed={!active.track.album} checked={active.fields.includes('album')} onToggle={() => toggleField(active.track.id, 'album')} />
+	              <ReviewDiff field="albumArtists" label="专辑艺术家" current={active.track.albumArtists.join(' / ') || '空'} next={active.candidate.albumArtists.value.join(' / ') || '来源未提供'} source={candidateFieldSource(active.candidate, 'albumArtists')} checked={active.fields.includes('albumArtists')} onToggle={() => toggleField(active.track.id, 'albumArtists')} warning={suspiciousAlbumArtist(active.candidate) ? '候选值与专辑名相同、但与曲目艺术家不同，已默认取消采用' : undefined} />
               <ReviewDiff
                 field="trackNumber"
                 label="音轨"
                 current={active.track.trackNumber ? `${active.track.trackNumber} / ${active.track.trackTotal || '—'}` : '空'}
                 next={`${active.candidate.trackNumber.value} / ${active.candidate.trackTotal.value}`}
-                source={active.candidate.providerName}
+	                source={candidateFieldSource(active.candidate, 'trackNumber')}
                 changed={!active.track.trackNumber}
                 checked={active.fields.includes('trackNumber') || active.fields.includes('trackTotal')}
                 onToggle={() => toggleFields(active.track.id, ['trackNumber', 'trackTotal', 'discNumber', 'discTotal'])}
               />
-              <ReviewDiff field="year" label="年份" current={String(active.track.year || '空')} next={String(active.candidate.year.value)} source={active.candidate.providerName} checked={active.fields.includes('year')} onToggle={() => toggleField(active.track.id, 'year')} />
-              <ReviewDiff field="genres" label="风格" current={active.track.genres.join(', ') || '空'} next={active.candidate.genres.value.join(', ')} source={active.candidate.providerName} checked={active.fields.includes('genres')} onToggle={() => toggleField(active.track.id, 'genres')} />
-              {active.candidate.comment?.value && <ReviewDiff field="comment" label="注释" current={active.track.comment || '空'} next={active.candidate.comment.value} source={active.candidate.providerName} checked={active.fields.includes('comment')} onToggle={() => toggleField(active.track.id, 'comment')} />}
-              {active.candidate.composers?.value.length ? <ReviewDiff field="composers" label="作曲家" current={active.track.composers.join(' / ') || '空'} next={active.candidate.composers.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('composers')} onToggle={() => toggleField(active.track.id, 'composers')} /> : null}
-              {active.candidate.conductor?.value && <ReviewDiff field="conductor" label="指挥" current={active.track.conductor || '空'} next={active.candidate.conductor.value} source={active.candidate.providerName} checked={active.fields.includes('conductor')} onToggle={() => toggleField(active.track.id, 'conductor')} />}
-              {active.candidate.lyricists?.value.length ? <ReviewDiff field="lyricists" label="作词家" current={active.track.lyricists.join(' / ') || '空'} next={active.candidate.lyricists.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('lyricists')} onToggle={() => toggleField(active.track.id, 'lyricists')} /> : null}
-              {active.candidate.copyright?.value && <ReviewDiff field="copyright" label="版权" current={active.track.copyright || '空'} next={active.candidate.copyright.value} source={active.candidate.providerName} checked={active.fields.includes('copyright')} onToggle={() => toggleField(active.track.id, 'copyright')} />}
-              {active.candidate.bpm?.value ? <ReviewDiff field="bpm" label="BPM" current={String(active.track.bpm || '空')} next={String(active.candidate.bpm.value)} source={active.candidate.providerName} checked={active.fields.includes('bpm')} onToggle={() => toggleField(active.track.id, 'bpm')} /> : null}
-              {active.candidate.isrc?.value && <ReviewDiff field="isrc" label="ISRC" current={active.track.isrc || '空'} next={active.candidate.isrc.value} source={active.candidate.providerName} checked={active.fields.includes('isrc')} onToggle={() => toggleField(active.track.id, 'isrc')} />}
-              {active.candidate.musicbrainzTrackId?.value && <ReviewDiff field="musicbrainzTrackId" label="MB Track ID" current={active.track.musicbrainzTrackId || '空'} next={active.candidate.musicbrainzTrackId.value} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzTrackId')} onToggle={() => toggleField(active.track.id, 'musicbrainzTrackId')} />}
-              {active.candidate.musicbrainzReleaseId?.value && <ReviewDiff field="musicbrainzReleaseId" label="MB Release ID" current={active.track.musicbrainzReleaseId || '空'} next={active.candidate.musicbrainzReleaseId.value} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzReleaseId')} onToggle={() => toggleField(active.track.id, 'musicbrainzReleaseId')} />}
-              {active.candidate.musicbrainzArtistIds?.value.length ? <ReviewDiff field="musicbrainzArtistIds" label="MB Artist ID" current={active.track.musicbrainzArtistIds.join(' / ') || '空'} next={active.candidate.musicbrainzArtistIds.value.join(' / ')} source={active.candidate.providerName} checked={active.fields.includes('musicbrainzArtistIds')} onToggle={() => toggleField(active.track.id, 'musicbrainzArtistIds')} /> : null}
-              {active.candidate.acoustidId?.value && <ReviewDiff field="acoustidId" label="AcoustID" current={active.track.acoustidId || '空'} next={active.candidate.acoustidId.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidId')} onToggle={() => toggleField(active.track.id, 'acoustidId')} />}
-              {active.candidate.acoustidFingerprint?.value && <ReviewDiff field="acoustidFingerprint" label="AcoustID 指纹" current={active.track.acoustidFingerprint || '空'} next={active.candidate.acoustidFingerprint.value} source={active.candidate.providerName} checked={active.fields.includes('acoustidFingerprint')} onToggle={() => toggleField(active.track.id, 'acoustidFingerprint')} />}
-              {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="内嵌歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={active.candidate.providerName} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} inspectLabel="查看歌词" onInspect={() => setAssetPreview({kind: 'lyrics', track: active.track, candidate: active.candidate!})} />}
-              {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={active.candidate.providerName} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} inspectLabel="查看封面" onInspect={() => setAssetPreview({kind: 'artwork', track: active.track, candidate: active.candidate!})} />}
+	              <ReviewDiff field="year" label="年份" current={String(active.track.year || '空')} next={String(active.candidate.year.value)} source={candidateFieldSource(active.candidate, 'year')} checked={active.fields.includes('year')} onToggle={() => toggleField(active.track.id, 'year')} />
+	              <ReviewDiff field="genres" label="风格" current={active.track.genres.join(', ') || '空'} next={active.candidate.genres.value.join(', ')} source={candidateFieldSource(active.candidate, 'genres')} checked={active.fields.includes('genres')} onToggle={() => toggleField(active.track.id, 'genres')} />
+	              {active.candidate.comment?.value && <ReviewDiff field="comment" label="注释" current={active.track.comment || '空'} next={active.candidate.comment.value} source={candidateFieldSource(active.candidate, 'comment')} checked={active.fields.includes('comment')} onToggle={() => toggleField(active.track.id, 'comment')} />}
+	              {active.candidate.composers?.value.length ? <ReviewDiff field="composers" label="作曲家" current={active.track.composers.join(' / ') || '空'} next={active.candidate.composers.value.join(' / ')} source={candidateFieldSource(active.candidate, 'composers')} checked={active.fields.includes('composers')} onToggle={() => toggleField(active.track.id, 'composers')} /> : null}
+	              {active.candidate.conductor?.value && <ReviewDiff field="conductor" label="指挥" current={active.track.conductor || '空'} next={active.candidate.conductor.value} source={candidateFieldSource(active.candidate, 'conductor')} checked={active.fields.includes('conductor')} onToggle={() => toggleField(active.track.id, 'conductor')} />}
+	              {active.candidate.lyricists?.value.length ? <ReviewDiff field="lyricists" label="作词家" current={active.track.lyricists.join(' / ') || '空'} next={active.candidate.lyricists.value.join(' / ')} source={candidateFieldSource(active.candidate, 'lyricists')} checked={active.fields.includes('lyricists')} onToggle={() => toggleField(active.track.id, 'lyricists')} /> : null}
+	              {active.candidate.copyright?.value && <ReviewDiff field="copyright" label="版权" current={active.track.copyright || '空'} next={active.candidate.copyright.value} source={candidateFieldSource(active.candidate, 'copyright')} checked={active.fields.includes('copyright')} onToggle={() => toggleField(active.track.id, 'copyright')} />}
+	              {active.candidate.bpm?.value ? <ReviewDiff field="bpm" label="BPM" current={String(active.track.bpm || '空')} next={String(active.candidate.bpm.value)} source={candidateFieldSource(active.candidate, 'bpm')} checked={active.fields.includes('bpm')} onToggle={() => toggleField(active.track.id, 'bpm')} /> : null}
+	              {active.candidate.isrc?.value && <ReviewDiff field="isrc" label="ISRC" current={active.track.isrc || '空'} next={active.candidate.isrc.value} source={candidateFieldSource(active.candidate, 'isrc')} checked={active.fields.includes('isrc')} onToggle={() => toggleField(active.track.id, 'isrc')} />}
+	              {active.candidate.musicbrainzTrackId?.value && <ReviewDiff field="musicbrainzTrackId" label="MB Track ID" current={active.track.musicbrainzTrackId || '空'} next={active.candidate.musicbrainzTrackId.value} source={candidateFieldSource(active.candidate, 'musicbrainzTrackId')} checked={active.fields.includes('musicbrainzTrackId')} onToggle={() => toggleField(active.track.id, 'musicbrainzTrackId')} />}
+	              {active.candidate.musicbrainzReleaseId?.value && <ReviewDiff field="musicbrainzReleaseId" label="MB Release ID" current={active.track.musicbrainzReleaseId || '空'} next={active.candidate.musicbrainzReleaseId.value} source={candidateFieldSource(active.candidate, 'musicbrainzReleaseId')} checked={active.fields.includes('musicbrainzReleaseId')} onToggle={() => toggleField(active.track.id, 'musicbrainzReleaseId')} />}
+	              {active.candidate.musicbrainzArtistIds?.value.length ? <ReviewDiff field="musicbrainzArtistIds" label="MB Artist ID" current={active.track.musicbrainzArtistIds.join(' / ') || '空'} next={active.candidate.musicbrainzArtistIds.value.join(' / ')} source={candidateFieldSource(active.candidate, 'musicbrainzArtistIds')} checked={active.fields.includes('musicbrainzArtistIds')} onToggle={() => toggleField(active.track.id, 'musicbrainzArtistIds')} /> : null}
+	              {active.candidate.acoustidId?.value && <ReviewDiff field="acoustidId" label="AcoustID" current={active.track.acoustidId || '空'} next={active.candidate.acoustidId.value} source={candidateFieldSource(active.candidate, 'acoustidId')} checked={active.fields.includes('acoustidId')} onToggle={() => toggleField(active.track.id, 'acoustidId')} />}
+	              {active.candidate.acoustidFingerprint?.value && <ReviewDiff field="acoustidFingerprint" label="AcoustID 指纹" current={active.track.acoustidFingerprint || '空'} next={active.candidate.acoustidFingerprint.value} source={candidateFieldSource(active.candidate, 'acoustidFingerprint')} checked={active.fields.includes('acoustidFingerprint')} onToggle={() => toggleField(active.track.id, 'acoustidFingerprint')} />}
+	              {active.candidate.lyrics?.value && <ReviewDiff field="lyrics" label="内嵌歌词" current={active.track.lyrics ? '已有歌词' : '空'} next="来源提供歌词" source={candidateFieldSource(active.candidate, 'lyrics')} checked={active.fields.includes('lyrics')} onToggle={() => toggleField(active.track.id, 'lyrics')} inspectLabel="查看歌词" onInspect={() => setAssetPreview({kind: 'lyrics', track: active.track, candidate: active.candidate!})} />}
+	              {active.candidate.hasArtwork && <ReviewDiff field="artwork" label="替换封面" current={active.track.artworkCount > 0 ? '已有封面' : '空'} next="来源提供封面" source={candidateFieldSource(active.candidate, 'artwork')} checked={active.includeArtwork} onToggle={() => toggleArtwork(active.track.id)} inspectLabel="查看封面" onInspect={() => setAssetPreview({kind: 'artwork', track: active.track, candidate: active.candidate!})} />}
             </div>
 			<div className="review-fields-actions">
 			  <span>已选择 {active.fields.filter((field) => activeAvailableFields.includes(field)).length} / {activeAvailableFields.length} 个可用字段</span>
@@ -728,19 +814,30 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 				<button className="icon-button" type="button" title="关闭候选列表" aria-label="关闭候选列表" onClick={() => setCandidatePickerOpen(false)}><X size={17} /></button>
 			  </header>
 			  <div className="candidate-picker" role="listbox" aria-label="候选列表">
-				{active.candidates.map((candidate) => (
-				  <button
-					key={candidate.id}
-					role="option"
-					aria-selected={candidate.id === active.candidate?.id}
-					className={cn('candidate-picker-option', candidate.id === active.candidate?.id && 'is-selected')}
-					onClick={() => selectCandidate(active.track.id, candidate)}
-				  >
-					<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
-					<span><strong>{candidate.title.value}</strong><small>{candidate.providerName} · {candidate.externalId}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
-					{candidate.id === active.candidate?.id && <Check size={15} />}
-				  </button>
+				{[
+				  {label: '推荐方案', candidates: active.candidates.filter((candidate) => candidate.kind === 'smart' || candidate.kind === 'ai')},
+				  {label: '原始数据源', candidates: active.candidates.filter((candidate) => !candidate.kind || candidate.kind === 'source')},
+				].filter((group) => group.candidates.length > 0).map((group) => (
+				  <div className="candidate-picker-group" role="group" aria-label={group.label} key={group.label}>
+					<strong className="candidate-picker-group-label">{group.label}</strong>
+					{group.candidates.map((candidate) => (
+					  <button
+						key={candidate.id}
+						role="option"
+						aria-selected={candidate.id === active.candidate?.id}
+						className={cn('candidate-picker-option', candidate.id === active.candidate?.id && 'is-selected', candidate.kind === 'smart' && 'is-smart')}
+						onClick={() => selectCandidate(active.track.id, candidate)}
+					  >
+						<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
+						<span><strong>{candidate.title.value}</strong><small>{candidateSourceSummary(candidate)}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
+						{candidate.id === active.candidate?.id && <Check size={15} />}
+					  </button>
+					))}
+				  </div>
 				))}
+				{active.candidates.some((candidate) => candidate.kind === 'smart') && !active.candidates.some((candidate) => candidate.kind === 'ai') && (
+				  <div className="candidate-ai-placeholder"><Sparkles size={15} /><span><strong>AI 筛选</strong><small>模型服务尚未配置；当前使用可解释的规则综合结果</small></span></div>
+				)}
 			  </div>
 			</section>
 		  </div>,

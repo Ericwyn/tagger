@@ -253,6 +253,124 @@ func TestTrackQueriesSearchAmbiguousHintsWithoutPromotingThem(t *testing.T) {
 	}
 }
 
+func TestSearchTrackBuildsAuditableSmartCandidateAcrossAllSources(t *testing.T) {
+	registry := NewRegistry(
+		fakeStrategy{descriptor: Descriptor{ID: "metadata", Name: "Metadata", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ProviderID: "metadata", ExternalID: "meta-1", Title: "Song", Artists: []string{"Artist"}, Album: "Original Album",
+			Year: 2024, TrackNumber: 2, DurationSeconds: 240, Genres: []string{"Pop"}, ArtworkURL: "https://images.example.test/song.jpg",
+		}}},
+		fakeStrategy{descriptor: Descriptor{ID: "lyrics", Name: "Lyrics", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ProviderID: "lyrics", ExternalID: "lyrics-1", Title: "Song", Artists: []string{"Artist"}, Album: "Original Album",
+			DurationSeconds: 240, SyncedLyrics: "[00:01.00]line one\n[00:05.00]line two",
+		}}},
+		fakeStrategy{descriptor: Descriptor{ID: "catalog", Name: "Catalog", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ProviderID: "catalog", ExternalID: "catalog-1", Title: "Song", Artists: []string{"Artist"}, Album: "Original Album",
+			DurationSeconds: 240, ISRC: "US-AAA-24-00001", MusicBrainzTrackID: "recording-1", MusicBrainzReleaseID: "release-1",
+		}}},
+	)
+	track := domain.Track{Title: "Song", Artists: []string{"Artist"}, Album: "Original Album", DurationSeconds: 240}
+	result, err := registry.SearchTrack(context.Background(), track, Query{}, nil, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 4 {
+		t.Fatalf("candidate count = %d, candidates=%#v", len(result.Candidates), result.Candidates)
+	}
+	smart := result.Candidates[0]
+	if smart.Kind != CandidateKindSmart || !smart.Recommended || !smart.AutoAccept || smart.ProviderID != "smart" {
+		t.Fatalf("smart candidate = %#v", smart)
+	}
+	if smart.Evidence.SourceCount != 3 || len(smart.Contributors) != 3 || len(smart.MemberCandidateIDs) != 3 {
+		t.Fatalf("smart provenance = %#v", smart)
+	}
+	if smart.Album.Value != "Original Album" || smart.Lyrics == nil || smart.Lyrics.Source != "Lyrics" || !smart.HasArtwork {
+		t.Fatalf("smart fields = %#v", smart)
+	}
+	if len(smart.Title.Sources) != 3 || smart.ArtworkReferenceID == "" || smart.ArtworkSource == nil || smart.ArtworkSource.ProviderID != "metadata" {
+		t.Fatalf("smart field sources = %#v", smart)
+	}
+	reference, err := registry.ArtworkReference(smart.ArtworkReferenceID)
+	if err != nil || reference.ProviderID != "metadata" {
+		t.Fatalf("smart artwork reference = %#v err=%v", reference, err)
+	}
+}
+
+func TestSmartCandidateKeepsReleaseFieldsFromSelectedRelease(t *testing.T) {
+	registry := NewRegistry(
+		fakeStrategy{descriptor: Descriptor{ID: "original", Name: "Original", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ExternalID: "original-1", Title: "Song", Artists: []string{"Artist"}, Album: "Original Album", AlbumArtists: []string{"Artist"}, Year: 2020, TrackNumber: 3, DurationSeconds: 200,
+		}}},
+		fakeStrategy{descriptor: Descriptor{ID: "compilation-a", Name: "Compilation A", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ExternalID: "comp-a", Title: "Song", Artists: []string{"Artist"}, Album: "Greatest Hits", AlbumArtists: []string{"Various Artists"}, Year: 2024, TrackNumber: 9, DurationSeconds: 200,
+		}}},
+		fakeStrategy{descriptor: Descriptor{ID: "compilation-b", Name: "Compilation B", Enabled: true, Health: HealthReady}, candidates: []Candidate{{
+			ExternalID: "comp-b", Title: "Song", Artists: []string{"Artist"}, Album: "Greatest Hits", AlbumArtists: []string{"Various Artists"}, Year: 2024, TrackNumber: 9, DurationSeconds: 200,
+		}}},
+	)
+	track := domain.Track{Title: "Song", Artists: []string{"Artist"}, Album: "Original Album", DurationSeconds: 200}
+	result, err := registry.SearchTrack(context.Background(), track, Query{}, nil, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smart := result.Candidates[0]
+	if smart.Kind != CandidateKindSmart || smart.Album.Value != "Original Album" || smart.Year.Value != 2020 || smart.TrackNumber.Value != 3 {
+		t.Fatalf("smart release fields crossed releases: %#v", smart)
+	}
+	if smart.Album.Source != "Original" || smart.Year.Source != "Original" {
+		t.Fatalf("smart release provenance = %#v", smart)
+	}
+}
+
+func TestSmartCandidateDoesNotMergeConflictingVersions(t *testing.T) {
+	registry := NewRegistry(
+		fakeStrategy{descriptor: Descriptor{ID: "live-a", Name: "Live A", Enabled: true, Health: HealthReady}, candidates: []Candidate{{ExternalID: "live-a", Title: "Song (Live)", Artists: []string{"Artist"}, DurationSeconds: 230}}},
+		fakeStrategy{descriptor: Descriptor{ID: "live-b", Name: "Live B", Enabled: true, Health: HealthReady}, candidates: []Candidate{{ExternalID: "live-b", Title: "Song 现场版", Artists: []string{"Artist"}, DurationSeconds: 230}}},
+		fakeStrategy{descriptor: Descriptor{ID: "remix", Name: "Remix", Enabled: true, Health: HealthReady}, candidates: []Candidate{{ExternalID: "remix", Title: "Song (Remix)", Artists: []string{"Artist"}, DurationSeconds: 230}}},
+	)
+	track := domain.Track{Title: "Song (Live)", Artists: []string{"Artist"}, DurationSeconds: 230}
+	result, err := registry.SearchTrack(context.Background(), track, Query{}, nil, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smart := result.Candidates[0]
+	if smart.Kind != CandidateKindSmart || smart.Evidence.SourceCount != 2 {
+		t.Fatalf("version cluster = %#v", smart)
+	}
+	for _, contributor := range smart.Contributors {
+		if contributor.ProviderID == "remix" {
+			t.Fatalf("remix was merged into live cluster: %#v", smart)
+		}
+	}
+}
+
+func TestRecordingClusterDoesNotBridgeConflictingVersionsThroughUnqualifiedTitle(t *testing.T) {
+	view := func(id, title string) MatchCandidate {
+		return MatchCandidate{ID: id, Kind: CandidateKindSource, ProviderID: id, Title: Field[string]{Value: title}, Artists: Field[[]string]{Value: []string{"Artist"}}, DurationSeconds: Field[int64]{Value: 200}}
+	}
+	clusters := clusterRecordings([]MatchCandidate{view("plain", "Song"), view("live", "Song (Live)"), view("remix", "Song (Remix)")})
+	if len(clusters) != 2 {
+		t.Fatalf("clusters = %#v", clusters)
+	}
+}
+
+func TestSmartCandidateRequiresReviewWhenReleaseIsAmbiguous(t *testing.T) {
+	registry := NewRegistry(
+		fakeStrategy{descriptor: Descriptor{ID: "release-a", Name: "Release A", Enabled: true, Health: HealthReady}, candidates: []Candidate{{ExternalID: "a", Title: "Song", Artists: []string{"Artist"}, Album: "Album A", DurationSeconds: 180}}},
+		fakeStrategy{descriptor: Descriptor{ID: "release-b", Name: "Release B", Enabled: true, Health: HealthReady}, candidates: []Candidate{{ExternalID: "b", Title: "Song", Artists: []string{"Artist"}, Album: "Album B", DurationSeconds: 180}}},
+	)
+	result, err := registry.SearchTrack(context.Background(), domain.Track{Title: "Song", Artists: []string{"Artist"}, DurationSeconds: 180}, Query{}, nil, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smart := result.Candidates[0]
+	if smart.Kind != CandidateKindSmart || smart.AutoAccept || !containsString(smart.Evidence.Conflicts, "存在多个相近发行版本") {
+		t.Fatalf("ambiguous release decision = %#v", smart)
+	}
+	if smart.AlbumArtists.Value == nil || smart.Genres.Value == nil || smart.Composers.Value == nil || smart.Lyricists.Value == nil || smart.MusicBrainzArtistIDs.Value == nil {
+		t.Fatalf("smart multi-value fields must serialize as arrays: %#v", smart)
+	}
+}
+
 func TestSimilarityHandlesPunctuationAndCJK(t *testing.T) {
 	if got := similarity("我很丑，可是我很温柔", "我很丑可是我很温柔"); got != 1 {
 		t.Fatalf("punctuation similarity = %f", got)
@@ -273,7 +391,7 @@ func TestAlternateTitlesImproveCandidateScore(t *testing.T) {
 	}
 }
 
-func TestRegistryRanksCandidatesWithArtworkAheadOfMetadataOnlyMatches(t *testing.T) {
+func TestRegistrySeparatesArtworkQualityFromIdentityConfidence(t *testing.T) {
 	registry := NewRegistry(fakeStrategy{descriptor: Descriptor{ID: "source", Name: "Source", Enabled: true, Health: HealthReady}, candidates: []Candidate{
 		{ExternalID: "no-artwork", Title: "最佳歌手", Artists: []string{"许嵩"}},
 		{ExternalID: "with-artwork", Title: "最佳歌手", Artists: []string{"许嵩"}, ArtworkURL: "https://images.example.test/cover.jpg"},
@@ -285,8 +403,11 @@ func TestRegistryRanksCandidatesWithArtworkAheadOfMetadataOnlyMatches(t *testing
 	if result.Candidates[0].ExternalID != "with-artwork" {
 		t.Fatalf("candidate order = %#v", result.Candidates)
 	}
-	if result.Candidates[1].Score > noArtworkConfidenceCap || result.Candidates[1].ScoreLabel == "高度匹配" {
-		t.Fatalf("metadata-only candidate retained high confidence: %#v", result.Candidates[1])
+	if result.Candidates[1].Score != result.Candidates[0].Score || result.Candidates[1].Evidence.IdentityScore != result.Candidates[0].Evidence.IdentityScore {
+		t.Fatalf("artwork must not change identity confidence: %#v", result.Candidates)
+	}
+	if result.Candidates[0].Evidence.AssetQuality <= result.Candidates[1].Evidence.AssetQuality {
+		t.Fatalf("artwork quality was not represented separately: %#v", result.Candidates)
 	}
 	if !containsString(result.Candidates[1].MatchReasons, "来源未提供封面") {
 		t.Fatalf("metadata-only reasons = %#v", result.Candidates[1].MatchReasons)

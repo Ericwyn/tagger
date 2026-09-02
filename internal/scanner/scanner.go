@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -599,7 +600,7 @@ func fallbackTrack(relativePath string, format domain.TrackFormat) domain.Track 
 
 func tagHintsFromPath(relativePath string) []domain.TagHint {
 	directory := filepath.ToSlash(filepath.Dir(relativePath))
-	base := strings.TrimSpace(strings.TrimSuffix(filepath.Base(relativePath), filepath.Ext(relativePath)))
+	base := stripTrackPrefix(strings.TrimSpace(strings.TrimSuffix(filepath.Base(relativePath), filepath.Ext(relativePath))))
 	if directory != "." {
 		albumFolder := filepath.Base(directory)
 		artist, album, found := strings.Cut(albumFolder, "-")
@@ -615,8 +616,8 @@ func tagHintsFromPath(relativePath string) []domain.TagHint {
 			}}
 		}
 	}
-	if index := strings.LastIndex(base, "-"); index > 0 && index < len(base)-1 {
-		left, right := strings.TrimSpace(base[:index]), strings.TrimSpace(base[index+1:])
+	if index, separator := filenameSeparator(base); index > 0 && index+len(separator) < len(base) {
+		left, right := strings.TrimSpace(base[:index]), strings.TrimSpace(base[index+len(separator):])
 		if left != "" && right != "" {
 			return []domain.TagHint{
 				{Title: left, Artists: []string{right}, AlbumArtists: []string{right}, Source: "filename", Pattern: "title-artist"},
@@ -628,6 +629,25 @@ func tagHintsFromPath(relativePath string) []domain.TagHint {
 		return []domain.TagHint{}
 	}
 	return []domain.TagHint{{Title: base, Artists: []string{}, AlbumArtists: []string{}, Source: "filename", Pattern: "filename-title"}}
+}
+
+var trackPrefixPattern = regexp.MustCompile(`(?i)^(?:cd\s*\d+\s*[-_. ]*)?(?:\d{1,3})\s*[-_. ]+`)
+
+func stripTrackPrefix(value string) string {
+	stripped := strings.TrimSpace(trackPrefixPattern.ReplaceAllString(value, ""))
+	if stripped == "" {
+		return strings.TrimSpace(value)
+	}
+	return stripped
+}
+
+func filenameSeparator(value string) (int, string) {
+	for _, separator := range []string{" - ", " – ", " — "} {
+		if index := strings.LastIndex(value, separator); index > 0 {
+			return index, separator
+		}
+	}
+	return strings.LastIndex(value, "-"), "-"
 }
 
 func tagIssuesForTrack(track domain.Track) []domain.TagIssue {

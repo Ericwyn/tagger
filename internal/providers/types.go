@@ -83,10 +83,19 @@ type Descriptor struct {
 }
 
 type Query struct {
-	Title           string
-	Artists         []string
-	Album           string
-	DurationSeconds int64
+	Title                string
+	Artists              []string
+	Album                string
+	AlbumArtists         []string
+	Year                 int
+	TrackNumber          int
+	DiscNumber           int
+	DurationSeconds      int64
+	ISRC                 string
+	MusicBrainzTrackID   string
+	MusicBrainzReleaseID string
+	AcoustID             string
+	AcoustIDFingerprint  string
 }
 
 type Candidate struct {
@@ -129,46 +138,91 @@ type Strategy interface {
 	Search(ctx context.Context, query Query, limit int) ([]Candidate, error)
 }
 
+type CandidateKind string
+
+const (
+	CandidateKindSource CandidateKind = "source"
+	CandidateKindSmart  CandidateKind = "smart"
+	CandidateKindAI     CandidateKind = "ai"
+)
+
+// SourceReference keeps a composite field auditable without exposing the
+// provider's private artwork URL or requiring the UI to reverse-engineer a
+// candidate ID. Multiple references mean independent candidates confirmed the
+// same normalized value; the first item is the value that was retained.
+type SourceReference struct {
+	ProviderID   string `json:"providerId"`
+	ProviderName string `json:"providerName"`
+	CandidateID  string `json:"candidateId"`
+	ExternalID   string `json:"externalId,omitempty"`
+}
+
 type Field[T any] struct {
-	Value  T      `json:"value"`
-	Source string `json:"source"`
+	Value      T                 `json:"value"`
+	Source     string            `json:"source"`
+	Sources    []SourceReference `json:"sources,omitempty"`
+	Confidence float64           `json:"confidence,omitempty"`
+	Derived    bool              `json:"derived,omitempty"`
+}
+
+// MatchEvidence deliberately separates identity from metadata completeness
+// and asset availability. A missing cover must never make an otherwise exact
+// recording match look less certain.
+type MatchEvidence struct {
+	IdentityScore     float64  `json:"identityScore"`
+	ReleaseScore      float64  `json:"releaseScore,omitempty"`
+	CompletenessScore float64  `json:"completenessScore,omitempty"`
+	AssetQuality      float64  `json:"assetQuality,omitempty"`
+	Margin            float64  `json:"margin,omitempty"`
+	Level             string   `json:"level"`
+	SourceCount       int      `json:"sourceCount"`
+	Conflicts         []string `json:"conflicts,omitempty"`
+	AlgorithmVersion  string   `json:"algorithmVersion,omitempty"`
 }
 
 type MatchCandidate struct {
-	ID                   string           `json:"id"`
-	ProviderID           string           `json:"providerId"`
-	ProviderName         string           `json:"providerName"`
-	ExternalID           string           `json:"externalId"`
-	Title                Field[string]    `json:"title"`
-	Artists              Field[[]string]  `json:"artists"`
-	Album                Field[string]    `json:"album"`
-	AlbumArtists         Field[[]string]  `json:"albumArtists"`
-	Year                 Field[int]       `json:"year"`
-	TrackNumber          Field[int]       `json:"trackNumber"`
-	TrackTotal           Field[int]       `json:"trackTotal"`
-	DiscNumber           Field[int]       `json:"discNumber"`
-	DiscTotal            Field[int]       `json:"discTotal"`
-	DurationSeconds      Field[int64]     `json:"durationSeconds"`
-	Genres               Field[[]string]  `json:"genres"`
-	Comment              Field[string]    `json:"comment"`
-	Composers            Field[[]string]  `json:"composers"`
-	Conductor            Field[string]    `json:"conductor"`
-	Lyricists            Field[[]string]  `json:"lyricists"`
-	Copyright            Field[string]    `json:"copyright"`
-	BPM                  Field[int]       `json:"bpm"`
-	ISRC                 Field[string]    `json:"isrc"`
-	MusicBrainzTrackID   Field[string]    `json:"musicbrainzTrackId"`
-	MusicBrainzReleaseID Field[string]    `json:"musicbrainzReleaseId"`
-	MusicBrainzArtistIDs Field[[]string]  `json:"musicbrainzArtistIds"`
-	AcoustID             Field[string]    `json:"acoustidId"`
-	AcoustIDFingerprint  Field[string]    `json:"acoustidFingerprint"`
-	Lyrics               *Field[string]   `json:"lyrics,omitempty"`
-	HasLyrics            bool             `json:"hasLyrics"`
-	HasArtwork           bool             `json:"hasArtwork"`
-	CoverTone            domain.CoverTone `json:"coverTone"`
-	Score                float64          `json:"score"`
-	ScoreLabel           string           `json:"scoreLabel"`
-	MatchReasons         []string         `json:"matchReasons"`
+	ID                   string            `json:"id"`
+	Kind                 CandidateKind     `json:"kind,omitempty"`
+	ProviderID           string            `json:"providerId"`
+	ProviderName         string            `json:"providerName"`
+	ExternalID           string            `json:"externalId"`
+	MemberCandidateIDs   []string          `json:"memberCandidateIds,omitempty"`
+	Contributors         []SourceReference `json:"contributors,omitempty"`
+	ArtworkReferenceID   string            `json:"artworkRefId,omitempty"`
+	ArtworkSource        *SourceReference  `json:"artworkSource,omitempty"`
+	Title                Field[string]     `json:"title"`
+	Artists              Field[[]string]   `json:"artists"`
+	Album                Field[string]     `json:"album"`
+	AlbumArtists         Field[[]string]   `json:"albumArtists"`
+	Year                 Field[int]        `json:"year"`
+	TrackNumber          Field[int]        `json:"trackNumber"`
+	TrackTotal           Field[int]        `json:"trackTotal"`
+	DiscNumber           Field[int]        `json:"discNumber"`
+	DiscTotal            Field[int]        `json:"discTotal"`
+	DurationSeconds      Field[int64]      `json:"durationSeconds"`
+	Genres               Field[[]string]   `json:"genres"`
+	Comment              Field[string]     `json:"comment"`
+	Composers            Field[[]string]   `json:"composers"`
+	Conductor            Field[string]     `json:"conductor"`
+	Lyricists            Field[[]string]   `json:"lyricists"`
+	Copyright            Field[string]     `json:"copyright"`
+	BPM                  Field[int]        `json:"bpm"`
+	ISRC                 Field[string]     `json:"isrc"`
+	MusicBrainzTrackID   Field[string]     `json:"musicbrainzTrackId"`
+	MusicBrainzReleaseID Field[string]     `json:"musicbrainzReleaseId"`
+	MusicBrainzArtistIDs Field[[]string]   `json:"musicbrainzArtistIds"`
+	AcoustID             Field[string]     `json:"acoustidId"`
+	AcoustIDFingerprint  Field[string]     `json:"acoustidFingerprint"`
+	Lyrics               *Field[string]    `json:"lyrics,omitempty"`
+	HasLyrics            bool              `json:"hasLyrics"`
+	HasArtwork           bool              `json:"hasArtwork"`
+	CoverTone            domain.CoverTone  `json:"coverTone"`
+	Score                float64           `json:"score"`
+	ScoreLabel           string            `json:"scoreLabel"`
+	MatchReasons         []string          `json:"matchReasons"`
+	Evidence             MatchEvidence     `json:"evidence"`
+	Recommended          bool              `json:"recommended,omitempty"`
+	AutoAccept           bool              `json:"autoAccept,omitempty"`
 }
 
 type ProviderResult struct {

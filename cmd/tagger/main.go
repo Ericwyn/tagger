@@ -272,17 +272,28 @@ func main() {
 					providerQueries += len(result.Providers)
 					candidateCount += len(result.Candidates)
 					state := "review"
+					selectedCandidateID := ""
 					if len(result.Candidates) == 0 {
 						state = "no_match"
 						failed++
 					} else {
 						succeeded++
+						for _, candidate := range result.Candidates {
+							if !candidate.Recommended {
+								continue
+							}
+							selectedCandidateID = candidate.ID
+							if candidate.AutoAccept {
+								state = "accepted"
+							}
+							break
+						}
 					}
 					candidateJSON, marshalErr := json.Marshal(result.Candidates)
 					if marshalErr != nil {
 						return fmt.Errorf("encode match candidates for %s: %w", trackID, marshalErr)
 					}
-					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON}); persistErr != nil {
+					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON, SelectedCandidateID: selectedCandidateID}); persistErr != nil {
 						return fmt.Errorf("persist match item %s: %w", trackID, persistErr)
 					}
 				}
@@ -416,7 +427,7 @@ func main() {
 				if trackErr != nil {
 					continue
 				}
-				descriptor, _ := providerRegistry.Descriptor(item.candidate.ProviderID)
+				source := candidateRevisionSource(providerRegistry, item.candidate)
 				diff := append([]domain.RevisionDiff(nil), item.tagResult.Diff...)
 				beforeTags, afterTags := item.tagResult.BeforeTags, item.tagResult.AfterTags
 				baseRevision, resultRevision := item.tagResult.BaseRevision, item.tagResult.CurrentRevision
@@ -435,7 +446,7 @@ func main() {
 					beforeArtwork = artworkRevisionSnapshot(item.artworkResult.Before)
 					afterArtwork = artworkRevisionSnapshot(item.artworkResult.After)
 				}
-				if _, historyErr := dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: action, Source: descriptor.Name, BaseRevision: baseRevision, ResultRevision: resultRevision, Diff: diff, CoverTone: track.CoverTone, BeforeTags: beforeTags, AfterTags: afterTags, BeforeArtwork: beforeArtwork, AfterArtwork: afterArtwork}); historyErr != nil {
+				if _, historyErr := dataStore.CreateRevision(ctx, domain.Revision{LibraryID: libraryService.Library().ID, TrackID: track.ID, TrackTitle: track.Title, FileName: track.FileName, Action: action, Source: source, BaseRevision: baseRevision, ResultRevision: resultRevision, Diff: diff, CoverTone: track.CoverTone, BeforeTags: beforeTags, AfterTags: afterTags, BeforeArtwork: beforeArtwork, AfterArtwork: afterArtwork}); historyErr != nil {
 					return fmt.Errorf("persist batch revision for %s: %w", item.trackID, historyErr)
 				}
 			}
@@ -923,7 +934,11 @@ func prepareCandidateArtwork(ctx context.Context, registry *providers.Registry, 
 	if registry == nil || download == nil {
 		return nil, fmt.Errorf("候选封面服务未初始化")
 	}
-	reference, err := registry.ArtworkReference(candidate.ID)
+	referenceID := candidate.ArtworkReferenceID
+	if referenceID == "" {
+		referenceID = candidate.ID
+	}
+	reference, err := registry.ArtworkReference(referenceID)
 	if err != nil {
 		return nil, fmt.Errorf("候选封面不可用：%w", err)
 	}
@@ -932,6 +947,24 @@ func prepareCandidateArtwork(ctx context.Context, registry *providers.Registry, 
 		return nil, fmt.Errorf("下载候选封面：%w", err)
 	}
 	return &asset, nil
+}
+
+func candidateRevisionSource(registry *providers.Registry, candidate providers.MatchCandidate) string {
+	switch candidate.Kind {
+	case providers.CandidateKindSmart:
+		return "智能选择"
+	case providers.CandidateKindAI:
+		return "AI 筛选"
+	}
+	if registry != nil {
+		if descriptor, found := registry.Descriptor(candidate.ProviderID); found {
+			return descriptor.Name
+		}
+	}
+	if candidate.ProviderName != "" {
+		return candidate.ProviderName
+	}
+	return "数据源候选"
 }
 
 func patchFromCandidate(candidate providers.MatchCandidate, fields []string) domain.TagPatch {

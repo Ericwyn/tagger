@@ -463,7 +463,7 @@ export const revisions: Revision[] = [
 
 export function candidatesFor(track: Track): MatchCandidate[] {
   const baseYear = track.year ?? 2016;
-  return [
+	const sourceCandidates: MatchCandidate[] = [
     {
       id: `cand-${track.id}-mb`,
       providerId: 'musicbrainz',
@@ -537,5 +537,45 @@ export function candidatesFor(track: Track): MatchCandidate[] {
       scoreLabel: '版本可能不同',
       matchReasons: ['标题近似', '艺术家一致', 'Live 版本', '时长相差 26 秒'],
     },
-  ];
+	];
+	const musicbrainz = sourceCandidates[0];
+	const netease = sourceCandidates[1];
+	const mbRef = {providerId: musicbrainz.providerId, providerName: musicbrainz.providerName, candidateId: musicbrainz.id, externalId: musicbrainz.externalId};
+	const neteaseRef = {providerId: netease.providerId, providerName: netease.providerName, candidateId: netease.id, externalId: netease.externalId};
+	const smart: MatchCandidate = {
+	  id: `cand-${track.id}-smart`,
+	  kind: 'smart',
+	  providerId: 'smart',
+	  providerName: '智能选择',
+	  externalId: `smart-${track.id}`,
+	  memberCandidateIds: [musicbrainz.id, netease.id],
+	  contributors: [mbRef, neteaseRef],
+	  artworkRefId: musicbrainz.id,
+	  artworkSource: mbRef,
+	  title: {...musicbrainz.title, sources: [mbRef, neteaseRef], confidence: 0.98},
+	  artists: {...musicbrainz.artists, sources: [mbRef, neteaseRef], confidence: 0.98},
+	  album: {...musicbrainz.album, sources: [mbRef], confidence: 0.94},
+	  albumArtists: {...musicbrainz.albumArtists, sources: [mbRef], confidence: 0.92},
+	  year: {...musicbrainz.year, sources: [mbRef], confidence: 0.91},
+	  trackNumber: {...musicbrainz.trackNumber, sources: [mbRef], confidence: 0.91},
+	  trackTotal: {...musicbrainz.trackTotal, sources: [mbRef], confidence: 0.91},
+	  discNumber: {...musicbrainz.discNumber, sources: [mbRef], confidence: 0.91},
+	  discTotal: {...musicbrainz.discTotal, sources: [mbRef], confidence: 0.91},
+	  durationSeconds: {...netease.durationSeconds, sources: [neteaseRef, mbRef], confidence: 0.97},
+	  genres: {...netease.genres, sources: [neteaseRef, mbRef], confidence: 0.86},
+	  musicbrainzTrackId: musicbrainz.musicbrainzTrackId,
+	  musicbrainzReleaseId: musicbrainz.musicbrainzReleaseId,
+	  musicbrainzArtistIds: musicbrainz.musicbrainzArtistIds,
+	  lyrics: netease.lyrics,
+	  hasLyrics: true,
+	  hasArtwork: true,
+	  coverTone: track.coverTone,
+	  score: 0.98,
+	  scoreLabel: '智能高置信',
+	  matchReasons: ['综合 2 个数据源', '2 个独立来源确认同一录音', '发行版本字段保持一致'],
+	  evidence: {identityScore: 0.98, releaseScore: 0.94, completenessScore: 0.88, assetQuality: 1, margin: 0.18, level: 'high', sourceCount: 2, algorithmVersion: 'smart-v1'},
+	  recommended: true,
+	  autoAccept: true,
+	};
+	return [smart, ...sourceCandidates];
 }

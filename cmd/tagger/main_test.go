@@ -379,6 +379,19 @@ func TestPrepareCandidateArtworkUsesRegistryReference(t *testing.T) {
 	if err != nil || got == nil || string(got.Data) != "image" {
 		t.Fatalf("asset = %#v err=%v", got, err)
 	}
+	smart := providers.MatchCandidate{ID: "cand-smart", Kind: providers.CandidateKindSmart, ProviderID: "smart", ArtworkReferenceID: result.Candidates[0].ID, HasArtwork: true}
+	got, err = prepareCandidateArtwork(context.Background(), registry, smart, func(_ context.Context, reference providers.ArtworkReference) (artwork.Asset, error) {
+		if reference.ProviderID != "artwork-test" {
+			t.Fatalf("smart reference = %#v", reference)
+		}
+		return want, nil
+	})
+	if err != nil || got == nil || string(got.Data) != "image" {
+		t.Fatalf("smart asset = %#v err=%v", got, err)
+	}
+	if source := candidateRevisionSource(registry, smart); source != "智能选择" {
+		t.Fatalf("smart revision source = %q", source)
+	}
 	_, err = prepareCandidateArtwork(context.Background(), registry, providers.MatchCandidate{ID: "missing"}, func(context.Context, providers.ArtworkReference) (artwork.Asset, error) {
 		return want, nil
 	})

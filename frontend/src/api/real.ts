@@ -5,6 +5,7 @@ import type {
 	DirectoryProbe,
 	Job,
   MatchCandidate,
+	CandidateField,
 	MatchItem,
   ArtworkWriteResult,
   ProviderConfig,
@@ -124,6 +125,133 @@ function stringArray(value: unknown): string[] {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function candidateFieldRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function normalizeCandidateSources(value: unknown): NonNullable<CandidateField['sources']> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const raw = item as Record<string, unknown>;
+    const providerId = stringValue(raw.providerId);
+    const candidateId = stringValue(raw.candidateId);
+    if (!providerId || !candidateId) return [];
+    return [{
+      providerId,
+      providerName: stringValue(raw.providerName),
+      candidateId,
+      ...(stringValue(raw.externalId) ? {externalId: stringValue(raw.externalId)} : {}),
+    }];
+  });
+}
+
+function normalizeStringCandidateField(value: unknown): CandidateField<string> {
+  const raw = candidateFieldRecord(value);
+  const sources = normalizeCandidateSources(raw.sources);
+  return {
+    value: stringValue(raw.value),
+    source: stringValue(raw.source),
+    ...(sources.length > 0 ? {sources} : {}),
+    ...(typeof raw.confidence === 'number' ? {confidence: raw.confidence} : {}),
+    ...(raw.derived === true ? {derived: true} : {}),
+  };
+}
+
+function normalizeNumberCandidateField(value: unknown): CandidateField<number> {
+  const raw = candidateFieldRecord(value);
+  const sources = normalizeCandidateSources(raw.sources);
+  return {
+    value: numberValue(raw.value),
+    source: stringValue(raw.source),
+    ...(sources.length > 0 ? {sources} : {}),
+    ...(typeof raw.confidence === 'number' ? {confidence: raw.confidence} : {}),
+    ...(raw.derived === true ? {derived: true} : {}),
+  };
+}
+
+function normalizeStringsCandidateField(value: unknown): CandidateField<string[]> {
+  const raw = candidateFieldRecord(value);
+  const sources = normalizeCandidateSources(raw.sources);
+  return {
+    value: stringArray(raw.value),
+    source: stringValue(raw.source),
+    ...(sources.length > 0 ? {sources} : {}),
+    ...(typeof raw.confidence === 'number' ? {confidence: raw.confidence} : {}),
+    ...(raw.derived === true ? {derived: true} : {}),
+  };
+}
+
+// Candidate payloads live in SQLite as JSON and may predate the current Go
+// shape. Normalize nullable slice zero-values at the API boundary so one old or
+// sparse candidate can never blank the React tree by exposing `null.length`.
+export function normalizeMatchCandidate(candidate: MatchCandidate): MatchCandidate {
+  const raw = candidate as MatchCandidate & Record<string, unknown>;
+  const contributors = normalizeCandidateSources(raw.contributors);
+  const artworkSources = normalizeCandidateSources(raw.artworkSource ? [raw.artworkSource] : []);
+	const evidence = raw.evidence && typeof raw.evidence === 'object' ? raw.evidence as unknown as Record<string, unknown> : undefined;
+  return {
+    ...candidate,
+    memberCandidateIds: stringArray(raw.memberCandidateIds),
+    contributors,
+    ...(artworkSources[0] ? {artworkSource: artworkSources[0]} : {}),
+    title: normalizeStringCandidateField(raw.title),
+    artists: normalizeStringsCandidateField(raw.artists),
+    album: normalizeStringCandidateField(raw.album),
+    albumArtists: normalizeStringsCandidateField(raw.albumArtists),
+    year: normalizeNumberCandidateField(raw.year),
+    trackNumber: normalizeNumberCandidateField(raw.trackNumber),
+    trackTotal: normalizeNumberCandidateField(raw.trackTotal),
+    discNumber: normalizeNumberCandidateField(raw.discNumber),
+    discTotal: normalizeNumberCandidateField(raw.discTotal),
+    durationSeconds: normalizeNumberCandidateField(raw.durationSeconds),
+    genres: normalizeStringsCandidateField(raw.genres),
+    comment: normalizeStringCandidateField(raw.comment),
+    composers: normalizeStringsCandidateField(raw.composers),
+    conductor: normalizeStringCandidateField(raw.conductor),
+    lyricists: normalizeStringsCandidateField(raw.lyricists),
+    copyright: normalizeStringCandidateField(raw.copyright),
+    bpm: normalizeNumberCandidateField(raw.bpm),
+    isrc: normalizeStringCandidateField(raw.isrc),
+    musicbrainzTrackId: normalizeStringCandidateField(raw.musicbrainzTrackId),
+    musicbrainzReleaseId: normalizeStringCandidateField(raw.musicbrainzReleaseId),
+    musicbrainzArtistIds: normalizeStringsCandidateField(raw.musicbrainzArtistIds),
+    acoustidId: normalizeStringCandidateField(raw.acoustidId),
+    acoustidFingerprint: normalizeStringCandidateField(raw.acoustidFingerprint),
+    ...(raw.lyrics && typeof raw.lyrics === 'object' ? {lyrics: normalizeStringCandidateField(raw.lyrics)} : {lyrics: undefined}),
+    matchReasons: stringArray(raw.matchReasons),
+    ...(evidence ? {evidence: {
+      identityScore: numberValue(evidence.identityScore),
+      releaseScore: numberValue(evidence.releaseScore),
+      completenessScore: numberValue(evidence.completenessScore),
+      assetQuality: numberValue(evidence.assetQuality),
+      margin: numberValue(evidence.margin),
+      level: stringValue(evidence.level),
+      sourceCount: numberValue(evidence.sourceCount),
+      conflicts: stringArray(evidence.conflicts),
+      algorithmVersion: stringValue(evidence.algorithmVersion),
+    }} : {}),
+  };
+}
+
+function normalizeMatchItem(item: MatchItem): MatchItem {
+	const raw = item as MatchItem & Record<string, unknown>;
+	const candidates = Array.isArray(raw.candidates)
+	  ? raw.candidates
+		.filter((candidate): candidate is MatchCandidate => Boolean(candidate && typeof candidate === 'object'))
+		.map(normalizeMatchCandidate)
+	  : [];
+	return {
+	  ...item,
+	  candidates,
+	  ...(raw.reviewFields == null ? {reviewFields: raw.reviewFields as null | undefined} : {reviewFields: stringArray(raw.reviewFields)}),
+	};
 }
 
 const tagIssueValues: TagIssue[] = [
@@ -441,7 +569,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	},
 
 	listMatchItems(jobId: string): Promise<MatchItem[]> {
-	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`);
+	  return request<MatchItem[]>(`/api/v1/jobs/${encodeURIComponent(jobId)}/matches`).then((items) => Array.isArray(items) ? items.map(normalizeMatchItem) : []);
 	},
 
 	updateMatchItem(jobId: string, trackId: string, state: 'review' | 'accepted' | 'skipped', selectedCandidateId?: string, fields?: string[], artwork?: boolean, artworkMaxSize?: number): Promise<MatchItem> {
@@ -449,7 +577,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		method: 'PATCH',
 		headers: {'Content-Type': 'application/json'},
 		body: JSON.stringify({state, selectedCandidateId, fields, artwork, artworkMaxSize}),
-	  });
+	  }).then(normalizeMatchItem);
 	},
 
 	rematchMatchItem(jobId: string, trackId: string, query?: CandidateSearchQuery, providerIds: string[] = []): Promise<MatchItem> {
@@ -457,7 +585,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		method: 'POST',
 		headers: {'Content-Type': 'application/json'},
 		body: JSON.stringify({query, providerIds, limitPerProvider: 5}),
-	  }).then((result) => result.item);
+	  }).then((result) => normalizeMatchItem(result.item));
 	},
 
 	createWriteJob(matchJobId: string, items: WriteSelection[]): Promise<Job> {
@@ -552,7 +680,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
           }),
         },
       );
-      return result.candidates;
+	      return (result.candidates ?? []).map(normalizeMatchCandidate);
     },
 
 	listQueryHistory(trackId: string): Promise<MatchQueryHistory[]> {
@@ -632,7 +760,10 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 		init.headers = {'Content-Type': 'application/json'};
 		init.body = JSON.stringify({query, limit: 5, probeArtwork: true});
 	  }
-	  return request<ProviderTestResponse>(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, init);
+	  return request<ProviderTestResponse>(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, init).then((result) => ({
+		...result,
+		...(Array.isArray(result.candidates) ? {candidates: result.candidates.map(normalizeMatchCandidate)} : {}),
+	  }));
 	},
 
 	deleteArtwork(track: Track): Promise<ArtworkWriteResult> {

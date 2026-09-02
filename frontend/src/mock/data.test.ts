@@ -12,10 +12,11 @@ describe('mock music archive', () => {
 
   it('keeps provider candidates ordered by confidence', () => {
     const candidates = candidatesFor(seedTracks[0]);
-    expect(candidates).toHaveLength(3);
-    expect(candidates[0].providerId).toBe('musicbrainz');
+	  expect(candidates).toHaveLength(4);
+	  expect(candidates[0].kind).toBe('smart');
+	  expect(candidates[0].recommended).toBe(true);
     expect(candidates[0].score).toBeGreaterThan(candidates[1].score);
-    expect(candidates[2].scoreLabel).toContain('版本');
+	  expect(candidates[3].scoreLabel).toContain('版本');
   });
 
   it('marks unofficial providers as experimental', () => {

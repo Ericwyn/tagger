@@ -1,6 +1,6 @@
 import {describe, expect, it, vi} from 'vitest';
-import {APIError, createRealAPI, normalizeLibrary, normalizeTrack} from '@/api/real';
-import type {LibrarySummary, Track} from '@/types';
+import {APIError, createRealAPI, normalizeLibrary, normalizeMatchCandidate, normalizeTrack} from '@/api/real';
+import type {LibrarySummary, MatchCandidate, Track} from '@/types';
 
 const library: LibrarySummary = {
   id: 'lib-1',
@@ -15,7 +15,46 @@ const library: LibrarySummary = {
 
 const track = {id: 'trk-1', title: 'Song'} as Track;
 
+const nullableSmartCandidate = {
+	id: 'cand-smart', providerId: 'smart', providerName: '智能选择', externalId: 'smart-1',
+	title: {value: 'Song', source: 'Source'}, artists: {value: null, source: ''},
+	album: {value: '', source: ''}, albumArtists: {value: null, source: ''},
+	year: {value: 0, source: ''}, trackNumber: {value: 0, source: ''}, trackTotal: {value: 0, source: ''},
+	discNumber: {value: 0, source: ''}, discTotal: {value: 0, source: ''}, durationSeconds: {value: 0, source: ''},
+	genres: {value: null, source: ''}, composers: {value: null, source: ''}, lyricists: {value: null, source: ''},
+	musicbrainzArtistIds: {value: null, source: ''}, hasLyrics: false, hasArtwork: false,
+	coverTone: 'charcoal', score: 0.8, scoreLabel: '待复核', matchReasons: null,
+} as unknown as MatchCandidate;
+
 describe('real API client', () => {
+	it('normalizes nullable multi-value candidate fields from sparse and persisted results', () => {
+	  const normalized = normalizeMatchCandidate(nullableSmartCandidate);
+	  expect(normalized.artists.value).toEqual([]);
+	  expect(normalized.albumArtists.value).toEqual([]);
+	  expect(normalized.genres.value).toEqual([]);
+	  expect(normalized.composers?.value).toEqual([]);
+	  expect(normalized.lyricists?.value).toEqual([]);
+	  expect(normalized.musicbrainzArtistIds?.value).toEqual([]);
+	  expect(normalized.matchReasons).toEqual([]);
+	});
+
+	it('normalizes nullable smart fields while loading durable review items', async () => {
+	  const item = {
+		id: 'match-1', jobId: 'job-1', trackId: 'trk-1', state: 'review',
+		candidates: [nullableSmartCandidate], reviewFields: null,
+	  };
+	  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: [item]}), {status: 200}));
+	  const api = createRealAPI(fetcher);
+
+	  const items = await api.listMatchItems('job/1');
+	  expect(items).toHaveLength(1);
+	  expect(items[0].candidates[0].composers?.value).toEqual([]);
+	  expect(items[0].candidates[0].lyricists?.value).toEqual([]);
+	  expect(items[0].candidates[0].musicbrainzArtistIds?.value).toEqual([]);
+	  expect(items[0].reviewFields).toBeNull();
+	  expect(fetcher.mock.calls[0][0]).toBe('/api/v1/jobs/job%2F1/matches');
+	});
+
   it('probes system and forwards the optional single-user token', async () => {
     localStorage.setItem('tagger-auth-token', 'secret-token');
     try {
@@ -387,7 +426,9 @@ describe('real API client', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({data: [provider]}), {status: 200}));
     const api = createRealAPI(fetcher);
 
-    await expect(api.searchCandidates({...track, artists: ['Artist'], album: 'Album', durationSeconds: 180} as Track)).resolves.toEqual([candidate]);
+	const candidates = await api.searchCandidates({...track, artists: ['Artist'], album: 'Album', durationSeconds: 180} as Track);
+	expect(candidates[0]).toEqual(expect.objectContaining(candidate));
+	expect(candidates[0].artists.value).toEqual([]);
     await expect(api.listProviders()).resolves.toEqual([provider]);
     const searchInit = fetcher.mock.calls[0][1] as RequestInit;
     expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/tracks/search');

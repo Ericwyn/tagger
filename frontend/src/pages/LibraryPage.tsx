@@ -713,7 +713,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		tagsApplied = true;
 		updateTrackState(updated);
 		if (options.artwork) {
-		  updated = await applyCandidateArtwork(updated.id, candidate.id, options.artworkMaxSize ?? 0);
+			  updated = await applyCandidateArtwork(updated.id, candidate.artworkRefId || candidate.id, options.artworkMaxSize ?? 0);
 		  updateTrackState(updated);
 		}
 		onNotice(tagWriteNotice(updated, `已采用 ${candidate.providerName} 候选并安全写入${options.artwork ? '标签与封面' : '音乐标签'}`));

@@ -143,7 +143,7 @@ export function App() {
                 trackIds={route.batchIds}
                 matchJobId={route.reviewJobId}
                 showGeneratedCovers={showGeneratedCovers}
-                onBack={() => navigatePage('library')}
+				onBack={() => route.reviewJobId ? openJobs(route.reviewJobId) : navigatePage('library')}
                 onComplete={() => {
                   setNotice('批量写入任务已创建，正在等待安全写入');
                   openJobs();

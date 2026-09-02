@@ -1130,6 +1130,17 @@ func (s *Server) handleMatchRematch(ctx context.Context, c *app.RequestContext) 
 	if len(result.Candidates) == 0 {
 		item.State = "no_match"
 		item.Error = "重新匹配没有返回候选"
+	} else {
+		for _, candidate := range result.Candidates {
+			if !candidate.Recommended {
+				continue
+			}
+			item.SelectedCandidateID = candidate.ID
+			if candidate.AutoAccept {
+				item.State = "accepted"
+			}
+			break
+		}
 	}
 	if err := s.store.UpsertMatchItem(ctx, item); err != nil {
 		s.writeError(c, consts.StatusInternalServerError, "match_state_failed", err.Error())
@@ -2003,15 +2014,23 @@ func (s *Server) handleWriteTags(ctx context.Context, c *app.RequestContext) {
 			}
 			action, source = "编辑后恢复快照", "历史修订 "+restoreID
 		} else {
-			descriptor, found := providers.Descriptor{}, false
-			if s.providers != nil {
-				descriptor, found = s.providers.Descriptor(strings.TrimSpace(request.Provenance.ProviderID))
+			providerID := strings.TrimSpace(request.Provenance.ProviderID)
+			switch providerID {
+			case string(providers.CandidateKindSmart):
+				action, source = "采用智能选择元数据", "智能选择"
+			case string(providers.CandidateKindAI):
+				action, source = "采用 AI 筛选元数据", "AI 筛选"
+			default:
+				descriptor, found := providers.Descriptor{}, false
+				if s.providers != nil {
+					descriptor, found = s.providers.Descriptor(providerID)
+				}
+				if !found {
+					s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "数据来源未注册")
+					return
+				}
+				action, source = "采用数据源元数据", descriptor.Name
 			}
-			if !found {
-				s.writeError(c, consts.StatusBadRequest, "invalid_provenance", "数据来源未注册")
-				return
-			}
-			action, source = "采用数据源元数据", descriptor.Name
 		}
 	}
 	ref, err := s.library.FileRef(c.Param("id"))

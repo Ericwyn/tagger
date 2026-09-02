@@ -154,16 +154,45 @@ export interface DirectoryProbe {
   warnings?: string[];
 }
 
+export type CandidateKind = 'source' | 'smart' | 'ai';
+
+export interface CandidateSourceReference {
+  providerId: string;
+  providerName: string;
+  candidateId: string;
+  externalId?: string;
+}
+
 export interface CandidateField<T = string | number | string[]> {
   value: T;
   source: string;
+  sources?: CandidateSourceReference[];
+  confidence?: number;
+  derived?: boolean;
+}
+
+export interface MatchEvidence {
+  identityScore: number;
+  releaseScore?: number;
+  completenessScore?: number;
+  assetQuality?: number;
+  margin?: number;
+  level: 'exact' | 'high' | 'review' | 'low' | string;
+  sourceCount: number;
+  conflicts?: string[];
+  algorithmVersion?: string;
 }
 
 export interface MatchCandidate {
   id: string;
+  kind?: CandidateKind;
   providerId: string;
   providerName: string;
   externalId: string;
+  memberCandidateIds?: string[];
+  contributors?: CandidateSourceReference[];
+  artworkRefId?: string;
+  artworkSource?: CandidateSourceReference;
   title: CandidateField<string>;
   artists: CandidateField<string[]>;
   album: CandidateField<string>;
@@ -194,6 +223,9 @@ export interface MatchCandidate {
   score: number;
   scoreLabel: string;
   matchReasons: string[];
+  evidence?: MatchEvidence;
+  recommended?: boolean;
+  autoAccept?: boolean;
 }
 
 export interface CandidateSearchQuery {

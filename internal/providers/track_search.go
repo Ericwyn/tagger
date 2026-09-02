@@ -23,8 +23,35 @@ func TrackQueries(track domain.Track, override Query) []Query {
 	if strings.TrimSpace(base.Album) == "" {
 		base.Album = track.Album
 	}
+	if len(base.AlbumArtists) == 0 {
+		base.AlbumArtists = append([]string(nil), track.AlbumArtists...)
+	}
+	if base.Year <= 0 && track.Year != nil {
+		base.Year = *track.Year
+	}
+	if base.TrackNumber <= 0 && track.TrackNumber != nil {
+		base.TrackNumber = *track.TrackNumber
+	}
+	if base.DiscNumber <= 0 && track.DiscNumber != nil {
+		base.DiscNumber = *track.DiscNumber
+	}
 	if base.DurationSeconds <= 0 {
 		base.DurationSeconds = track.DurationSeconds
+	}
+	if strings.TrimSpace(base.ISRC) == "" {
+		base.ISRC = track.ISRC
+	}
+	if strings.TrimSpace(base.MusicBrainzTrackID) == "" {
+		base.MusicBrainzTrackID = track.MusicBrainzTrackID
+	}
+	if strings.TrimSpace(base.MusicBrainzReleaseID) == "" {
+		base.MusicBrainzReleaseID = track.MusicBrainzReleaseID
+	}
+	if strings.TrimSpace(base.AcoustID) == "" {
+		base.AcoustID = track.AcoustID
+	}
+	if strings.TrimSpace(base.AcoustIDFingerprint) == "" {
+		base.AcoustIDFingerprint = track.AcoustIDFingerprint
 	}
 
 	queries := make([]Query, 0, max(1, len(track.TagHints)))
@@ -129,6 +156,9 @@ func (r *Registry) SearchTrack(ctx context.Context, track domain.Track, override
 	}
 	for _, candidate := range candidates {
 		merged.Candidates = append(merged.Candidates, candidate)
+	}
+	if smart, found := buildSmartCandidate(queries, merged.Candidates); found {
+		merged.Candidates = append(merged.Candidates, smart)
 	}
 	sortViews(merged.Candidates)
 	return merged, nil

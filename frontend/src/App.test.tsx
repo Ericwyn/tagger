@@ -106,7 +106,8 @@ describe('Tagger app prototype', () => {
 
     await user.click(screen.getByRole('button', {name: /从数据源补全/}));
     expect(screen.getByText('正在查询已启用数据源')).toBeInTheDocument();
-    expect(await screen.findByText('找到 3 个候选', {}, {timeout: 2000})).toBeInTheDocument();
+		expect(await screen.findByText('找到 4 个候选', {}, {timeout: 2000})).toBeInTheDocument();
+		expect(screen.getAllByText(/智能选择/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('MusicBrainz').length).toBeGreaterThan(0);
   });
 

@@ -1212,7 +1212,7 @@ func TestMatchRematchAPIReplacesPersistedCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var candidates []providers.MatchCandidate
-	if err := json.Unmarshal(item.Candidates, &candidates); err != nil || len(candidates) != 1 || candidates[0].Title.Value != "重新查询" || item.SelectedCandidateID != "" || item.ReviewFields != nil || item.ReviewArtwork {
+	if err := json.Unmarshal(item.Candidates, &candidates); err != nil || len(candidates) != 2 || candidates[0].Kind != providers.CandidateKindSmart || candidates[0].Title.Value != "重新查询" || item.SelectedCandidateID != candidates[0].ID || item.ReviewFields != nil || item.ReviewArtwork {
 		t.Fatalf("rematched item = %#v candidates=%#v err=%v", item, candidates, err)
 	}
 }

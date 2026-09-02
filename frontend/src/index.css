@@ -610,6 +610,25 @@ button:disabled {
   letter-spacing: 0.08em;
 }
 
+.app-error-state {
+  flex-direction: column;
+  padding: 32px;
+  text-align: center;
+  letter-spacing: normal;
+}
+
+.app-error-state strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 20px;
+}
+
+.app-error-state > span,
+.app-error-state > small {
+  max-width: 620px;
+  line-height: 1.6;
+}
+
 .review-loading {
   display: flex;
   align-items: flex-start;
@@ -3609,6 +3628,21 @@ button:disabled {
   letter-spacing: 0.05em;
 }
 
+.candidate-list-group-label,
+.candidate-picker-group-label {
+  display: block;
+  padding: 8px 13px 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.candidate-list-group + .candidate-list-group {
+  border-top: 1px solid var(--line-strong);
+}
+
 .candidate-item {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr) 50px 16px;
@@ -3629,6 +3663,42 @@ button:disabled {
 
 .candidate-item.is-active {
   box-shadow: inset 3px 0 var(--accent);
+}
+
+.candidate-item.is-smart,
+.candidate-picker-option.is-smart {
+  background: color-mix(in srgb, var(--accent) 7%, var(--paper));
+}
+
+.candidate-item.is-smart .candidate-copy em {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--accent);
+}
+
+.candidate-ai-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 8px 10px 12px;
+  padding: 9px 10px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+}
+
+.candidate-ai-placeholder > span,
+.candidate-ai-placeholder strong,
+.candidate-ai-placeholder small {
+  display: block;
+}
+
+.candidate-ai-placeholder strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.candidate-ai-placeholder small {
+  margin-top: 2px;
+  font-size: 10px;
 }
 
 .candidate-copy {
@@ -3905,6 +3975,14 @@ button:disabled {
   font-size: 9px;
   font-weight: 500;
   line-height: 1.3;
+}
+
+.candidate-diff-row .candidate-field-source {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
 }
 
 .lyrics-candidate-editor {
@@ -4567,6 +4645,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 17px;
+	padding: 18px 0 20px;
 }
 
 .record-comparison {
@@ -4660,6 +4739,57 @@ button:disabled {
   font-size: 11px;
 }
 
+.review-policy-note {
+	margin: 0 0 18px;
+}
+
+.review-smart-evidence {
+	display: grid;
+	grid-template-columns: 28px minmax(0, 1fr);
+	align-items: start;
+	gap: 11px;
+	margin: 0 0 12px;
+	padding: 12px 14px 13px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
+	border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--paper-2));
+}
+
+.review-smart-evidence-icon {
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+	background: color-mix(in srgb, var(--accent) 9%, var(--paper));
+	color: var(--accent);
+}
+
+.review-smart-evidence > div,
+.review-smart-evidence strong,
+.review-smart-evidence > div > span,
+.review-smart-evidence small {
+  display: block;
+}
+
+.review-smart-evidence strong {
+	font-family: var(--display);
+	font-size: 12px;
+	line-height: 1.3;
+}
+
+.review-smart-evidence > div > span,
+.review-smart-evidence small {
+	margin-top: 4px;
+  color: var(--muted);
+	font-size: 10.5px;
+	line-height: 1.5;
+}
+
+.review-smart-evidence small {
+	font-family: var(--mono);
+}
+
 .candidate-picker-overlay {
   position: fixed;
   z-index: 60;
@@ -4740,6 +4870,22 @@ button:disabled {
   overflow-y: auto;
   padding: 10px;
   border-top: 1px solid var(--line);
+}
+
+.candidate-picker-group {
+  display: grid;
+  gap: 5px;
+}
+
+.candidate-picker-group + .candidate-picker-group {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+}
+
+.candidate-picker-group-label {
+  padding-right: 4px;
+  padding-left: 4px;
 }
 
 .candidate-picker-option {

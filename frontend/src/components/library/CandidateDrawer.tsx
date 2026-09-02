@@ -36,6 +36,46 @@ function suspiciousAlbumArtist(candidate: MatchCandidate): boolean {
   return !candidate.artists.value.some((artist) => artist.trim().toLocaleLowerCase() === album);
 }
 
+function recommendedCandidate(candidates: MatchCandidate[]): MatchCandidate | undefined {
+  return candidates.find((candidate) => candidate.recommended)
+    ?? candidates.find((candidate) => candidate.kind === 'smart')
+    ?? candidates[0];
+}
+
+function candidateSourceSummary(candidate: MatchCandidate): string {
+  if (candidate.kind === 'smart') {
+    const count = candidate.evidence?.sourceCount ?? candidate.contributors?.length ?? 0;
+    return count > 0 ? `智能选择 · 综合 ${count} 个数据源` : '智能选择';
+  }
+  if (candidate.kind === 'ai') return 'AI 筛选';
+  return candidate.providerName;
+}
+
+function candidateFieldSource(candidate: MatchCandidate, field: string): string {
+  switch (field) {
+    case 'title': return candidate.title.source;
+    case 'artists': return candidate.artists.source;
+    case 'album': return candidate.album.source;
+    case 'albumArtists': return candidate.albumArtists.source;
+    case 'track': return candidate.trackNumber.source;
+    case 'year': return candidate.year.source;
+    case 'genres': return candidate.genres.source;
+    case 'comment': return candidate.comment?.source ?? candidate.providerName;
+    case 'composers': return candidate.composers?.source ?? candidate.providerName;
+    case 'conductor': return candidate.conductor?.source ?? candidate.providerName;
+    case 'lyricists': return candidate.lyricists?.source ?? candidate.providerName;
+    case 'copyright': return candidate.copyright?.source ?? candidate.providerName;
+    case 'bpm': return candidate.bpm?.source ?? candidate.providerName;
+    case 'isrc': return candidate.isrc?.source ?? candidate.providerName;
+    case 'musicbrainzTrackId': return candidate.musicbrainzTrackId?.source ?? candidate.providerName;
+    case 'musicbrainzReleaseId': return candidate.musicbrainzReleaseId?.source ?? candidate.providerName;
+    case 'musicbrainzArtistIds': return candidate.musicbrainzArtistIds?.source ?? candidate.providerName;
+    case 'acoustidId': return candidate.acoustidId?.source ?? candidate.providerName;
+    case 'acoustidFingerprint': return candidate.acoustidFingerprint?.source ?? candidate.providerName;
+    default: return candidate.providerName;
+  }
+}
+
 type CandidateFieldDescriptor = {
   id: string;
   label: string;
@@ -281,8 +321,8 @@ export function CandidateDrawer({
   const [historySelection, setHistorySelection] = useState('');
 
   useEffect(() => {
-    setSelectedId(candidates[0]?.id ?? null);
-    const first = candidates[0];
+	const first = recommendedCandidate(candidates);
+	setSelectedId(first?.id ?? null);
     setIncludeLyrics(focus === 'lyrics' && Boolean(first?.hasLyrics && first.lyrics?.value));
     setLyricsDraft(first?.lyrics?.value ?? '');
     setSelectedArtworkInfo(undefined);
@@ -335,7 +375,7 @@ export function CandidateDrawer({
   };
 
   const selected = useMemo(
-    () => candidates.find((candidate) => candidate.id === selectedId) ?? candidates[0],
+	() => candidates.find((candidate) => candidate.id === selectedId) ?? recommendedCandidate(candidates),
     [candidates, selectedId],
   );
 
@@ -442,13 +482,13 @@ export function CandidateDrawer({
 
         {loading ? (
           <div className="candidate-loading">
-            <div className="radar-loader">
+			<div className="radar-loader">
               <i />
               <i />
               <Sparkles size={24} />
             </div>
-            <strong>正在查询已启用数据源</strong>
-            <p>MusicBrainz · LRCLIB · Apple；网易云 / 酷狗可在设置中启用</p>
+			<strong>正在查询已启用数据源</strong>
+			<p>所有已启用来源都会参与查询；智能选择将在结果返回后进行跨源综合</p>
           </div>
         ) : (
           <div className="candidate-layout">
@@ -457,36 +497,47 @@ export function CandidateDrawer({
                 <span>找到 {candidates.length} 个候选</span>
                 <small>按匹配度排序</small>
               </div>
-              <div className="candidate-list">
-                {candidates.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    className={cn('candidate-item', selected?.id === candidate.id && 'is-active')}
-                    onClick={() => setSelectedId(candidate.id)}
-                  >
-                    <CoverArt
-                      title={candidate.title.value}
-                      artist={candidate.artists.value[0]}
-                      tone={candidate.coverTone}
-                      missing={!showGeneratedCovers && !candidateArtworkURL(candidate)}
-                      imageUrl={candidateArtworkURL(candidate)}
-                      blankOnImageError={!showGeneratedCovers}
-                      size="sm"
-                    />
-                    <span className="candidate-copy">
-                      <strong>{candidate.title.value}</strong>
-                      <span>{candidate.artists.value.join(' / ')}</span>
-                      <small>{candidate.album.value || '专辑未知'} · {candidate.year.value || '年份未知'}</small>
-                      <em>{candidate.providerName}</em>
-                    </span>
-                    <span className={cn('score-ring', candidate.score < 0.8 && 'is-low')}>
-                      {Math.round(candidate.score * 100)}
-                      <small>%</small>
-                    </span>
-                    <ChevronRight size={15} />
-                  </button>
-                ))}
-              </div>
+			  <div className="candidate-list">
+				{[
+				  {label: '推荐方案', candidates: candidates.filter((candidate) => candidate.kind === 'smart' || candidate.kind === 'ai')},
+				  {label: '原始数据源', candidates: candidates.filter((candidate) => !candidate.kind || candidate.kind === 'source')},
+				].filter((group) => group.candidates.length > 0).map((group) => (
+				  <div className="candidate-list-group" key={group.label}>
+					<strong className="candidate-list-group-label">{group.label}</strong>
+					{group.candidates.map((candidate) => (
+					  <button
+						key={candidate.id}
+						className={cn('candidate-item', selected?.id === candidate.id && 'is-active', candidate.kind === 'smart' && 'is-smart')}
+						onClick={() => setSelectedId(candidate.id)}
+					  >
+						<CoverArt
+						  title={candidate.title.value}
+						  artist={candidate.artists.value[0]}
+						  tone={candidate.coverTone}
+						  missing={!showGeneratedCovers && !candidateArtworkURL(candidate)}
+						  imageUrl={candidateArtworkURL(candidate)}
+						  blankOnImageError={!showGeneratedCovers}
+						  size="sm"
+						/>
+						<span className="candidate-copy">
+						  <strong>{candidate.title.value}</strong>
+						  <span>{candidate.artists.value.join(' / ')}</span>
+						  <small>{candidate.album.value || '专辑未知'} · {candidate.year.value || '年份未知'}</small>
+						  <em>{candidateSourceSummary(candidate)}</em>
+						</span>
+						<span className={cn('score-ring', candidate.score < 0.8 && 'is-low')}>
+						  {Math.round(candidate.score * 100)}
+						  <small>%</small>
+						</span>
+						<ChevronRight size={15} />
+					  </button>
+					))}
+				  </div>
+				))}
+				{candidates.some((candidate) => candidate.kind === 'smart') && !candidates.some((candidate) => candidate.kind === 'ai') && (
+				  <div className="candidate-ai-placeholder"><Sparkles size={15} /><span><strong>AI 筛选</strong><small>模型服务尚未配置；不会影响智能选择结果</small></span></div>
+				)}
+			  </div>
             </section>
 
             {selected && (
@@ -516,7 +567,7 @@ export function CandidateDrawer({
                     </span>
                     <h3>{selected.title.value}</h3>
                     <p>{selected.artists.value.join(' / ')}</p>
-                    <small>{selected.providerName} / {selected.externalId}</small>
+					<small>{candidateSourceSummary(selected)}{!selected.kind || selected.kind === 'source' ? ` / ${selected.externalId}` : ''}</small>
                   </div>
                 </div>
 
@@ -559,12 +610,13 @@ export function CandidateDrawer({
 
                 <div className="candidate-diff">
                   <div className="diff-column-head"><span>字段</span><span>当前文件</span><span>候选值</span></div>
-                  {fieldOptions.filter((field) => field.available(selected)).map((field) => (
-                    <DiffRow
+				  {fieldOptions.filter((field) => field.available(selected)).map((field) => (
+					<DiffRow
                       key={field.id}
                       label={field.label}
                       current={field.currentText(track)}
-                      candidate={field.candidateText(selected)}
+					  candidate={field.candidateText(selected)}
+					  source={candidateFieldSource(selected, field.id)}
                       active={fields.has(field.id)}
                       warning={fieldWarning(field, selected)}
                     />
@@ -654,13 +706,13 @@ export function CandidateDrawer({
   );
 }
 
-function DiffRow({label, current, candidate, active, warning}: {label: string; current: string; candidate: string; active: boolean; warning?: string}) {
+function DiffRow({label, current, candidate, source, active, warning}: {label: string; current: string; candidate: string; source: string; active: boolean; warning?: string}) {
   const same = current === candidate;
   return (
     <div className={cn('candidate-diff-row', !active && 'is-muted', warning && 'has-warning')}>
       <span>{label}</span>
       <span>{current}</span>
-      <span className={cn(!same && active && 'is-changed')}>{candidate}{warning && <small>{warning}</small>}</span>
+	  <span className={cn(!same && active && 'is-changed')}>{candidate}<small className="candidate-field-source">来源：{source}</small>{warning && <small>{warning}</small>}</span>
     </div>
   );
 }

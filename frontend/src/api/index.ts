@@ -342,7 +342,7 @@ export function artworkURL(track: Track): string | undefined {
 
 export function candidateArtworkURL(candidate: MatchCandidate): string | undefined {
   if (apiReadMode === 'mock' || !candidate.hasArtwork) return undefined;
-  return `/api/v1/matches/candidates/${encodeURIComponent(candidate.id)}/artwork`;
+  return `/api/v1/matches/candidates/${encodeURIComponent(candidate.artworkRefId || candidate.id)}/artwork`;
 }
 
 export function audioURL(track: Track): string | undefined {

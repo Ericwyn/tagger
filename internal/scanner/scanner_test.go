@@ -180,6 +180,19 @@ func TestFilenameHintsRemainAmbiguousAndNeverBecomeTags(t *testing.T) {
 	}
 }
 
+func TestFilenameHintsStripTrackPrefixesAndUnicodeSeparators(t *testing.T) {
+	hints := tagHintsFromPath("Artist/Album/CD1 07 - Artist – Song Title.flac")
+	if len(hints) != 2 {
+		t.Fatalf("hints = %#v", hints)
+	}
+	if hints[0].Title != "Artist" || !slices.Equal(hints[0].Artists, []string{"Song Title"}) {
+		t.Fatalf("title-artist hint = %#v", hints[0])
+	}
+	if hints[1].Title != "Song Title" || !slices.Equal(hints[1].Artists, []string{"Artist"}) {
+		t.Fatalf("artist-title hint = %#v", hints[1])
+	}
+}
+
 func TestTagIssuesDetectSuspiciousAlbumArtist(t *testing.T) {
 	track := fallbackTrack("brave heart-宮崎歩.mp3", domain.FormatMP3)
 	applySnapshot(&track, tags.Snapshot{Raw: map[string][]string{
