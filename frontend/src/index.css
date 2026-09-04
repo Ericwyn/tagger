@@ -4850,9 +4850,21 @@ button:disabled {
 }
 
 .candidate-picker-option strong,
+.candidate-picker-option .candidate-picker-artist,
 .candidate-picker-option small,
 .candidate-picker-option em {
   display: block;
+}
+
+.candidate-picker-option .candidate-picker-artist {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .candidate-picker-option small,

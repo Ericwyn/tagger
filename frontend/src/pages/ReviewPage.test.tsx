@@ -1,4 +1,4 @@
-import {render, screen} from '@testing-library/react';
+import {render, screen, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {describe, expect, it, vi} from 'vitest';
 import {ReviewPage} from '@/pages/ReviewPage';
@@ -44,6 +44,7 @@ describe('ReviewPage field selection', () => {
     await user.click(screen.getByRole('button', {name: /更换候选/}));
     expect(screen.getByRole('dialog', {name: '候选列表'})).toBeInTheDocument();
     expect(screen.getByRole('listbox', {name: '候选列表'})).toBeInTheDocument();
+    expect(within(screen.getByRole('option', {name: /网易云音乐.*song-186001/})).getByText('姜育恒')).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', {name: '候选列表'})).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: /更换候选/}));

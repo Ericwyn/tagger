@@ -829,7 +829,12 @@ export function ReviewPage({trackIds, matchJobId, showGeneratedCovers = false, o
 						onClick={() => selectCandidate(active.track.id, candidate)}
 					  >
 						<CoverArt title={candidate.title.value} artist={candidate.artists.value[0]} tone={candidate.coverTone} missing={!showGeneratedCovers && !candidateArtworkURL(candidate)} imageUrl={candidateArtworkURL(candidate)} blankOnImageError={!showGeneratedCovers} size="xs" />
-						<span><strong>{candidate.title.value}</strong><small>{candidateSourceSummary(candidate)}</small><em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em></span>
+						<span>
+						  <strong>{candidate.title.value}</strong>
+						  <span className="candidate-picker-artist">{candidate.artists.value.join(' / ') || '未提供歌手'}</span>
+						  <small>{candidateSourceSummary(candidate)}</small>
+						  <em>{Math.round(candidate.score * 100)}% · {candidate.scoreLabel} · {candidateAssetSummary(candidate)}</em>
+						</span>
 						{candidate.id === active.candidate?.id && <Check size={15} />}
 					  </button>
 					))}
