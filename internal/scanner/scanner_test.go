@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -58,6 +59,8 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	mustWriteFile(t, filepath.Join(root, "Singer-Album", "Song Two.mp3"), nil)
 	mustWriteFile(t, filepath.Join(root, "Singer-Album", "Song Two.lrc"), []byte("[00:01.00]sidecar"))
 	mustWriteFile(t, filepath.Join(root, "root-artist.wav"), nil)
+	mustWriteFile(t, filepath.Join(root, "voice.ogg"), nil)
+	mustWriteFile(t, filepath.Join(root, "podcast.OPUS"), nil)
 	mustWriteFile(t, filepath.Join(root, "notes.txt"), nil)
 	mustWriteFile(t, filepath.Join(root, ".hidden", "ignored.mp3"), nil)
 	mustWriteFile(t, filepath.Join(root, ".song.tagger-inflight.mp3"), nil)
@@ -110,14 +113,15 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Library.TrackCount != 3 || result.Library.FolderCount != 2 {
+	if result.Library.TrackCount != 5 || result.Library.FolderCount != 2 {
 		t.Fatalf("library = %#v", result.Library)
 	}
-	if result.Report.Discovered != 3 || result.Report.Parsed != 2 || result.Report.Failed != 1 {
+	if result.Report.Discovered != 5 || result.Report.Parsed != 4 || result.Report.Failed != 1 {
 		t.Fatalf("report = %#v", result.Report)
 	}
 
 	var flac, mp3, wav domain.Track
+	oggCount := 0
 	for _, track := range result.Tracks {
 		switch track.Format {
 		case domain.FormatFLAC:
@@ -126,7 +130,12 @@ func TestScanDiscoversAndNormalizesSupportedAudio(t *testing.T) {
 			mp3 = track
 		case domain.FormatWAV:
 			wav = track
+		case domain.FormatOGG:
+			oggCount++
 		}
+	}
+	if oggCount != 2 {
+		t.Fatalf("ogg tracks = %d, want .ogg and .opus", oggCount)
 	}
 	if flac.Title != "Song" || len(flac.Artists) != 2 || flac.DurationSeconds != 241 || flac.Health != domain.HealthComplete {
 		t.Fatalf("flac normalization = %#v", flac)
@@ -177,6 +186,25 @@ func TestFilenameHintsRemainAmbiguousAndNeverBecomeTags(t *testing.T) {
 	track := fallbackTrack("music/数码宝贝/宮崎歩-brave heart.mp3", domain.FormatMP3)
 	if track.Title != "" || len(track.Artists) != 0 || track.Health != domain.HealthTagCompatibility {
 		t.Fatalf("fallback track promoted a hint = %#v", track)
+	}
+}
+
+func TestSupportedAudioExtensionMappingIsExplicit(t *testing.T) {
+	tests := map[string]domain.TrackFormat{
+		"track.mp3":  domain.FormatMP3,
+		"track.FLAC": domain.FormatFLAC,
+		"track.wave": domain.FormatWAV,
+		"track.ogg":  domain.FormatOGG,
+		"track.OPUS": domain.FormatOGG,
+	}
+	for path, want := range tests {
+		got, ok := formatFromPath(path)
+		if !ok || got != want || !isSupportedAudio(path) {
+			t.Errorf("formatFromPath(%q) = %q, %v; want %q, true", path, got, ok, want)
+		}
+	}
+	if got, ok := formatFromPath("track.aac"); ok || got != "" || isSupportedAudio("track.aac") {
+		t.Fatalf("unknown extension mapped to %q, %v", got, ok)
 	}
 }
 
@@ -311,20 +339,22 @@ func TestScannerReadsTestMusicCorpus(t *testing.T) {
 		if entry.IsDir() {
 			return nil
 		}
-		switch filepath.Ext(path) {
+		switch strings.ToLower(filepath.Ext(path)) {
 		case ".flac":
 			expectedFormats[domain.FormatFLAC]++
 		case ".mp3":
 			expectedFormats[domain.FormatMP3]++
 		case ".wav":
 			expectedFormats[domain.FormatWAV]++
+		case ".ogg", ".opus":
+			expectedFormats[domain.FormatOGG]++
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	expectedTotal := expectedFormats[domain.FormatFLAC] + expectedFormats[domain.FormatMP3] + expectedFormats[domain.FormatWAV]
+	expectedTotal := expectedFormats[domain.FormatFLAC] + expectedFormats[domain.FormatMP3] + expectedFormats[domain.FormatWAV] + expectedFormats[domain.FormatOGG]
 	if len(result.Tracks) != expectedTotal {
 		t.Fatalf("tracks = %d, want %d supported files", len(result.Tracks), expectedTotal)
 	}
@@ -335,7 +365,7 @@ func TestScannerReadsTestMusicCorpus(t *testing.T) {
 			t.Errorf("incomplete parsed track: %#v", track)
 		}
 	}
-	if formats[domain.FormatFLAC] != expectedFormats[domain.FormatFLAC] || formats[domain.FormatMP3] != expectedFormats[domain.FormatMP3] || formats[domain.FormatWAV] != expectedFormats[domain.FormatWAV] {
+	if formats[domain.FormatFLAC] != expectedFormats[domain.FormatFLAC] || formats[domain.FormatMP3] != expectedFormats[domain.FormatMP3] || formats[domain.FormatWAV] != expectedFormats[domain.FormatWAV] || formats[domain.FormatOGG] != expectedFormats[domain.FormatOGG] {
 		t.Fatalf("format counts = %#v, want %#v", formats, expectedFormats)
 	}
 }

@@ -24,7 +24,7 @@ type DirectoryProbe struct {
 }
 
 // ProbeRoot validates a candidate music directory without changing the
-// active library index. It deliberately counts only the three supported
+// active library index. It deliberately counts only supported audio
 // formats and never follows symlinks, matching Scanner's safety boundary.
 func ProbeRoot(root string) (DirectoryProbe, error) {
 	probe, err := ValidateRoot(root)
@@ -55,17 +55,9 @@ func ProbeRoot(root string) (DirectoryProbe, error) {
 		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			return nil
 		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
-		switch extension {
-		case ".mp3":
+		if format, ok := domain.TrackFormatFromExtension(filepath.Ext(entry.Name())); ok {
 			probe.AudioFiles++
-			probe.Formats[string(domain.FormatMP3)]++
-		case ".flac":
-			probe.AudioFiles++
-			probe.Formats[string(domain.FormatFLAC)]++
-		case ".wav", ".wave":
-			probe.AudioFiles++
-			probe.Formats[string(domain.FormatWAV)]++
+			probe.Formats[string(format)]++
 		}
 		return nil
 	})
@@ -100,7 +92,12 @@ func ValidateRoot(root string) (DirectoryProbe, error) {
 	if !info.IsDir() {
 		return DirectoryProbe{}, fmt.Errorf("path is not a directory")
 	}
-	probe := DirectoryProbe{Path: abs, Name: filepath.Base(abs), Formats: map[string]int{string(domain.FormatMP3): 0, string(domain.FormatFLAC): 0, string(domain.FormatWAV): 0}}
+	probe := DirectoryProbe{Path: abs, Name: filepath.Base(abs), Formats: map[string]int{
+		string(domain.FormatMP3):  0,
+		string(domain.FormatFLAC): 0,
+		string(domain.FormatWAV):  0,
+		string(domain.FormatOGG):  0,
+	}}
 	if file, openErr := os.Open(abs); openErr == nil {
 		probe.Readable = true
 		_ = file.Close()

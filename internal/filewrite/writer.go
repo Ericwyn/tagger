@@ -163,7 +163,7 @@ func (w *Writer) SetRoot(root string) error {
 func (w *Writer) ValidateWritable(refs []library.FileRef) error {
 	checkedDirectories := make(map[string]struct{})
 	for _, ref := range refs {
-		if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+		if !ref.Format.IsSupported() {
 			return fmt.Errorf("%w: %s: %w", ErrTargetNotWritable, ref.RelativePath, ErrUnsupportedFormat)
 		}
 		path, err := w.containedPath(ref)
@@ -242,7 +242,7 @@ func (w *Writer) ReadSidecar(ctx context.Context, ref library.FileRef) (SidecarS
 // nil content pointer means delete; an empty non-nil string creates an empty
 // sidecar. Both the audio revision and sidecar content revision are guarded.
 func (w *Writer) WriteSidecar(ctx context.Context, ref library.FileRef, baseRevision, baseSidecarRevision string, content *string, dryRun bool) (SidecarResult, error) {
-	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+	if !ref.Format.IsSupported() {
 		return SidecarResult{}, ErrUnsupportedFormat
 	}
 	path, err := w.containedPath(ref)
@@ -395,7 +395,7 @@ func (w *Writer) ReadArtwork(ctx context.Context, ref library.FileRef, index int
 }
 
 func (w *Writer) WriteArtwork(ctx context.Context, ref library.FileRef, baseRevision string, index int, target *artwork.Asset, dryRun bool) (ArtworkResult, error) {
-	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+	if !ref.Format.IsSupported() {
 		return ArtworkResult{}, ErrUnsupportedFormat
 	}
 	if index < 0 || index > 31 {
@@ -539,7 +539,7 @@ func cloneArtworkAsset(asset *artwork.Asset) *artwork.Asset {
 type updateCompiler func(raw map[string][]string) (map[string][]string, []FieldDiff, error)
 
 func (w *Writer) mutate(ctx context.Context, ref library.FileRef, baseRevision string, dryRun bool, compile updateCompiler) (Result, error) {
-	if ref.Format != domain.FormatMP3 && ref.Format != domain.FormatFLAC && ref.Format != domain.FormatWAV {
+	if !ref.Format.IsSupported() {
 		return Result{}, ErrUnsupportedFormat
 	}
 	path, err := w.containedPath(ref)

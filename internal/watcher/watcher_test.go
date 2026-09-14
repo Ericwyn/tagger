@@ -53,6 +53,19 @@ func TestIgnoredPaths(t *testing.T) {
 	}
 }
 
+func TestWatchedFilesIncludeOggAndOpus(t *testing.T) {
+	for _, path := range []string{"song.ogg", "podcast.OPUS", "lyrics.lrc", "track.flac"} {
+		if !isWatchedFile(path) {
+			t.Errorf("watched file %q was ignored", path)
+		}
+	}
+	for _, path := range []string{"cover.jpg", "track.aac", "notes.txt"} {
+		if isWatchedFile(path) {
+			t.Errorf("unwatched file %q was accepted", path)
+		}
+	}
+}
+
 func TestManagerRetriesBusyBatch(t *testing.T) {
 	root := t.TempDir()
 	changes := make(chan []string, 1)

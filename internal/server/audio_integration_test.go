@@ -32,6 +32,8 @@ func TestAudioAPIWithCopiedTestMusic(t *testing.T) {
 	}{
 		{name: "mp3", extension: ".mp3", contentType: "audio/mpeg"},
 		{name: "flac", extension: ".flac", contentType: "audio/flac"},
+		{name: "ogg-vorbis", extension: ".ogg", contentType: "audio/ogg"},
+		{name: "ogg-opus", extension: ".opus", contentType: "audio/ogg"},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			source := findIntegrationAudio(t, corpus, fixture.extension)

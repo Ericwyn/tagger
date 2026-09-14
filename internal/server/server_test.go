@@ -412,6 +412,12 @@ func TestAudioAPIProvidesRangeStreamAndETag(t *testing.T) {
 	}
 }
 
+func TestAudioContentTypeIncludesOgg(t *testing.T) {
+	if got := audioContentType(domain.FormatOGG); got != "audio/ogg" {
+		t.Fatalf("OGG content type = %q", got)
+	}
+}
+
 func TestRawTagsAPIReadsLosslessPropertyMap(t *testing.T) {
 	s := newTestServer(t)
 	track := s.library.ListTracks(library.TrackFilter{})[0]

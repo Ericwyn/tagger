@@ -16,6 +16,8 @@ func TestProbeRootReportsSupportedAudioAndPermissions(t *testing.T) {
 		filepath.Join(root, "Album", "two.FLAC"),
 		filepath.Join(root, "Album", "three.wav"),
 		filepath.Join(root, "Album", "four.wave"),
+		filepath.Join(root, "Album", "five.OGG"),
+		filepath.Join(root, "Album", "six.opus"),
 		filepath.Join(root, "cover.jpg"),
 	} {
 		if err := os.WriteFile(path, nil, 0o644); err != nil {
@@ -26,10 +28,10 @@ func TestProbeRootReportsSupportedAudioAndPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !probe.Readable || !probe.Writable || probe.AudioFiles != 4 || probe.Folders != 1 {
+	if !probe.Readable || !probe.Writable || probe.AudioFiles != 6 || probe.Folders != 1 {
 		t.Fatalf("probe = %#v", probe)
 	}
-	if probe.Formats["mp3"] != 1 || probe.Formats["flac"] != 1 || probe.Formats["wav"] != 2 {
+	if probe.Formats["mp3"] != 1 || probe.Formats["flac"] != 1 || probe.Formats["wav"] != 2 || probe.Formats["ogg"] != 2 {
 		t.Fatalf("formats = %#v", probe.Formats)
 	}
 }
@@ -61,7 +63,7 @@ func TestProbeTestMusicCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if probe.AudioFiles == 0 || probe.Formats["mp3"]+probe.Formats["flac"]+probe.Formats["wav"] != probe.AudioFiles {
+	if probe.AudioFiles == 0 || probe.Formats["mp3"]+probe.Formats["flac"]+probe.Formats["wav"]+probe.Formats["ogg"] != probe.AudioFiles {
 		t.Fatalf("unexpected TestMusic probe = %#v", probe)
 	}
 }

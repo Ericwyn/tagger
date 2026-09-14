@@ -84,9 +84,7 @@ func NormalizeTrackQuery(query TrackQuery) (TrackQuery, error) {
 		}
 	}
 	if query.Format != "" {
-		switch query.Format {
-		case domain.FormatMP3, domain.FormatFLAC, domain.FormatWAV:
-		default:
+		if !query.Format.IsSupported() {
 			return TrackQuery{}, fmt.Errorf("%w: unsupported format %q", ErrInvalidTrackQuery, query.Format)
 		}
 	}

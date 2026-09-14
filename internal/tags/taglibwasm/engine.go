@@ -97,6 +97,8 @@ func normalizeContainer(format string) string {
 		return "FLAC"
 	case "wav", "wave":
 		return "WAV"
+	case "ogg":
+		return "OGG"
 	default:
 		return strings.ToUpper(format)
 	}

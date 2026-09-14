@@ -324,11 +324,15 @@ func (s *Scanner) DiscoverFiles(ctx context.Context, targets []string, maxDepth 
 		}
 		relativePath, _ := filepath.Rel(s.opts.Root, path)
 		relativePath = filepath.ToSlash(relativePath)
+		format, ok := formatFromPath(path)
+		if !ok {
+			continue
+		}
 		files = append(files, DiscoveredFile{
 			RelativePath:    relativePath,
 			FileName:        filepath.Base(path),
 			FolderID:        folderID(filepath.ToSlash(filepath.Dir(relativePath))),
-			Format:          formatFromPath(path),
+			Format:          format,
 			SizeBytes:       info.Size(),
 			ModifiedAt:      info.ModTime().Format("2006-01-02 15:04"),
 			Writable:        info.Mode().Perm()&0o222 != 0,
@@ -468,7 +472,10 @@ func (s *Scanner) extract(ctx context.Context, path string) (domain.Track, error
 	info, statErr := os.Stat(path)
 	relativePath, _ := filepath.Rel(s.opts.Root, path)
 	relativePath = filepath.ToSlash(relativePath)
-	format := formatFromPath(path)
+	format, ok := formatFromPath(path)
+	if !ok {
+		return domain.Track{}, fmt.Errorf("unsupported audio format: %s", filepath.Ext(path))
+	}
 	track := fallbackTrack(relativePath, format)
 	track.ID = "trk-" + shortHash(relativePath)
 	track.FileName = filepath.Base(path)
@@ -867,23 +874,12 @@ func FileRevision(relativePath string, info fs.FileInfo, raw map[string][]string
 }
 
 func isSupportedAudio(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp3", ".flac", ".wav", ".wave":
-		return true
-	default:
-		return false
-	}
+	_, ok := formatFromPath(path)
+	return ok
 }
 
-func formatFromPath(path string) domain.TrackFormat {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp3":
-		return domain.FormatMP3
-	case ".wav", ".wave":
-		return domain.FormatWAV
-	default:
-		return domain.FormatFLAC
-	}
+func formatFromPath(path string) (domain.TrackFormat, bool) {
+	return domain.TrackFormatFromExtension(filepath.Ext(path))
 }
 
 func isIgnoredDirectory(name string) bool {

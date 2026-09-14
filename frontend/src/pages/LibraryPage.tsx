@@ -79,6 +79,7 @@ const formatLabels: Record<FormatFilter, string> = {
   flac: 'FLAC 无损',
   mp3: 'MP3',
   wav: 'WAV',
+  ogg: 'OGG / Opus',
 };
 
 const sortLabels: Record<SortMode, string> = {

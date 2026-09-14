@@ -1962,6 +1962,8 @@ func audioContentType(format domain.TrackFormat) string {
 		return "audio/flac"
 	case domain.FormatWAV:
 		return "audio/wav"
+	case domain.FormatOGG:
+		return "audio/ogg"
 	default:
 		return "application/octet-stream"
 	}

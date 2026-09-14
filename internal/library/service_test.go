@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,6 +101,16 @@ func TestServiceFiltersAndReturnsDefensiveCopies(t *testing.T) {
 	}
 	if _, err := service.Track("missing"); err != ErrTrackNotFound {
 		t.Fatalf("missing error = %v", err)
+	}
+}
+
+func TestNormalizeTrackQueryAcceptsOgg(t *testing.T) {
+	query, err := NormalizeTrackQuery(TrackQuery{Format: domain.FormatOGG})
+	if err != nil || query.Format != domain.FormatOGG {
+		t.Fatalf("normalize OGG query = %#v, %v", query, err)
+	}
+	if _, err := NormalizeTrackQuery(TrackQuery{Format: "aac"}); !errors.Is(err, ErrInvalidTrackQuery) {
+		t.Fatalf("unsupported format error = %v", err)
 	}
 }
 

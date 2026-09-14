@@ -227,6 +227,49 @@ func TestWriterUsesVerifiedTemporaryCopy(t *testing.T) {
 	}
 }
 
+func TestWriterAllowsOggTagsSidecarAndArtwork(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "song.ogg")
+	if err := os.WriteFile(path, []byte("fake OGG bytes for the tag engine double"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	engine := newArtworkMemoryEngine(map[string][]string{
+		"TITLE":  {"Old title"},
+		"ARTIST": {"Artist"},
+	}, nil)
+	writer, err := New(root, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := testFileRef(t, root, path, domain.FormatOGG, engine)
+	if err := writer.ValidateWritable([]library.FileRef{ref}); err != nil {
+		t.Fatalf("OGG writable preflight: %v", err)
+	}
+
+	written, err := writer.Write(context.Background(), ref, ref.Revision, domain.TagPatch{
+		Title: &domain.StringFieldPatch{Op: domain.OperationSet, Value: "New OGG title"},
+	}, false)
+	if err != nil || !written.Changed {
+		t.Fatalf("OGG tag write = %#v, %v", written, err)
+	}
+	ref.Revision = written.CurrentRevision
+
+	lyrics := "[00:01.00]OGG sidecar\n"
+	if _, err := writer.WriteSidecar(context.Background(), ref, ref.Revision, "", &lyrics, false); err != nil {
+		t.Fatalf("OGG sidecar write: %v", err)
+	}
+	asset, err := artwork.Validate(testPNG(t, 4, 3), "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.WriteArtwork(context.Background(), ref, ref.Revision, 0, &asset, false); err != nil {
+		t.Fatalf("OGG artwork write: %v", err)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(root, ".song.tagger-*")); len(leftovers) != 0 {
+		t.Fatalf("OGG temporary files leaked: %v", leftovers)
+	}
+}
+
 func TestWriterPatchesExtendedEmbeddedFields(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "extended.flac")
@@ -573,13 +616,22 @@ func TestWriterWithCopiedTestMusicArtwork(t *testing.T) {
 	if _, err := os.Stat(corpus); err != nil {
 		t.Skipf("TestMusic corpus unavailable: %v", err)
 	}
-	for _, extension := range []string{".mp3", ".flac"} {
-		t.Run(strings.TrimPrefix(extension, "."), func(t *testing.T) {
-			source := findAudio(t, corpus, extension)
+	for _, fixture := range []struct {
+		name      string
+		extension string
+		format    domain.TrackFormat
+	}{
+		{name: "mp3", extension: ".mp3", format: domain.FormatMP3},
+		{name: "flac", extension: ".flac", format: domain.FormatFLAC},
+		{name: "ogg-vorbis", extension: ".ogg", format: domain.FormatOGG},
+		{name: "ogg-opus", extension: ".opus", format: domain.FormatOGG},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			source := findAudio(t, corpus, fixture.extension)
 			root := t.TempDir()
-			destination := filepath.Join(root, "artwork-fixture"+extension)
+			destination := filepath.Join(root, "artwork-fixture"+fixture.extension)
 			copyFixture(t, source, destination)
-			verifyArtworkRoundTrip(t, root, destination, domain.TrackFormat(strings.TrimPrefix(extension, ".")))
+			verifyArtworkRoundTrip(t, root, destination, fixture.format)
 		})
 	}
 	t.Run("wav", func(t *testing.T) {

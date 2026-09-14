@@ -15,7 +15,7 @@
 ![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)
 ![Status](https://img.shields.io/badge/status-active%20development-orange)
 
-Tagger 是一个使用 Go 构建的本地音乐元数据管理工具。它把音乐文件当作事实源，在浏览器中读取和编辑 MP3、FLAC、WAV 的标签、歌词、封面和技术信息；需要补全时，再通过可插拔的数据源策略查询候选结果，并在逐字段审核后写回文件。
+Tagger 是一个使用 Go 构建的本地音乐元数据管理工具。它把音乐文件当作事实源，在浏览器中读取和编辑 MP3、FLAC、WAV、Ogg Vorbis 和 Ogg Opus 的标签、歌词、封面和技术信息；需要补全时，再通过可插拔的数据源策略查询候选结果，并在逐字段审核后写回文件。
 
 它不是音乐下载器，也不是面向公网的音乐流媒体服务。Tagger 的目标很简单：让个人音乐库的整理工作可解释、可恢复、可审计，并且在一台机器上用一个二进制文件启动。
 
@@ -32,7 +32,7 @@ Tagger 是一个使用 Go 构建的本地音乐元数据管理工具。它把音
 
 | 方向 | Tagger 提供的能力 |
 | --- | --- |
-| 音乐文件 | MP3、FLAC、WAV 的常用标签、原始 PropertyMap、时长、码率、采样率、位深、声道和嵌入封面 |
+| 音乐文件 | MP3、FLAC、WAV、Ogg Vorbis、Ogg Opus 的常用标签、原始 PropertyMap、时长、码率、采样率、位深、声道和嵌入封面 |
 | 标签编辑 | 标题、艺术家、专辑、专辑艺术家、音轨/光盘号、年份、风格、歌词，以及注释、作曲家、指挥、作词家、版权、BPM、ISRC、MusicBrainz/AcoustID 标识 |
 | 封面管理 | 读取、预览、上传、删除、远程候选预览；支持 JPEG/PNG/WebP 校验和 500×500 / 1000×1000 居中裁剪 |
 | 数据补全 | 全部启用来源并行查询、跨源 Recording/Release 聚类、字段级智能选择、原始候选保留、歌词/封面独立采用和单曲重新匹配 |

@@ -1,13 +1,45 @@
 package domain
 
-// TrackFormat is the set of formats certified by the first product version.
+import "strings"
+
+// TrackFormat is the set of audio container families certified by Tagger.
 type TrackFormat string
 
 const (
 	FormatMP3  TrackFormat = "mp3"
 	FormatFLAC TrackFormat = "flac"
 	FormatWAV  TrackFormat = "wav"
+	FormatOGG  TrackFormat = "ogg"
 )
+
+// IsSupported reports whether the format is accepted throughout the scan,
+// query, playback, and safe-write pipelines.
+func (format TrackFormat) IsSupported() bool {
+	switch format {
+	case FormatMP3, FormatFLAC, FormatWAV, FormatOGG:
+		return true
+	default:
+		return false
+	}
+}
+
+// TrackFormatFromExtension maps file extensions to their container family.
+// Ogg Opus commonly uses .opus while Ogg Vorbis commonly uses .ogg; both are
+// represented as FormatOGG and remain distinguishable through TrackProperties.Codec.
+func TrackFormatFromExtension(extension string) (TrackFormat, bool) {
+	switch strings.ToLower(strings.TrimSpace(extension)) {
+	case ".mp3":
+		return FormatMP3, true
+	case ".flac":
+		return FormatFLAC, true
+	case ".wav", ".wave":
+		return FormatWAV, true
+	case ".ogg", ".opus":
+		return FormatOGG, true
+	default:
+		return "", false
+	}
+}
 
 type TrackHealth string
 

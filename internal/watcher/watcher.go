@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -244,10 +245,10 @@ func ignoredDirectory(name string) bool {
 }
 
 func isWatchedFile(path string) bool {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp3", ".flac", ".wav", ".wave", ".lrc":
+	extension := filepath.Ext(path)
+	if strings.EqualFold(extension, ".lrc") {
 		return true
-	default:
-		return false
 	}
+	_, supported := domain.TrackFormatFromExtension(extension)
+	return supported
 }
