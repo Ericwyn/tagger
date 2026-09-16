@@ -452,6 +452,34 @@ func TestWriteHistorySettingDefaultsOnAndPersists(t *testing.T) {
 	}
 }
 
+func TestBatchTrackLimitDefaultsAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "batch-limit.db")
+	first, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := first.BatchTrackLimit(context.Background()); got != domain.DefaultBatchTrackLimit {
+		t.Fatalf("default batch track limit = %d, want %d", got, domain.DefaultBatchTrackLimit)
+	}
+	if err := first.SetBatchTrackLimit(context.Background(), 5000); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if got := second.BatchTrackLimit(context.Background()); got != 5000 {
+		t.Fatalf("persisted batch track limit = %d, want 5000", got)
+	}
+	if err := second.SetBatchTrackLimit(context.Background(), domain.MaxBatchTrackLimit+1); err == nil {
+		t.Fatal("expected oversized batch track limit to be rejected")
+	}
+}
+
 func TestJobsClaimInOrderAndRecoverAfterRestart(t *testing.T) {
 	dataStore := openTestStore(t)
 	first, err := dataStore.CreateJob(context.Background(), domain.Job{Kind: domain.JobScan, Title: "first"})

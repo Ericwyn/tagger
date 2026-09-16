@@ -30,6 +30,7 @@ import type {
 	TrackPage,
 	TrackQuery,
 } from '@/types';
+import {defaultBatchTrackLimit} from '@/types';
 import type {BatchArtworkPayload} from '@/api/real';
 import type {SystemInfo} from '@/api/real';
 
@@ -42,6 +43,7 @@ export const apiReadMode: 'mock' | 'real' = configuredMode === 'mock' || import.
 
 const real = createRealAPI();
 let realTrackCache = new Map<string, Track>();
+let mockBatchTrackLimit = defaultBatchTrackLimit;
 
 export async function getLibrary(): Promise<LibrarySummary> {
   return apiReadMode === 'mock' ? mock.getLibrary() : real.getLibrary();
@@ -67,7 +69,7 @@ export async function switchLibrary(libraryId: string, path: string): Promise<Jo
 }
 
 export function getSystem(): Promise<SystemInfo> {
-  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20, writeHistory: true, storage: {databaseBytes: 0, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 0}}) : real.getSystem();
+  return apiReadMode === 'mock' ? Promise.resolve({version: 'mock', tag_engine: 'mock', listen: 'Mock', historyRetention: 20, writeHistory: true, batchTrackLimit: mockBatchTrackLimit, storage: {databaseBytes: 0, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 0}}) : real.getSystem();
 }
 
 export function clearRuntimeCache(): Promise<NonNullable<SystemInfo['storage']>> {
@@ -75,8 +77,11 @@ export function clearRuntimeCache(): Promise<NonNullable<SystemInfo['storage']>>
   return real.clearRuntimeCache();
 }
 
-export function updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
-  if (apiReadMode === 'mock') return Promise.resolve({historyRetention: settings.historyRetention ?? 20, writeHistory: settings.writeHistory ?? true});
+export function updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean; batchTrackLimit?: number}): Promise<{historyRetention: number; writeHistory: boolean; batchTrackLimit: number}> {
+  if (apiReadMode === 'mock') {
+    mockBatchTrackLimit = settings.batchTrackLimit ?? mockBatchTrackLimit;
+    return Promise.resolve({historyRetention: settings.historyRetention ?? 20, writeHistory: settings.writeHistory ?? true, batchTrackLimit: mockBatchTrackLimit});
+  }
   return real.updateSystemSettings(settings);
 }
 
@@ -99,7 +104,7 @@ export async function listTrackPage(query: TrackQuery = {}, cursor = '', limit =
 }
 
 export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery}): Promise<{tracks: Track[]; total: number}> {
-  if (apiReadMode === 'mock') return mock.resolveTracks(request);
+  if (apiReadMode === 'mock') return mock.resolveTracks(request, mockBatchTrackLimit);
   const result = await real.resolveTracks(request);
   result.tracks.forEach((track) => realTrackCache.set(track.id, track));
   return result;

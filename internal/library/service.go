@@ -453,7 +453,10 @@ func (s *Service) ListTrackPage(query TrackQuery, cursor string, limit int) (Tra
 	return result, nil
 }
 
-func (s *Service) ResolveTracksByIDs(ids []string) ([]domain.Track, error) {
+func (s *Service) ResolveTracksByIDs(ids []string, limit int) ([]domain.Track, error) {
+	if limit <= 0 {
+		limit = DefaultTrackResolveSize
+	}
 	unique := make([]string, 0, len(ids))
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -470,7 +473,7 @@ func (s *Service) ResolveTracksByIDs(ids []string) ([]domain.Track, error) {
 	if len(unique) == 0 {
 		return []domain.Track{}, nil
 	}
-	if len(unique) > MaxTrackResolveSize {
+	if len(unique) > limit {
 		return nil, ErrTrackSelectionLarge
 	}
 	s.mu.RLock()
@@ -486,7 +489,10 @@ func (s *Service) ResolveTracksByIDs(ids []string) ([]domain.Track, error) {
 	return result, nil
 }
 
-func (s *Service) ResolveTracksByQuery(query TrackQuery) ([]domain.Track, int, error) {
+func (s *Service) ResolveTracksByQuery(query TrackQuery, limit int) ([]domain.Track, int, error) {
+	if limit <= 0 {
+		limit = DefaultTrackResolveSize
+	}
 	normalized, err := NormalizeTrackQuery(query)
 	if err != nil {
 		return nil, 0, err
@@ -499,7 +505,7 @@ func (s *Service) ResolveTracksByQuery(query TrackQuery) ([]domain.Track, int, e
 			continue
 		}
 		total++
-		if total > MaxTrackResolveSize {
+		if total > limit {
 			return nil, total, ErrTrackSelectionLarge
 		}
 		result = append(result, cloneTrack(track))

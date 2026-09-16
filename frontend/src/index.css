@@ -1805,6 +1805,13 @@ button:disabled {
   color: var(--muted);
 }
 
+.inspector-empty .inspector-mobile-head {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+}
+
 .inspector-empty-disc {
   position: relative;
   display: grid;
@@ -6816,6 +6823,18 @@ button:disabled {
   justify-self: stretch;
 }
 
+.batch-track-limit-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  justify-self: stretch;
+}
+
+.batch-track-limit-control .secondary-button {
+  min-height: 34px;
+}
+
 .system-storage-panel {
   display: grid;
   gap: 10px;
@@ -6940,13 +6959,69 @@ button:disabled {
   white-space: nowrap;
 }
 
+@media (max-width: 1600px) {
+  .library-page {
+    grid-template-columns: var(--library-sidebar-width) minmax(0, 1fr);
+    overflow: hidden;
+  }
+
+  .library-workspace {
+    overflow: hidden;
+  }
+
+  .track-inspector {
+    position: fixed;
+    z-index: 75;
+    top: 68px;
+    right: 0;
+    bottom: 0;
+    width: min(430px, 94vw);
+    grid-template-rows: auto auto 43px minmax(0, 1fr) 54px;
+    background: var(--paper-2);
+    border-left: 1px solid var(--ink);
+    box-shadow: var(--shadow);
+    transform: translateX(102%);
+    transition: transform 220ms ease;
+  }
+
+  .track-inspector.has-restore-draft {
+    grid-template-rows: auto auto 43px auto minmax(0, 1fr) 54px;
+  }
+
+  .track-inspector.is-mobile-open {
+    transform: translateX(0);
+  }
+
+  .inspector-mobile-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 43px;
+    padding: 0 13px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--display);
+    font-weight: 700;
+  }
+
+  .inspector-mobile-head button {
+    display: grid;
+    place-items: center;
+    padding: 4px;
+    background: transparent;
+  }
+
+  .mobile-inspector-button {
+    display: grid;
+  }
+}
+
 @media (max-width: 1450px) {
   :root {
     --library-sidebar-width: 230px;
   }
 
   .library-page {
-    grid-template-columns: 230px minmax(470px, 1fr) 375px;
+    grid-template-columns: 230px minmax(0, 1fr);
   }
 
   .top-bar {

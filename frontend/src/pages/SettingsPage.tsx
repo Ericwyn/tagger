@@ -30,7 +30,7 @@ import {cn, formatBytes} from '@/lib/utils';
 import {apiReadMode, candidateArtworkURL, clearRuntimeCache, deleteLibrary, getSystem, listLibraries, listProviders, probeLibrary, purgeMissing, registerLibrary, resetProvider, rescanLibrary, switchLibrary, testProvider as runProviderTest, updateProvider, updateSystemSettings, waitForJob} from '@/api';
 import type {SystemInfo} from '@/api/real';
 import {fontOptions, themeOptions, type FontID, type ThemeID} from '@/theme';
-import {historyRetentionOptions, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
+import {defaultBatchTrackLimit, historyRetentionOptions, maxBatchTrackLimit, minBatchTrackLimit, type CandidateSearchQuery, type DirectoryProbe, type HistoryRetention, type LibrarySummary, type MatchCandidate, type ProviderConfig, type ProviderTestResponse} from '@/types';
 import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 interface SettingsPageProps {
@@ -130,6 +130,8 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
   const [systemInfo, setSystemInfo] = useState<SystemInfo>();
   const [historyRetention, setHistoryRetention] = useState<HistoryRetention>(readHistoryRetention);
   const [writeHistory, setWriteHistory] = useState(true);
+  const [batchTrackLimit, setBatchTrackLimit] = useState(defaultBatchTrackLimit);
+  const [batchTrackLimitSaving, setBatchTrackLimitSaving] = useState(false);
   const [cacheClearing, setCacheClearing] = useState(false);
 
   useEffect(() => {
@@ -244,6 +246,7 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
         localStorage.setItem(historyRetentionKey, String(info.historyRetention));
       }
       if (typeof info.writeHistory === 'boolean') setWriteHistory(info.writeHistory);
+      if (typeof info.batchTrackLimit === 'number') setBatchTrackLimit(info.batchTrackLimit);
     }).catch(() => setSystemInfo(undefined));
   }, [tab]);
 
@@ -267,6 +270,23 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
     } catch (error) {
       setWriteHistory(previous);
       onNotice(error instanceof Error ? error.message : '写前历史设置保存失败');
+    }
+  };
+
+  const saveBatchTrackLimit = async () => {
+    if (!Number.isInteger(batchTrackLimit) || batchTrackLimit < minBatchTrackLimit || batchTrackLimit > maxBatchTrackLimit) {
+      onNotice(`单次批量曲目上限必须在 ${minBatchTrackLimit} 到 ${maxBatchTrackLimit} 之间`);
+      return;
+    }
+    setBatchTrackLimitSaving(true);
+    try {
+      const updated = await updateSystemSettings({batchTrackLimit});
+      setBatchTrackLimit(updated.batchTrackLimit);
+      onNotice(`单次批量曲目上限已更新为 ${updated.batchTrackLimit} 首`);
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '批量曲目上限保存失败');
+    } finally {
+      setBatchTrackLimitSaving(false);
     }
   };
 
@@ -808,6 +828,14 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
                   <label className="system-select"><span>每文件</span><select aria-label="历史保留次数" value={historyRetention} onChange={(event) => void updateHistoryRetention(Number(event.target.value) as HistoryRetention)}>
                     {historyRetentionOptions.map((value) => <option key={value} value={value}>最近 {value} 次</option>)}
                   </select></label>
+                </section>
+                <section>
+                  <div className="system-icon"><ServerCog size={19} /></div>
+                  <div><strong>单次批量曲目上限</strong><p>限制全选解析、批量补全和批量编辑的单次曲目数；调高会增加内存和任务负载。</p></div>
+                  <div className="batch-track-limit-control">
+                    <label><span>曲目数</span><input aria-label="单次批量曲目上限" type="number" min={minBatchTrackLimit} max={maxBatchTrackLimit} step={100} value={batchTrackLimit} onChange={(event) => setBatchTrackLimit(Number(event.target.value))} /></label>
+                    <button className="secondary-button" type="button" disabled={batchTrackLimitSaving} onClick={() => void saveBatchTrackLimit()}>{batchTrackLimitSaving ? '保存中…' : '保存'}</button>
+                  </div>
                 </section>
                 <section className="system-storage-section">
                   <div className="system-icon"><Database size={19} /></div>

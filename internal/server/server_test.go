@@ -1318,6 +1318,13 @@ func TestRevisionHistoryAPI(t *testing.T) {
 	if settings.Code != 200 || !containsJSON(settings.Body.Bytes(), `"historyRetention":3`) {
 		t.Fatalf("system settings = %d %s", settings.Code, settings.Body.String())
 	}
+	batchLimitBody := []byte(`{"batchTrackLimit":3500}`)
+	batchLimit := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/system/settings",
+		&ut.Body{Body: bytes.NewReader(batchLimitBody), Len: len(batchLimitBody)},
+		ut.Header{Key: "content-type", Value: "application/json"})
+	if batchLimit.Code != 200 || !containsJSON(batchLimit.Body.Bytes(), `"batchTrackLimit":3500`) || s.store.BatchTrackLimit(context.Background()) != 3500 {
+		t.Fatalf("batch track limit setting = %d %s", batchLimit.Code, batchLimit.Body.String())
+	}
 	historyOffBody := []byte(`{"writeHistory":false}`)
 	historyOff := ut.PerformRequest(s.h.Engine, "PATCH", "/api/v1/system/settings",
 		&ut.Body{Body: bytes.NewReader(historyOffBody), Len: len(historyOffBody)},

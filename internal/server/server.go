@@ -227,9 +227,11 @@ func (s *Server) handleHealth(_ context.Context, c *app.RequestContext) {
 func (s *Server) handleSystem(ctx context.Context, c *app.RequestContext) {
 	historyRetention := 20
 	writeHistory := true
+	batchTrackLimit := domain.DefaultBatchTrackLimit
 	if s.store != nil {
 		historyRetention = s.store.HistoryRetention(ctx)
 		writeHistory = s.store.WriteHistory(ctx)
+		batchTrackLimit = s.store.BatchTrackLimit(ctx)
 	}
 	response := map[string]any{
 		"version":          s.version,
@@ -237,6 +239,7 @@ func (s *Server) handleSystem(ctx context.Context, c *app.RequestContext) {
 		"listen":           s.listen,
 		"historyRetention": historyRetention,
 		"writeHistory":     writeHistory,
+		"batchTrackLimit":  batchTrackLimit,
 	}
 	if storage, err := s.systemStorage(ctx); err == nil {
 		response["storage"] = storage
@@ -329,6 +332,7 @@ func (s *Server) handleSystemCacheClear(ctx context.Context, c *app.RequestConte
 type systemSettingsRequest struct {
 	HistoryRetention *int  `json:"historyRetention"`
 	WriteHistory     *bool `json:"writeHistory"`
+	BatchTrackLimit  *int  `json:"batchTrackLimit"`
 }
 
 func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext) {
@@ -337,8 +341,8 @@ func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext
 		return
 	}
 	var request systemSettingsRequest
-	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || (request.HistoryRetention == nil && request.WriteHistory == nil) {
-		s.writeError(c, consts.StatusBadRequest, "invalid_request", "需要提供 historyRetention 或 writeHistory")
+	if err := json.Unmarshal(c.Request.Body(), &request); err != nil || (request.HistoryRetention == nil && request.WriteHistory == nil && request.BatchTrackLimit == nil) {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", "需要提供 historyRetention、writeHistory 或 batchTrackLimit")
 		return
 	}
 	if request.HistoryRetention != nil {
@@ -353,7 +357,24 @@ func (s *Server) handleSystemSettings(ctx context.Context, c *app.RequestContext
 			return
 		}
 	}
-	s.writeData(c, map[string]any{"historyRetention": s.store.HistoryRetention(ctx), "writeHistory": s.store.WriteHistory(ctx)})
+	if request.BatchTrackLimit != nil {
+		if err := s.store.SetBatchTrackLimit(ctx, *request.BatchTrackLimit); err != nil {
+			s.writeError(c, consts.StatusBadRequest, "invalid_batch_track_limit", err.Error())
+			return
+		}
+	}
+	s.writeData(c, map[string]any{
+		"historyRetention": s.store.HistoryRetention(ctx),
+		"writeHistory":     s.store.WriteHistory(ctx),
+		"batchTrackLimit":  s.store.BatchTrackLimit(ctx),
+	})
+}
+
+func (s *Server) batchTrackLimit(ctx context.Context) int {
+	if s.store == nil {
+		return domain.DefaultBatchTrackLimit
+	}
+	return s.store.BatchTrackLimit(ctx)
 }
 
 func (s *Server) historyEnabled(ctx context.Context) bool {
@@ -1000,11 +1021,12 @@ func (s *Server) handleMatchBatch(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "trackIds 不能为空且请求 JSON 必须有效")
 		return
 	}
-	if len(request.TrackIDs) > 1000 {
-		s.writeError(c, consts.StatusBadRequest, "invalid_request", "单次最多处理 1000 首曲目")
+	limit := s.batchTrackLimit(ctx)
+	if len(request.TrackIDs) > limit {
+		s.writeError(c, consts.StatusBadRequest, "track_selection_too_large", fmt.Sprintf("单次最多处理 %d 首曲目", limit))
 		return
 	}
-	tracks, err := s.library.ResolveTracksByIDs(request.TrackIDs)
+	tracks, err := s.library.ResolveTracksByIDs(request.TrackIDs, limit)
 	if err != nil {
 		s.writeError(c, consts.StatusNotFound, "track_not_found", err.Error())
 		return
@@ -1400,18 +1422,19 @@ func (s *Server) handleTrackResolve(ctx context.Context, c *app.RequestContext) 
 	total := 0
 	var err error
 	if hasIDs {
+		limit := s.batchTrackLimit(ctx)
 		requestedCount := len(request.IDs)
-		tracks, err = s.library.ResolveTracksByIDs(request.IDs)
+		tracks, err = s.library.ResolveTracksByIDs(request.IDs, limit)
 		if err != nil && errors.Is(err, library.ErrTrackSelectionLarge) {
 			total = requestedCount
 		} else {
 			total = len(tracks)
 		}
 	} else {
-		tracks, total, err = s.library.ResolveTracksByQuery(*request.Query)
+		tracks, total, err = s.library.ResolveTracksByQuery(*request.Query, s.batchTrackLimit(ctx))
 	}
 	if errors.Is(err, library.ErrTrackSelectionLarge) {
-		s.writeError(c, consts.StatusBadRequest, "track_selection_too_large", fmt.Sprintf("当前结果有 %d 首，单次最多处理 %d 首", total, library.MaxTrackResolveSize))
+		s.writeError(c, consts.StatusBadRequest, "track_selection_too_large", fmt.Sprintf("当前结果有 %d 首，单次最多处理 %d 首", total, s.batchTrackLimit(ctx)))
 		return
 	}
 	if errors.Is(err, library.ErrTrackNotFound) {
@@ -1487,7 +1510,7 @@ func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "请求 JSON 无效")
 		return
 	}
-	if err := s.validateBatchEditPayload(&payload); err != nil {
+	if err := s.validateBatchEditPayload(&payload, s.batchTrackLimit(ctx)); err != nil {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -1527,9 +1550,9 @@ func (s *Server) writeWritablePreflightError(c *app.RequestContext, err error) {
 	s.writeError(c, consts.StatusUnprocessableEntity, "write_preflight_failed", "写入目标预检失败："+err.Error())
 }
 
-func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload) error {
-	if len(payload.Items) == 0 || len(payload.Items) > 1000 {
-		return fmt.Errorf("items 必须在 1 到 1000 之间")
+func (s *Server) validateBatchEditPayload(payload *domain.BatchEditPayload, limit int) error {
+	if len(payload.Items) == 0 || len(payload.Items) > limit {
+		return fmt.Errorf("items 必须在 1 到 %d 之间", limit)
 	}
 	if len(payload.Operations) == 0 && !payload.SequenceTracks && payload.Artwork == nil {
 		return fmt.Errorf("至少选择一个字段操作、音轨序号操作或封面操作")

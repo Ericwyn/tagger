@@ -15,6 +15,9 @@ export interface TagHint {
 }
 export const historyRetentionOptions = [3, 5, 10, 20] as const;
 export type HistoryRetention = typeof historyRetentionOptions[number];
+export const defaultBatchTrackLimit = 2000;
+export const minBatchTrackLimit = 1;
+export const maxBatchTrackLimit = 100000;
 
 export interface TrackProperties {
   container: string;

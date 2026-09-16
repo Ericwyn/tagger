@@ -218,6 +218,10 @@ export function TrackInspector({
   if (!track || !draft) {
     return (
       <aside className={cn('track-inspector inspector-empty', mobileOpen && 'is-mobile-open')}>
+        <div className="inspector-mobile-head">
+          <span>曲目详情</span>
+          <button title="关闭详情" onClick={onCloseMobile}><X size={18} /></button>
+        </div>
         <div className="inspector-empty-disc">
           <span />
           <Music size={28} />

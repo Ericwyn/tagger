@@ -424,8 +424,9 @@ func TestServiceTrackPagesCombineFolderHealthFormatAndSearchFilters(t *testing.T
 }
 
 func TestServiceResolveTracksByQueryEnforcesBatchLimit(t *testing.T) {
+	const limit = 2000
 	root := t.TempDir()
-	for index := 0; index < MaxTrackResolveSize+1; index++ {
+	for index := 0; index < limit+1; index++ {
 		name := filepath.Join(root, fmt.Sprintf("%04d.mp3", index))
 		if err := os.WriteFile(name, nil, 0o644); err != nil {
 			t.Fatal(err)
@@ -439,9 +440,9 @@ func TestServiceResolveTracksByQueryEnforcesBatchLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, total, err := service.ResolveTracksByQuery(TrackQuery{Sort: TrackSortTitle})
-	if err != ErrTrackSelectionLarge || total != MaxTrackResolveSize+1 {
-		t.Fatalf("resolve total=%d err=%v, want limit error at %d", total, err, MaxTrackResolveSize+1)
+	_, total, err := service.ResolveTracksByQuery(TrackQuery{Sort: TrackSortTitle}, limit)
+	if err != ErrTrackSelectionLarge || total != limit+1 {
+		t.Fatalf("resolve total=%d err=%v, want limit error at %d", total, err, limit+1)
 	}
 }
 

@@ -73,6 +73,7 @@ export interface SystemInfo {
   listen?: string;
 	historyRetention?: number;
 	writeHistory?: boolean;
+	batchTrackLimit?: number;
   storage?: SystemStorageInfo;
 }
 
@@ -428,8 +429,8 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
       return request<{storage: SystemStorageInfo}>('/api/v1/system/cache/clear', {method: 'POST'}).then((result) => result.storage);
     },
 
-    updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean}): Promise<{historyRetention: number; writeHistory: boolean}> {
-	  return request<{historyRetention: number; writeHistory: boolean}>('/api/v1/system/settings', {
+    updateSystemSettings(settings: {historyRetention?: number; writeHistory?: boolean; batchTrackLimit?: number}): Promise<{historyRetention: number; writeHistory: boolean; batchTrackLimit: number}> {
+	  return request<{historyRetention: number; writeHistory: boolean; batchTrackLimit: number}>('/api/v1/system/settings', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(settings),

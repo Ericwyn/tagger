@@ -7,15 +7,66 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/ericwyn/tagger/internal/domain"
 )
 
 const (
 	historyRetentionSetting = "history_retention"
 	writeHistorySetting     = "write_history"
+	batchTrackLimitSetting  = "batch_track_limit"
 	libraryRootSetting      = "library_root"
 	defaultHistoryRetention = 20
 	defaultWriteHistory     = true
 )
+
+func validateBatchTrackLimit(value int) error {
+	if value < domain.MinBatchTrackLimit || value > domain.MaxBatchTrackLimit {
+		return fmt.Errorf("批量曲目上限必须在 %d 到 %d 之间", domain.MinBatchTrackLimit, domain.MaxBatchTrackLimit)
+	}
+	return nil
+}
+
+func (s *Store) loadBatchTrackLimit(ctx context.Context) (int, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key=?`, batchTrackLimitSetting).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return domain.DefaultBatchTrackLimit, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("load batch track limit: %w", err)
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || validateBatchTrackLimit(value) != nil {
+		return domain.DefaultBatchTrackLimit, nil
+	}
+	return value, nil
+}
+
+// BatchTrackLimit returns the maximum number of tracks accepted by one batch
+// resolve, match, edit, or snapshot operation.
+func (s *Store) BatchTrackLimit(_ context.Context) int {
+	value := int(s.batchTrackLimit.Load())
+	if value == 0 {
+		return domain.DefaultBatchTrackLimit
+	}
+	return value
+}
+
+func (s *Store) SetBatchTrackLimit(ctx context.Context, value int) error {
+	if err := validateBatchTrackLimit(value); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO system_settings(key, value, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+		batchTrackLimitSetting, strconv.Itoa(value), formatTime(s.now().UTC()))
+	if err != nil {
+		return fmt.Errorf("save batch track limit: %w", err)
+	}
+	s.batchTrackLimit.Store(int64(value))
+	return nil
+}
 
 func (s *Store) LibraryRoot(ctx context.Context) (string, bool, error) {
 	var value string

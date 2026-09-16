@@ -98,7 +98,7 @@ function TreeLabel({children}: {children: string}) {
 
   const style = {
     '--tree-label-shift': `${shift}px`,
-    '--tree-label-duration': `${Math.max(4, Math.min(12, shift / 12))}s`,
+    '--tree-label-duration': `${Math.max(2.2, Math.min(7, shift / 26))}s`,
   } as CSSProperties;
   return (
     <span ref={wrapperRef} className={cn('tree-label', overflow && 'is-overflow')} title={children} style={style}>

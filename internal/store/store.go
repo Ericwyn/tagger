@@ -34,6 +34,7 @@ type Store struct {
 	now              func() time.Time
 	historyRetention atomic.Int64
 	writeHistory     atomic.Bool
+	batchTrackLimit  atomic.Int64
 	secretBox        *secretBox
 }
 
@@ -83,6 +84,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		return nil, err
 	}
 	store.writeHistory.Store(writeHistory)
+	batchTrackLimit, err := store.loadBatchTrackLimit(ctx)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	store.batchTrackLimit.Store(int64(batchTrackLimit))
 	return store, nil
 }
 

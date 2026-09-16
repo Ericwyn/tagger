@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listLibraries: vi.fn(),
   listTrackPage: vi.fn(),
   resolveTracks: vi.fn(),
+  getSystem: vi.fn(),
   switchLibrary: vi.fn(),
 }));
 
@@ -72,6 +73,7 @@ describe('LibraryPage active library boundary', () => {
     vi.clearAllMocks();
     localStorage.removeItem(libraryBrowseStateKey);
     clearLibraryViewSnapshots();
+    api.getSystem.mockResolvedValue({batchTrackLimit: 2000});
     api.listLibraries.mockResolvedValue([firstLibrary]);
     installTrackPageSource([firstTrack]);
     api.switchLibrary.mockResolvedValue({id: 'job-switch', kind: 'scan', state: 'succeeded', title: '切换', detail: '完成', processed: 1, total: 1, succeeded: 1, failed: 0, startedAt: '刚刚'});

@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	DefaultTrackPageSize = 100
-	MaxTrackPageSize     = 200
-	MaxTrackResolveSize  = 1000
+	DefaultTrackPageSize    = 100
+	MaxTrackPageSize        = 200
+	DefaultTrackResolveSize = domain.DefaultBatchTrackLimit
 )
 
 type TrackSort string

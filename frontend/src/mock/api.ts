@@ -1,5 +1,5 @@
 import {candidatesFor, jobs, library, providerConfigs, revisions, seedTracks} from '@/mock/data';
-import type {CandidateSearchQuery, DirectoryProbe, Job, LibrarySummary, LyricsSidecarWriteResult, MatchCandidate, ProviderConfig, ProviderTestResponse, Revision, SidecarInfo, Track, TrackPatch, TrackPage, TrackQuery, TrackSort} from '@/types';
+import {defaultBatchTrackLimit, type CandidateSearchQuery, type DirectoryProbe, type Job, type LibrarySummary, type LyricsSidecarWriteResult, type MatchCandidate, type ProviderConfig, type ProviderTestResponse, type Revision, type SidecarInfo, type Track, type TrackPatch, type TrackPage, type TrackQuery, type TrackSort} from '@/types';
 
 let tracks = structuredClone(seedTracks);
 
@@ -104,21 +104,21 @@ export async function listTrackPage(query: TrackQuery = {}, cursor = '', limit =
   };
 }
 
-export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery}): Promise<{tracks: Track[]; total: number}> {
+export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery}, limit = defaultBatchTrackLimit): Promise<{tracks: Track[]; total: number}> {
   await wait();
   const hasIDs = Boolean(request.ids?.length);
   const hasQuery = request.query != null;
   if (hasIDs === hasQuery) throw new Error('invalid_track_resolve');
   if (hasIDs) {
     const ids = [...new Set((request.ids ?? []).filter(Boolean))];
-    if (ids.length > 1000) throw new Error('当前结果超过 1000 首，请缩小搜索、目录或筛选范围后再操作');
+    if (ids.length > limit) throw new Error(`当前结果超过 ${limit} 首，请缩小搜索、目录或筛选范围后再操作`);
     const byID = new Map(tracks.map((track) => [track.id, track]));
     const resolved = ids.map((id) => byID.get(id));
     if (resolved.some((track) => !track)) throw new Error('track_not_found');
     return {tracks: structuredClone(resolved as Track[]), total: resolved.length};
   }
   const result = filteredMockTracks(request.query ?? {});
-  if (result.length > 1000) throw new Error('当前结果超过 1000 首，请缩小搜索、目录或筛选范围后再操作');
+  if (result.length > limit) throw new Error(`当前结果超过 ${limit} 首，请缩小搜索、目录或筛选范围后再操作`);
   return {tracks: structuredClone(result), total: result.length};
 }
 

@@ -76,9 +76,9 @@ describe('SettingsPage provider diagnostics', () => {
     api.purgeMissing.mockResolvedValue({removed: 2});
     api.rescanLibrary.mockResolvedValue({id: 'job-scan', state: 'waiting'});
     api.waitForJob.mockResolvedValue({id: 'job-scan', state: 'succeeded', succeeded: 24, total: 24, detail: '扫描完成'});
-    api.getSystem.mockResolvedValue({version: '1.0.2', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
+    api.getSystem.mockResolvedValue({version: '1.0.2', tag_engine: 'taglib', listen: '127.0.0.1:8090', writeHistory: true, batchTrackLimit: 2000, storage: {databaseBytes: 1024 * 1024, artworkCacheBytes: 2048, providerCacheEntries: 2, artworkReferenceEntries: 1, totalBytes: 1024 * 1024 + 2048}});
     api.clearRuntimeCache.mockResolvedValue({databaseBytes: 1024 * 1024, artworkCacheBytes: 0, providerCacheEntries: 0, artworkReferenceEntries: 0, totalBytes: 1024 * 1024});
-    api.updateSystemSettings.mockResolvedValue({historyRetention: 20, writeHistory: true});
+    api.updateSystemSettings.mockImplementation((settings: {historyRetention?: number; writeHistory?: boolean; batchTrackLimit?: number}) => Promise.resolve({historyRetention: settings.historyRetention ?? 20, writeHistory: settings.writeHistory ?? true, batchTrackLimit: settings.batchTrackLimit ?? 2000}));
     api.testProvider.mockResolvedValue({
       provider,
       result: {status: 'ok', count: 1, latencyMs: 42},
@@ -303,6 +303,12 @@ describe('SettingsPage provider diagnostics', () => {
     await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith({writeHistory: false}));
     expect(historySwitch).not.toBeChecked();
     expect(screen.getByText('运行数据占用')).toBeInTheDocument();
+    const batchLimit = screen.getByRole('spinbutton', {name: '单次批量曲目上限'});
+    expect(batchLimit).toHaveValue(2000);
+    await user.clear(batchLimit);
+    await user.type(batchLimit, '5000');
+    await user.click(screen.getByRole('button', {name: '保存'}));
+    await waitFor(() => expect(api.updateSystemSettings).toHaveBeenCalledWith({batchTrackLimit: 5000}));
     await user.click(screen.getByRole('button', {name: '清理运行缓存'}));
     await waitFor(() => expect(api.clearRuntimeCache).toHaveBeenCalledTimes(1));
   });

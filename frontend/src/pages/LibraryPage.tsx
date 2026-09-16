@@ -25,6 +25,7 @@ import {
   apiReadMode,
   applyCandidateArtwork,
   createBatchEditJob,
+	  getSystem,
 	  listLibraries,
 	  listTrackPage,
 	  reconcileLibrary,
@@ -38,7 +39,7 @@ import {
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import type {BatchArtworkInput, CandidateSearchQuery, LibrarySummary, MatchCandidate, RestoreDraftRequest, Track, TrackFormat, TrackPatch, TrackQuery, TrackSort, UpdateProvenance} from '@/types';
+import {defaultBatchTrackLimit, type BatchArtworkInput, type CandidateSearchQuery, type LibrarySummary, type MatchCandidate, type RestoreDraftRequest, type Track, type TrackFormat, type TrackPatch, type TrackQuery, type TrackSort, type UpdateProvenance} from '@/types';
 import type {StateSnapshot} from 'react-virtuoso';
 import {clearLibraryViewSnapshot, getLibraryViewSnapshot, setLibraryViewSnapshot} from '@/pages/libraryViewCache';
 
@@ -170,7 +171,9 @@ function mergeTrackPages(current: Track[], incoming: Track[]): Track[] {
 function trackOperationError(error: unknown, fallback: string): string {
   const code = error && typeof error === 'object' && 'code' in error ? String((error as {code?: unknown}).code ?? '') : '';
   if (code === 'track_selection_too_large' || (error instanceof Error && error.message === 'track_selection_too_large')) {
-    return '当前结果超过 1000 首，请缩小搜索、目录或筛选范围后再操作';
+    return error instanceof Error && error.message !== 'track_selection_too_large'
+      ? error.message
+      : '当前结果超过单次批量曲目上限，请缩小搜索、目录或筛选范围后再操作';
   }
   return error instanceof Error ? error.message : fallback;
 }
@@ -183,6 +186,7 @@ function tagWriteNotice(track: Track, success: string): string {
 export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false, restoreDraft, onRestoreDraftConsumed, onDiscardRestoreDraft}: LibraryPageProps) {
   const pageSize = 100;
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  const [batchTrackLimit, setBatchTrackLimit] = useState(defaultBatchTrackLimit);
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [pageTotal, setPageTotal] = useState(0);
@@ -351,7 +355,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 		  if (!refreshed.some((item) => item.id === track.id)) refreshed.push(track);
 		});
 	  }
-	  const pinnedIDs = [...new Set([...(viewRef.current.selectedIds ?? []), ...(viewRef.current.activeTrackId ? [viewRef.current.activeTrackId] : [])])].slice(0, 1000);
+	  const pinnedIDs = [...new Set([...(viewRef.current.selectedIds ?? []), ...(viewRef.current.activeTrackId ? [viewRef.current.activeTrackId] : [])])].slice(0, batchTrackLimit);
 	  let validPinned: Track[] = [];
 	  let pinnedResolved = false;
 	  if (pinnedIDs.length > 0) {
@@ -519,6 +523,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
   useEffect(() => {
     void loadData();
+    void getSystem().then((info) => {
+      if (typeof info.batchTrackLimit === 'number') setBatchTrackLimit(info.batchTrackLimit);
+    }).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -820,8 +827,8 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   };
 
   const openReviewSelection = async () => {
-    if (selectedIds.size > 1000) {
-      onNotice('当前选择超过 1000 首，请缩小范围后再批量补全');
+    if (selectedIds.size > batchTrackLimit) {
+	  onNotice(`当前选择超过 ${batchTrackLimit} 首，请缩小范围后再批量补全`);
       return;
     }
 	    try {
@@ -1032,7 +1039,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 
       <section className="library-workspace">
         <div className="workspace-titlebar">
-          <button className="mobile-panel-button" title="打开目录" aria-label="打开目录" onClick={() => { setMobileSidebar(true); setMobileInspector(false); }}>
+          <button className="mobile-panel-button mobile-sidebar-button" title="打开目录" aria-label="打开目录" onClick={() => { setMobileSidebar(true); setMobileInspector(false); }}>
             <FolderTree size={18} />
           </button>
           <div>
@@ -1141,7 +1148,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
               </label>
             </div>
           </div>
-          <button className="mobile-panel-button" title="打开曲目详情" aria-label="打开曲目详情" onClick={() => { setMobileInspector(true); setMobileSidebar(false); }}>
+          <button className="mobile-panel-button mobile-inspector-button" title="打开曲目详情" aria-label="打开曲目详情" onClick={() => { setMobileInspector(true); setMobileSidebar(false); }}>
             <PanelRightOpen size={18} />
           </button>
         </div>
