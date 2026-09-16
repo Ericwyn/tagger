@@ -127,7 +127,7 @@ function TreeLabel({children, path}: {children: string; path?: string}) {
 
   const pathLabel = path && path !== children ? path.split('/').join(' / ') : '';
   return (
-    <span className={cn('tree-label', overflow && 'is-overflow')} aria-label={pathLabel ? `${children}，路径 ${pathLabel}` : children}>
+    <span className={cn('tree-label', overflow && 'is-overflow')} aria-description={pathLabel ? `路径 ${pathLabel}` : undefined}>
       <span ref={wrapperRef} className="tree-label-clip">
         <span ref={contentRef} className="tree-label-text">{children}</span>
       </span>
