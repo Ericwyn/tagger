@@ -1,4 +1,5 @@
-import {useEffect, useRef, useState, type CSSProperties} from 'react';
+import {useEffect, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -74,11 +75,11 @@ function branchContainsSelection(branch: FolderBranch, folderId: string | null, 
   return branch.folderId === folderId || branch.path === folderPath || branch.children.some((child) => branchContainsSelection(child, folderId, folderPath));
 }
 
-function TreeLabel({children}: {children: string}) {
+function TreeLabel({children, path}: {children: string; path?: string}) {
   const wrapperRef = useRef<HTMLSpanElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
   const [overflow, setOverflow] = useState(false);
-  const [shift, setShift] = useState(0);
+  const [preview, setPreview] = useState<{left: number; top: number; below: boolean} | null>(null);
 
   useEffect(() => {
     const measure = () => {
@@ -86,7 +87,6 @@ function TreeLabel({children}: {children: string}) {
       const content = contentRef.current;
       if (!wrapper || !content) return;
       const nextShift = Math.max(0, content.scrollWidth - wrapper.clientWidth);
-      setShift(nextShift);
       setOverflow(nextShift > 1);
     };
     measure();
@@ -96,13 +96,48 @@ function TreeLabel({children}: {children: string}) {
     return () => observer.disconnect();
   }, [children]);
 
-  const style = {
-    '--tree-label-shift': `${shift}px`,
-    '--tree-label-duration': `${Math.max(2.2, Math.min(7, shift / 26))}s`,
-  } as CSSProperties;
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    const row = wrapper?.closest('button');
+    if (!overflow || !wrapper || !row) {
+      setPreview(null);
+      return;
+    }
+    const show = () => {
+      const rect = wrapper.getBoundingClientRect();
+      const below = rect.top < 92;
+      setPreview({left: Math.max(8, rect.left - 10), top: below ? rect.bottom + 8 : rect.top - 8, below});
+    };
+    const hide = () => setPreview(null);
+    row.addEventListener('mouseenter', show);
+    row.addEventListener('mouseleave', hide);
+    row.addEventListener('focus', show);
+    row.addEventListener('blur', hide);
+    window.addEventListener('resize', hide);
+    window.addEventListener('scroll', hide, true);
+    return () => {
+      row.removeEventListener('mouseenter', show);
+      row.removeEventListener('mouseleave', hide);
+      row.removeEventListener('focus', show);
+      row.removeEventListener('blur', hide);
+      window.removeEventListener('resize', hide);
+      window.removeEventListener('scroll', hide, true);
+    };
+  }, [overflow, children, path]);
+
+  const pathLabel = path && path !== children ? path.split('/').join(' / ') : '';
   return (
-    <span ref={wrapperRef} className={cn('tree-label', overflow && 'is-overflow')} title={children} style={style}>
-      <span ref={contentRef}>{children}</span>
+    <span className={cn('tree-label', overflow && 'is-overflow')} aria-label={pathLabel ? `${children}，路径 ${pathLabel}` : children}>
+      <span ref={wrapperRef} className="tree-label-clip">
+        <span ref={contentRef} className="tree-label-text">{children}</span>
+      </span>
+      {overflow && preview && typeof document !== 'undefined' && createPortal(
+        <span className={cn('tree-label-popover', preview.below && 'is-below')} aria-hidden="true" style={{left: preview.left, top: preview.top}}>
+          <strong>{children}</strong>
+          {pathLabel && <small>{pathLabel}</small>}
+        </span>,
+        document.body,
+      )}
     </span>
   );
 }
@@ -125,7 +160,7 @@ function FolderBranchRow({branch, activeFolder, activeFolderPath, onSelectFolder
           onClick={(event) => { if (hasChildren) { event.stopPropagation(); setExpanded((value) => !value); } }}
         >{hasChildren ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}</span>
         {expanded ? <FolderOpen size={15} /> : <Folder size={15} />}
-        <TreeLabel>{branch.name}</TreeLabel>
+        <TreeLabel path={branch.path}>{branch.name}</TreeLabel>
         <em>{branch.count}</em>
       </button>
       {expanded && hasChildren && <div className="tree-nested-children">{branch.children.map((child) => <FolderBranchRow key={child.key} branch={child} activeFolder={activeFolder} activeFolderPath={activeFolderPath} onSelectFolder={onSelectFolder} onSelectFolderPath={onSelectFolderPath} />)}</div>}
@@ -203,7 +238,7 @@ export function LibrarySidebar({
         >
           <span className="tree-disclosure is-empty" aria-hidden="true" />
           <FolderOpen size={16} />
-          <TreeLabel>{library.rootLabel}</TreeLabel>
+          <TreeLabel path={library.rootLabel}>{library.rootLabel}</TreeLabel>
           <em>{library.trackCount}</em>
         </button>
         <div className="tree-children">

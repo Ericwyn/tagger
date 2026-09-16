@@ -60,16 +60,21 @@ describe('LibrarySidebar library controls', () => {
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
-  it('keeps the full folder name available to hover and assistive users', () => {
+  it('keeps the full folder name available to hover and assistive users', async () => {
+    const user = userEvent.setup();
     const longName = '非常长的唱片目录名称-2026-现场录音-高解析度收藏版';
-    // The production tree derives labels from folder paths; this assertion
-    // verifies the label contract without depending on viewport width.
-    render(<LibrarySidebar {...{
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(80);
+    const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(260);
+    const {container} = render(<LibrarySidebar {...{
       library: {...library, folders: [{id: 'folder-long', name: longName, count: 1}]},
       libraries: [library, otherLibrary], activeFolder: null, activeFilter: 'all',
       sourceLabel: 'Mock', indexedSizeBytes: 1024, mobileOpen: false, onCloseMobile: vi.fn(),
       onSelectFolder: vi.fn(), onSwitchLibrary: vi.fn(), onRescan: vi.fn(), onOpenSettings: vi.fn(),
     }} />);
-    expect(screen.getByTitle(longName)).toHaveTextContent(longName);
+    await user.hover(screen.getByRole('button', {name: new RegExp(longName)}));
+    expect([...document.querySelectorAll('.tree-label-popover strong')].some((node) => node.textContent === longName)).toBe(true);
+    expect(container.querySelector(`.tree-label-clip[title="${longName}"]`)).not.toBeInTheDocument();
+    clientWidth.mockRestore();
+    scrollWidth.mockRestore();
   });
 });

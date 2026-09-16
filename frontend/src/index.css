@@ -882,11 +882,48 @@ button:disabled {
 
 /* Library page */
 .library-page {
+  position: relative;
   display: grid;
   grid-template-columns: var(--library-sidebar-width) minmax(480px, 1fr) 420px;
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+.library-sidebar-resizer {
+  position: absolute;
+  z-index: 65;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--library-sidebar-width) - 6px);
+  width: 12px;
+  cursor: col-resize;
+  outline: 0;
+  touch-action: none;
+}
+
+.library-sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  width: 2px;
+  background: var(--accent);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0.5);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.library-sidebar-resizer:hover::after,
+.library-sidebar-resizer:focus-visible::after,
+.library-page.is-resizing-sidebar .library-sidebar-resizer::after {
+  opacity: 0.82;
+  transform: scaleX(1);
+}
+
+.library-page.is-resizing-sidebar {
+  cursor: col-resize;
 }
 
 .library-sidebar,
@@ -1029,6 +1066,7 @@ button:disabled {
 }
 
 .tree-row {
+  position: relative;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
@@ -1051,30 +1089,76 @@ button:disabled {
 }
 
 .tree-row .tree-label {
+  position: relative;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: clip;
+  overflow: visible;
 }
 
-.tree-label > span {
-  display: inline-block;
-  min-width: 100%;
-  overflow: visible;
-  text-overflow: clip;
+.tree-label-clip {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tree-label.is-overflow:hover > span {
-  animation: tree-label-marquee var(--tree-label-duration) ease-in-out infinite alternate;
+.tree-label-text {
+  display: inline-block;
+  min-width: max-content;
 }
 
-@keyframes tree-label-marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(calc(-1 * var(--tree-label-shift))); }
+.tree-label-popover {
+  position: fixed;
+  z-index: 300;
+  display: grid;
+  width: max-content;
+  max-width: min(340px, calc(100vw - 16px));
+  gap: 3px;
+  padding: 8px 10px;
+  overflow: visible;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--paper-2);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  text-overflow: clip;
+  transform: translateY(calc(-100% + 4px));
+  animation: tree-tooltip-above-in 150ms ease 160ms forwards;
+  white-space: normal;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .tree-label.is-overflow:hover > span { animation: none; }
+.tree-label-popover.is-below {
+  transform: translateY(-4px);
+  animation-name: tree-tooltip-below-in;
+}
+
+.tree-label-popover strong,
+.tree-label-popover small {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.tree-label-popover strong {
+  font-family: var(--display);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.tree-label-popover small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+@keyframes tree-tooltip-above-in {
+  to { opacity: 1; transform: translateY(-100%); }
+}
+
+@keyframes tree-tooltip-below-in {
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .tree-row em {
@@ -1090,12 +1174,13 @@ button:disabled {
 }
 
 .tree-row.is-active {
-  background: var(--ink);
-  color: var(--paper);
+  background: color-mix(in srgb, var(--accent) 10%, var(--paper-2));
+  color: var(--ink);
+  box-shadow: inset 3px 0 var(--accent);
 }
 
 .tree-row.is-active em {
-  color: color-mix(in srgb, var(--paper) 62%, transparent);
+  color: var(--accent-2);
 }
 
 .tree-root {
@@ -7021,7 +7106,7 @@ button:disabled {
   }
 
   .library-page {
-    grid-template-columns: 230px minmax(0, 1fr);
+    grid-template-columns: var(--library-sidebar-width) minmax(0, 1fr);
   }
 
   .top-bar {
@@ -7150,6 +7235,10 @@ button:disabled {
     box-shadow: var(--shadow);
     transform: translateX(-102%);
     transition: transform 220ms ease;
+  }
+
+  .library-sidebar-resizer {
+    display: none;
   }
 
   .library-sidebar.is-mobile-open {

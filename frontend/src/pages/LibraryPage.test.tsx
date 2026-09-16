@@ -17,7 +17,7 @@ vi.mock('@/api', async () => ({
   ...api,
 }));
 
-import {LibraryPage, libraryBrowseStateKey, shouldPollLibrary} from '@/pages/LibraryPage';
+import {LibraryPage, libraryBrowseStateKey, librarySidebarWidthKey, shouldPollLibrary} from '@/pages/LibraryPage';
 import {clearLibraryViewSnapshots} from '@/pages/libraryViewCache';
 
 const firstLibrary: LibrarySummary = {
@@ -72,6 +72,7 @@ describe('LibraryPage active library boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem(libraryBrowseStateKey);
+    localStorage.removeItem(librarySidebarWidthKey);
     clearLibraryViewSnapshots();
     api.getSystem.mockResolvedValue({batchTrackLimit: 2000});
     api.listLibraries.mockResolvedValue([firstLibrary]);
@@ -192,6 +193,19 @@ describe('LibraryPage active library boundary', () => {
     expect(inspector).toHaveClass('is-mobile-open');
     await user.click(screen.getByRole('button', {name: '关闭详情'}));
     expect(inspector).not.toHaveClass('is-mobile-open');
+  });
+
+  it('adjusts, persists, and resets the library sidebar width from the separator', async () => {
+    const user = userEvent.setup();
+    render(<LibraryPage onOpenReview={vi.fn()} onOpenSettings={vi.fn()} onNotice={vi.fn()} playerPlaying={false} onPlayTrack={vi.fn()} onTogglePlayer={vi.fn()} />);
+    await screen.findByText('第一首');
+    const resizer = screen.getByRole('separator', {name: '调整目录栏宽度'});
+    resizer.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(resizer).toHaveAttribute('aria-valuenow', '270');
+    expect(localStorage.getItem(librarySidebarWidthKey)).toBe('270');
+    await user.dblClick(resizer);
+    expect(localStorage.getItem(librarySidebarWidthKey)).toBeNull();
   });
 
 	  it('shows draft files immediately while keeping metadata operations locked', async () => {

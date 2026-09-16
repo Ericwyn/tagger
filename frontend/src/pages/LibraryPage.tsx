@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent} from 'react';
 import {
   ArrowDownUp,
   Archive,
@@ -91,6 +91,19 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 export const libraryBrowseStateKey = 'tagger-library-browse-state-v1';
+export const librarySidebarWidthKey = 'tagger-library-sidebar-width-v1';
+const minLibrarySidebarWidth = 210;
+const maxLibrarySidebarWidth = 420;
+
+function readLibrarySidebarWidth(): number | undefined {
+  if (typeof localStorage === 'undefined') return undefined;
+  const value = Number(localStorage.getItem(librarySidebarWidthKey));
+  return Number.isFinite(value) && value >= minLibrarySidebarWidth && value <= maxLibrarySidebarWidth ? value : undefined;
+}
+
+function clampLibrarySidebarWidth(value: number): number {
+  return Math.round(Math.max(minLibrarySidebarWidth, Math.min(maxLibrarySidebarWidth, value)));
+}
 
 interface LibraryBrowseState {
   folderId?: string;
@@ -186,6 +199,8 @@ function tagWriteNotice(track: Track, success: string): string {
 export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrackId, playerPlaying, onPlayTrack, onTogglePlayer, showGeneratedCovers = false, restoreDraft, onRestoreDraftConsumed, onDiscardRestoreDraft}: LibraryPageProps) {
   const pageSize = 100;
   const [library, setLibrary] = useState<LibrarySummary | null>(null);
+  const [librarySidebarWidth, setLibrarySidebarWidth] = useState<number | undefined>(readLibrarySidebarWidth);
+  const [resizingLibrarySidebar, setResizingLibrarySidebar] = useState(false);
   const [batchTrackLimit, setBatchTrackLimit] = useState(defaultBatchTrackLimit);
   const [libraries, setLibraries] = useState<LibrarySummary[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -254,6 +269,71 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     sort: sortMode,
   }), [activeFilter, activeFolder, activeFolderPath, formatFilter, includeSubfolders, search, sortMode]);
   const queryKey = JSON.stringify(query);
+
+  useEffect(() => {
+    const applySidebarWidth = () => {
+      if (window.innerWidth > 1180 && librarySidebarWidth) {
+        document.documentElement.style.setProperty('--library-sidebar-width', `${librarySidebarWidth}px`);
+      } else {
+        document.documentElement.style.removeProperty('--library-sidebar-width');
+      }
+    };
+    applySidebarWidth();
+    window.addEventListener('resize', applySidebarWidth);
+    return () => {
+      window.removeEventListener('resize', applySidebarWidth);
+      document.documentElement.style.removeProperty('--library-sidebar-width');
+    };
+  }, [librarySidebarWidth]);
+
+  const persistLibrarySidebarWidth = (value: number) => {
+    const next = clampLibrarySidebarWidth(value);
+    setLibrarySidebarWidth(next);
+    localStorage.setItem(librarySidebarWidthKey, String(next));
+  };
+
+  const resetLibrarySidebarWidth = () => {
+    setLibrarySidebarWidth(undefined);
+    localStorage.removeItem(librarySidebarWidthKey);
+  };
+
+  const resizeLibrarySidebar = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (window.innerWidth <= 1180) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = document.querySelector<HTMLElement>('.library-sidebar')?.getBoundingClientRect().width || librarySidebarWidth || 260;
+    let nextWidth = clampLibrarySidebarWidth(startWidth);
+    let moved = false;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    setResizingLibrarySidebar(true);
+    const move = (moveEvent: PointerEvent) => {
+      moved = moved || Math.abs(moveEvent.clientX - startX) >= 1;
+      nextWidth = clampLibrarySidebarWidth(startWidth + moveEvent.clientX - startX);
+      setLibrarySidebarWidth(nextWidth);
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      setResizingLibrarySidebar(false);
+      if (moved) persistLibrarySidebarWidth(nextWidth);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+  };
+
+  const resizeLibrarySidebarWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const current = document.querySelector<HTMLElement>('.library-sidebar')?.getBoundingClientRect().width || librarySidebarWidth || 260;
+    persistLibrarySidebarWidth(current + (event.key === 'ArrowLeft' ? -10 : 10));
+  };
 
   viewRef.current = {
     library: library ?? undefined,
@@ -996,7 +1076,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       || filterLabels[activeFilter];
 
   return (
-    <div className="library-page">
+    <div className={cn('library-page', resizingLibrarySidebar && 'is-resizing-sidebar')}>
       <LibrarySidebar
         library={library}
         libraries={libraries}
@@ -1037,6 +1117,21 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         }}
       />
 
+      <div
+        className="library-sidebar-resizer"
+        role="separator"
+        aria-label="调整目录栏宽度"
+        aria-orientation="vertical"
+        aria-valuemin={minLibrarySidebarWidth}
+        aria-valuemax={maxLibrarySidebarWidth}
+        aria-valuenow={librarySidebarWidth ?? 260}
+        tabIndex={0}
+        title="拖动调整目录栏宽度；双击恢复默认"
+        onPointerDown={resizeLibrarySidebar}
+        onKeyDown={resizeLibrarySidebarWithKeyboard}
+        onDoubleClick={resetLibrarySidebarWidth}
+      />
+
       <section className="library-workspace">
         <div className="workspace-titlebar">
           <button className="mobile-panel-button mobile-sidebar-button" title="打开目录" aria-label="打开目录" onClick={() => { setMobileSidebar(true); setMobileInspector(false); }}>
@@ -1046,9 +1141,9 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
             <div className="breadcrumb">
               <span>{library.name.toLocaleUpperCase()}</span>
               <i>/</i>
-              <strong>{currentLabel}</strong>
+              <strong title={currentLabel}>{currentLabel}</strong>
             </div>
-            <h1>{currentLabel}</h1>
+            <h1 title={currentLabel}>{currentLabel}</h1>
             <p>{pageTotal} 首匹配曲目 · 已加载 {visibleTracks.length} 首</p>
           </div>
           <div className="workspace-actions">
