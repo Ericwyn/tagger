@@ -37,12 +37,14 @@ type Client struct {
 	gate     *providers.Gate
 }
 
+const defaultSearchEndpoint = "https://songsearch.kugou.com/song_search_v2"
+
 func New(config Config) *Client {
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 10 * time.Second}
 	}
 	if config.SearchEndpoint == "" {
-		config.SearchEndpoint = "https://mobilecdn.kugou.com/api/v3/search/song"
+		config.SearchEndpoint = defaultSearchEndpoint
 	}
 	if config.LyricsSearchURL == "" {
 		config.LyricsSearchURL = "https://krcs.kugou.com/search"
@@ -68,7 +70,7 @@ func New(config Config) *Client {
 func (c *Client) ResetConfig() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.config.SearchEndpoint = "https://mobilecdn.kugou.com/api/v3/search/song"
+	c.config.SearchEndpoint = defaultSearchEndpoint
 	c.config.LyricsSearchURL = "https://krcs.kugou.com/search"
 	c.config.LyricsDownloadURL = "https://lyrics.kugou.com/download"
 	c.config.ArtworkEndpoint = "https://wwwapi.kugou.com/yy/index.php"
@@ -115,7 +117,7 @@ func (c *Client) Configure(values map[string]string) error {
 			if err != nil {
 				return err
 			}
-			c.config.SearchEndpoint = endpoint
+			c.config.SearchEndpoint = currentSearchEndpoint(endpoint)
 		case "lyricsSearchUrl":
 			endpoint, err := providers.ValidateHTTPURL(value, "lyricsSearchUrl")
 			if err != nil {
@@ -201,14 +203,22 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	var searchErr error
 	for index, keyword := range keywords {
 		values := url.Values{
-			"format":   {"json"},
-			"keyword":  {keyword},
-			"page":     {"1"},
-			"pagesize": {strconv.Itoa(max(limit*4, 20))},
-			"showtype": {"1"},
+			"format":           {"json"},
+			"keyword":          {keyword},
+			"page":             {"1"},
+			"pagesize":         {strconv.Itoa(max(limit*4, 20))},
+			"showtype":         {"1"},
+			"userid":           {"0"},
+			"clientver":        {"20549"},
+			"platform":         {"WebFilter"},
+			"tag":              {"em"},
+			"filter":           {"10"},
+			"iscorrection":     {"1"},
+			"privilege_filter": {"0"},
 		}
 		var response searchResponse
-		if err := providers.GetJSONWithHeaders(ctx, c.http, c.config.SearchEndpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
+		endpoint := currentSearchEndpoint(c.config.SearchEndpoint)
+		if err := providers.GetJSONWithHeaders(ctx, c.http, endpoint+"?"+values.Encode(), c.config.UserAgent, kugouHeaders(c.config.Auth, c.config.Cookie), &response); err != nil {
 			searchErr = err
 			if index == 0 {
 				return nil, err
@@ -223,6 +233,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			continue
 		}
 		items = response.Data.Info
+		if len(items) == 0 {
+			items = response.Data.Lists
+		}
 		if len(items) > 0 {
 			break
 		}
@@ -240,7 +253,7 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	result := make([]providers.Candidate, 0, min(limit, len(items)))
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
-		hash := strings.TrimSpace(item.Hash)
+		hash := item.hash()
 		if hash == "" {
 			continue
 		}
@@ -252,8 +265,10 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		lyrics, _ := c.fetchLyrics(ctx, hash)
 		candidate.SyncedLyrics = lyrics
 		candidate.Lyrics = lyrics
-		if artwork, _ := c.fetchArtwork(ctx, hash, item.AlbumID.String()); artwork != "" {
-			candidate.ArtworkURL = artwork
+		if candidate.ArtworkURL == "" {
+			if artwork, _ := c.fetchArtwork(ctx, hash, item.albumID()); artwork != "" {
+				candidate.ArtworkURL = artwork
+			}
 		}
 		result = append(result, candidate)
 		if len(result) >= limit {
@@ -332,7 +347,7 @@ func (c *Client) fetchArtwork(ctx context.Context, hash, albumID string) (string
 }
 
 func mapCandidate(item songItem) providers.Candidate {
-	artists := splitArtists(item.SingerName)
+	artists := splitArtists(stripSearchHighlight(item.SingerName))
 	duration := item.Duration
 	if duration.String() == "" {
 		duration = item.TimeLength
@@ -340,11 +355,33 @@ func mapCandidate(item songItem) providers.Candidate {
 	if duration.String() == "" {
 		duration = item.SongDuration
 	}
-	return providers.Candidate{
-		ProviderID: "kugou", ExternalID: strings.TrimSpace(item.Hash), Title: strings.TrimSpace(item.SongName),
-		Artists: artists, Album: strings.TrimSpace(item.AlbumName), AlbumArtists: artists,
-		DurationSeconds: parseDuration(duration), TrackNumber: item.TrackNumber,
+	artworkURL := strings.ReplaceAll(strings.TrimSpace(item.Image), "{size}", "500")
+	artworkURL = strings.TrimPrefix(artworkURL, "http://")
+	if artworkURL != "" && !strings.HasPrefix(artworkURL, "https://") {
+		artworkURL = "https://" + artworkURL
 	}
+	return providers.Candidate{
+		ProviderID: "kugou", ExternalID: item.hash(), Title: stripSearchHighlight(strings.TrimSpace(item.SongName)),
+		Artists: artists, Album: stripSearchHighlight(strings.TrimSpace(item.albumName())), AlbumArtists: artists,
+		DurationSeconds: parseDuration(duration), TrackNumber: item.TrackNumber,
+		ArtworkURL: artworkURL,
+	}
+}
+
+func currentSearchEndpoint(configured string) string {
+	parsed, err := url.Parse(strings.TrimSpace(configured))
+	if err != nil {
+		return configured
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if (host == "mobilecdn.kugou.com" || host == "msearchcdn.kugou.com") && parsed.Path == "/api/v3/search/song" {
+		return defaultSearchEndpoint
+	}
+	return configured
+}
+
+func stripSearchHighlight(value string) string {
+	return strings.TrimSpace(strings.NewReplacer("<em>", "", "</em>", "", "<EM>", "", "</EM>", "").Replace(value))
 }
 
 func searchKeywords(query providers.Query) []string {
@@ -414,8 +451,8 @@ func splitArtists(value string) []string {
 }
 
 func songScore(query providers.Query, item songItem) float64 {
-	titleScore := similarity(normalize(query.Title), normalize(item.SongName))
-	artistScore := similarity(normalize(strings.Join(query.Artists, " ")), normalize(item.SingerName))
+	titleScore := similarity(normalize(query.Title), normalize(stripSearchHighlight(item.SongName)))
+	artistScore := similarity(normalize(strings.Join(query.Artists, " ")), normalize(stripSearchHighlight(item.SingerName)))
 	score := titleScore*0.7 + artistScore*0.3
 	if query.DurationSeconds > 0 {
 		candidateDuration := parseDuration(item.Duration)
@@ -581,15 +618,40 @@ func (value *stringOrNumber) UnmarshalJSON(data []byte) error {
 func (value stringOrNumber) String() string { return string(value) }
 
 type songItem struct {
-	Hash         string         `json:"hash"`
-	SongName     string         `json:"songname"`
-	SingerName   string         `json:"singername"`
-	AlbumID      stringOrNumber `json:"album_id"`
-	AlbumName    string         `json:"album_name"`
-	Duration     stringOrNumber `json:"duration"`
-	TimeLength   stringOrNumber `json:"timelength"`
-	SongDuration stringOrNumber `json:"song_duration"`
-	TrackNumber  int            `json:"tracknum"`
+	Hash            string         `json:"hash"`
+	FileHash        string         `json:"FileHash"`
+	SongName        string         `json:"songname"`
+	SingerName      string         `json:"singername"`
+	AlbumID         stringOrNumber `json:"album_id"`
+	SearchAlbumID   stringOrNumber `json:"AlbumID"`
+	AlbumName       string         `json:"album_name"`
+	SearchAlbumName string         `json:"AlbumName"`
+	Duration        stringOrNumber `json:"duration"`
+	TimeLength      stringOrNumber `json:"timelength"`
+	SongDuration    stringOrNumber `json:"song_duration"`
+	TrackNumber     int            `json:"tracknum"`
+	Image           string         `json:"Image"`
+}
+
+func (item songItem) hash() string {
+	if value := strings.TrimSpace(item.Hash); value != "" {
+		return value
+	}
+	return strings.TrimSpace(item.FileHash)
+}
+
+func (item songItem) albumID() string {
+	if value := strings.TrimSpace(item.AlbumID.String()); value != "" {
+		return value
+	}
+	return strings.TrimSpace(item.SearchAlbumID.String())
+}
+
+func (item songItem) albumName() string {
+	if value := strings.TrimSpace(item.AlbumName); value != "" {
+		return value
+	}
+	return strings.TrimSpace(item.SearchAlbumName)
 }
 
 type searchResponse struct {
@@ -597,7 +659,8 @@ type searchResponse struct {
 	ErrorCode stringOrNumber `json:"error_code"`
 	Message   string         `json:"error"`
 	Data      struct {
-		Info []songItem `json:"info"`
+		Info  []songItem `json:"info"`
+		Lists []songItem `json:"lists"`
 	} `json:"data"`
 }
 

@@ -35,6 +35,11 @@ type Client struct {
 	gate     *providers.Gate
 }
 
+const (
+	defaultLyricsEndpoint = "https://www.kuwo.cn/openapi/v1/www/lyric/getlyric"
+	legacyLyricsEndpoint  = "https://www.kuwo.cn/newh5/singles/songinfoandlrc"
+)
+
 func New(config Config) *Client {
 	if config.Client == nil {
 		config.Client = &http.Client{Timeout: 10 * time.Second}
@@ -43,7 +48,7 @@ func New(config Config) *Client {
 		config.Endpoint = "https://search.kuwo.cn/r.s"
 	}
 	if config.LyricsEndpoint == "" {
-		config.LyricsEndpoint = "https://www.kuwo.cn/newh5/singles/songinfoandlrc"
+		config.LyricsEndpoint = defaultLyricsEndpoint
 	}
 	if config.LyricsRIDEndpoint == "" {
 		config.LyricsRIDEndpoint = "https://player.kuwo.cn/webmusic/st/getNewMuiseByRid"
@@ -67,7 +72,7 @@ func (c *Client) ResetConfig() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config.Endpoint = "https://search.kuwo.cn/r.s"
-	c.config.LyricsEndpoint = "https://www.kuwo.cn/newh5/singles/songinfoandlrc"
+	c.config.LyricsEndpoint = defaultLyricsEndpoint
 	c.config.LyricsRIDEndpoint = "https://player.kuwo.cn/webmusic/st/getNewMuiseByRid"
 	c.config.LyricsFileEndpoint = "https://newlyric.kuwo.cn/newlyric.lrc"
 	c.config.UserAgent = providers.DefaultUserAgent("kuwo")
@@ -112,6 +117,9 @@ func (c *Client) Configure(values map[string]string) error {
 			endpoint, err := providers.ValidateHTTPURL(value, "lyricsEndpoint")
 			if err != nil {
 				return err
+			}
+			if strings.TrimRight(endpoint, "/") == legacyLyricsEndpoint {
+				endpoint = defaultLyricsEndpoint
 			}
 			c.config.LyricsEndpoint = endpoint
 		case "lyricsRidEndpoint":
@@ -249,7 +257,11 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		if id == "" {
 			continue
 		}
-		candidate := providers.Candidate{ProviderID: "kuwo", ExternalID: id, Title: item.SongName, Artists: splitArtists(item.Artist), Album: item.Album, AlbumArtists: splitArtists(item.AlbumArtist), TrackNumber: item.TrackNumber, DurationSeconds: parseDuration(item.Duration), ArtworkURL: normalizeArtworkURL(item.AlbumPicture, item.WebAlbumPicture, item.WebAlbumPictureShort, item.AlbumPictureShort, item.Picture)}
+		duration := parseDuration(item.Duration)
+		if duration == 0 {
+			duration, _ = strconv.ParseInt(strings.TrimSpace(item.DurationSeconds), 10, 64)
+		}
+		candidate := providers.Candidate{ProviderID: "kuwo", ExternalID: id, Title: item.SongName, Artists: splitArtists(item.Artist), Album: item.Album, AlbumArtists: splitArtists(item.AlbumArtist), TrackNumber: item.TrackNumber, DurationSeconds: duration, ArtworkURL: normalizeArtworkURL(item.AlbumPicture, item.WebAlbumPicture, item.WebAlbumPictureShort, item.AlbumPictureShort, item.Picture)}
 		if lyrics, lyricsErr := c.fetchLyrics(ctx, id); lyricsErr == nil {
 			candidate.Lyrics = lyrics
 			candidate.SyncedLyrics = lyrics
@@ -275,6 +287,7 @@ type kuwoItem struct {
 	Album                string `json:"ALBUM"`
 	AlbumArtist          string `json:"ALBUMARTIST"`
 	Duration             string `json:"SONG_DURATION"`
+	DurationSeconds      string `json:"DURATION"`
 	TrackNumber          int    `json:"TRACKNUM"`
 	AlbumPicture         string `json:"ALBUMPIC"`
 	AlbumPictureShort    string `json:"ALBUMPIC_SHORT"`
@@ -305,24 +318,19 @@ type lyricPayload struct {
 func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 	numericID := strings.TrimPrefix(strings.TrimSpace(id), "MUSIC_")
 	values := url.Values{"musicId": {numericID}}
-	body, primaryErr := c.getBody(ctx, c.config.LyricsEndpoint+"?"+values.Encode(), map[string]string{"Accept": "application/json"})
-	if primaryErr == nil {
-		var payload lyricPayload
-		if err := json.Unmarshal(body, &payload); err == nil {
-			if businessErr := kuwoBusinessError(payload.Code, payload.Status, payload.Message); businessErr != nil {
-				primaryErr = businessErr
-			} else {
-				lyrics := firstLyrics(
-					payload.Data.Lyrics,
-					payload.Data.LRC.Lyric,
-					payload.Data.LRC.Content,
-					renderLyricLines(payload.Data.LRCList),
-					renderLyricLines(payload.LRCList),
-				)
-				if providers.HasLyrics(lyrics) {
-					return lyrics, nil
-				}
-			}
+	lyrics, primaryErr := c.fetchJSONLyrics(ctx, c.config.LyricsEndpoint, values)
+	if providers.HasLyrics(lyrics) {
+		return lyrics, nil
+	}
+	// Existing installations may have persisted the retired newh5 endpoint.
+	// Retry the current public OpenAPI before falling back to the older RID flow.
+	if strings.TrimRight(c.config.LyricsEndpoint, "/") != defaultLyricsEndpoint {
+		fallbackLyrics, fallbackErr := c.fetchJSONLyrics(ctx, defaultLyricsEndpoint, values)
+		if providers.HasLyrics(fallbackLyrics) {
+			return fallbackLyrics, nil
+		}
+		if primaryErr == nil {
+			primaryErr = fallbackErr
 		}
 	}
 
@@ -343,6 +351,27 @@ func (c *Client) fetchLyrics(ctx context.Context, id string) (string, error) {
 		return "", primaryErr
 	}
 	return "", ridErr
+}
+
+func (c *Client) fetchJSONLyrics(ctx context.Context, endpoint string, values url.Values) (string, error) {
+	body, err := c.getBody(ctx, strings.TrimRight(endpoint, "?")+"?"+values.Encode(), map[string]string{"Accept": "application/json"})
+	if err != nil {
+		return "", err
+	}
+	var payload lyricPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", err
+	}
+	if err := kuwoBusinessError(payload.Code, payload.Status, payload.Message); err != nil {
+		return "", err
+	}
+	return firstLyrics(
+		payload.Data.Lyrics,
+		payload.Data.LRC.Lyric,
+		payload.Data.LRC.Content,
+		renderLyricLines(payload.Data.LRCList),
+		renderLyricLines(payload.LRCList),
+	), nil
 }
 
 func (c *Client) getBody(ctx context.Context, endpoint string, headers map[string]string) ([]byte, error) {

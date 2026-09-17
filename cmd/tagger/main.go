@@ -53,6 +53,43 @@ func main() {
 		os.Exit(1)
 	}
 	defer dataStore.Close()
+	providerRegistry := providers.NewRegistry(
+		musicbrainz.New(musicbrainz.Config{}),
+		lrclib.New(lrclib.Config{}),
+		itunes.New(itunes.Config{}),
+		netease.New(netease.Config{}),
+		kugou.New(kugou.Config{}),
+		kuwo.New(kuwo.Config{}),
+		lrcapi.New(lrcapi.Config{BaseURL: os.Getenv("TAGGER_LRCAPI_URL"), CoverURL: os.Getenv("TAGGER_LRCAPI_COVER_URL"), Auth: os.Getenv("TAGGER_LRCAPI_AUTH")}),
+	)
+	if err := providerRegistry.SetPersistence(ctx, dataStore); err != nil {
+		cancel()
+		logger.Error("load provider persistence", "error", err)
+		os.Exit(1)
+	}
+	if cfg.TestProviders {
+		report, diagnosticErr := executeProviderDiagnostics(ctx, providerRegistry, providers.Query{
+			Title: cfg.TestTitle, Artists: parseProviderTestArtists(cfg.TestArtists), Album: cfg.TestAlbum, DurationSeconds: cfg.TestDuration,
+		}, providerDiagnosticOptions{Limit: cfg.TestLimit, ProbeArtwork: cfg.TestArtwork}, artworkDownloader(providerRegistry.DownloadArtwork))
+		var writeErr error
+		if diagnosticErr == nil {
+			writeErr = writeProviderDiagnostics(os.Stdout, report, cfg.TestJSON)
+		}
+		cancel()
+		if diagnosticErr != nil || writeErr != nil {
+			if diagnosticErr == nil {
+				diagnosticErr = writeErr
+			}
+			logger.Error("provider diagnostics failed", "error", diagnosticErr)
+			_ = dataStore.Close()
+			os.Exit(1)
+		}
+		if report.Summary.Failed > 0 {
+			_ = dataStore.Close()
+			os.Exit(1)
+		}
+		return
+	}
 	musicDir := ""
 	usingPersistedLibrary := false
 	if persisted, found, rootErr := dataStore.LibraryRoot(ctx); rootErr != nil {
@@ -148,19 +185,6 @@ func main() {
 	tagWriter, err := filewrite.New(musicScanner.Root(), engine)
 	if err != nil {
 		logger.Error("initialize safe tag writer", "error", err)
-		os.Exit(1)
-	}
-	providerRegistry := providers.NewRegistry(
-		musicbrainz.New(musicbrainz.Config{}),
-		lrclib.New(lrclib.Config{}),
-		itunes.New(itunes.Config{}),
-		netease.New(netease.Config{}),
-		kugou.New(kugou.Config{}),
-		kuwo.New(kuwo.Config{}),
-		lrcapi.New(lrcapi.Config{BaseURL: os.Getenv("TAGGER_LRCAPI_URL"), CoverURL: os.Getenv("TAGGER_LRCAPI_COVER_URL"), Auth: os.Getenv("TAGGER_LRCAPI_AUTH")}),
-	)
-	if err := providerRegistry.SetPersistence(context.Background(), dataStore); err != nil {
-		logger.Error("load provider persistence", "error", err)
 		os.Exit(1)
 	}
 	var artworkCache *artwork.Cache

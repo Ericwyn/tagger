@@ -280,7 +280,7 @@ export const providerConfigs: ProviderConfig[] = [
     quotaLabel: '需要 Developer Token',
     config: [
       {key: 'baseUrl', label: 'Search API URL', type: 'url', value: 'https://itunes.apple.com/search'},
-      {key: 'country', label: '地区代码', type: 'text', value: 'CN'},
+      {key: 'country', label: '地区代码', type: 'text', value: 'HK'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
       {...providerProxyConfig},
     ],
@@ -320,7 +320,7 @@ export const providerConfigs: ProviderConfig[] = [
     quotaLabel: '未启用',
     config: [
       {key: 'endpoint', label: '搜索 API URL', type: 'url', value: 'https://search.kuwo.cn/r.s'},
-      {key: 'lyricsEndpoint', label: '歌词 JSON URL', type: 'url', value: 'https://www.kuwo.cn/newh5/singles/songinfoandlrc'},
+      {key: 'lyricsEndpoint', label: '歌词 JSON URL', type: 'url', value: 'https://www.kuwo.cn/openapi/v1/www/lyric/getlyric'},
       {key: 'lyricsRidEndpoint', label: '歌词 RID URL', type: 'url', value: 'https://player.kuwo.cn/webmusic/st/getNewMuiseByRid'},
       {key: 'lyricsFileEndpoint', label: '歌词文件 URL', type: 'url', value: 'https://newlyric.kuwo.cn/newlyric.lrc'},
       {key: 'userAgent', label: 'User-Agent', type: 'text', value: browserUserAgent},
@@ -342,7 +342,7 @@ export const providerConfigs: ProviderConfig[] = [
     accent: '#14a86b',
     quotaLabel: '实验性 · 默认关闭',
     config: [
-      {key: 'searchEndpoint', label: '搜索 API URL', type: 'url', value: 'https://mobilecdn.kugou.com/api/v3/search/song'},
+      {key: 'searchEndpoint', label: '搜索 API URL', type: 'url', value: 'https://songsearch.kugou.com/song_search_v2'},
       {key: 'lyricsSearchUrl', label: '歌词搜索 URL', type: 'url', value: 'https://krcs.kugou.com/search'},
       {key: 'lyricsDownloadUrl', label: '歌词下载 URL', type: 'url', value: 'https://lyrics.kugou.com/download'},
       {key: 'artworkEndpoint', label: '封面 API URL', type: 'url', value: 'https://wwwapi.kugou.com/yy/index.php'},

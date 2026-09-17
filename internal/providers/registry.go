@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -175,12 +176,24 @@ func (r *Registry) ResetConfig(ctx context.Context, id string) (Descriptor, erro
 
 func migrateProviderConfiguration(id string, values map[string]string) (map[string]string, bool) {
 	result := cloneStringMap(values)
-	userAgent, ok := result["userAgent"]
-	if !ok || !IsLegacyTaggerUserAgent(userAgent) {
-		return result, false
+	migrated := false
+	if userAgent, ok := result["userAgent"]; ok && IsLegacyTaggerUserAgent(userAgent) {
+		result["userAgent"] = DefaultUserAgent(id)
+		migrated = true
 	}
-	result["userAgent"] = DefaultUserAgent(id)
-	return result, true
+	switch id {
+	case "kugou":
+		if endpoint := strings.TrimRight(result["searchEndpoint"], "/"); endpoint == "https://mobilecdn.kugou.com/api/v3/search/song" || endpoint == "https://msearchcdn.kugou.com/api/v3/search/song" {
+			result["searchEndpoint"] = "https://songsearch.kugou.com/song_search_v2"
+			migrated = true
+		}
+	case "kuwo":
+		if strings.TrimRight(result["lyricsEndpoint"], "/") == "https://www.kuwo.cn/newh5/singles/songinfoandlrc" {
+			result["lyricsEndpoint"] = "https://www.kuwo.cn/openapi/v1/www/lyric/getlyric"
+			migrated = true
+		}
+	}
+	return result, migrated
 }
 
 func (r *Registry) SetEnabled(ctx context.Context, id string, enabled bool) (Descriptor, error) {
@@ -384,6 +397,10 @@ type SearchOptions struct {
 	// validate an earlier transport configuration. Successful results still
 	// refresh the normal cache entry.
 	BypassCache bool
+	// IncludeDisabled lets diagnostics exercise configured strategies without
+	// mutating the user's enabled-provider selection. Strategies whose base
+	// descriptor is unavailable remain excluded.
+	IncludeDisabled bool
 }
 
 func (r *Registry) Search(ctx context.Context, query Query, providerIDs []string, limit int) (SearchResult, error) {
@@ -404,7 +421,9 @@ func (r *Registry) SearchWithOptions(ctx context.Context, query Query, providerI
 	if len(providerIDs) == 0 {
 		for _, id := range r.order {
 			strategy := r.strategies[id]
-			if descriptor := r.descriptor(id); descriptor.Enabled && descriptor.Health != HealthDisabled {
+			descriptor := r.descriptor(id)
+			available := strategy.Descriptor().Health != HealthDisabled
+			if available && (descriptor.Enabled || options.IncludeDisabled) {
 				selected = append(selected, strategy)
 			}
 		}
@@ -414,7 +433,7 @@ func (r *Registry) SearchWithOptions(ctx context.Context, query Query, providerI
 			if !ok {
 				return SearchResult{}, fmt.Errorf("%w: %s", ErrProviderNotFound, id)
 			}
-			if r.descriptor(id).Enabled {
+			if r.descriptor(id).Enabled || (options.IncludeDisabled && strategy.Descriptor().Health != HealthDisabled) {
 				selected = append(selected, strategy)
 			}
 		}

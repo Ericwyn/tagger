@@ -33,6 +33,39 @@ func TestSearchMapsAppleCatalogResult(t *testing.T) {
 	}
 }
 
+func TestSearchFallsBackFromMainlandStorefrontToHongKong(t *testing.T) {
+	countries := make([]string, 0, 2)
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		country := request.URL.Query().Get("country")
+		countries = append(countries, country)
+		body := `{"resultCount":0,"results":[]}`
+		if country == "HK" {
+			body = `{"resultCount":1,"results":[{"trackId":1114698235,"trackName":"最佳歌手","artistName":"許嵩","collectionName":"最佳歌手 - Single","artworkUrl100":"https://is1-ssl.mzstatic.com/100x100bb.jpg"}]}`
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	client := New(Config{BaseURL: "https://itunes.test/search", Country: "CN", Client: httpClient, RateInterval: -1})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "最佳歌手", Artists: []string{"许嵩"}}, 1)
+	if err != nil || len(candidates) != 1 || candidates[0].ExternalID != "1114698235" {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+	if len(countries) != 2 || countries[0] != "CN" || countries[1] != "HK" {
+		t.Fatalf("countries = %#v", countries)
+	}
+}
+
+func TestDefaultStorefrontIsHongKong(t *testing.T) {
+	client := New(Config{Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Query().Get("country") != "HK" {
+			t.Fatalf("country = %q", request.URL.Query().Get("country"))
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
+	})}, RateInterval: -1})
+	if _, err := client.Search(context.Background(), providers.Query{Title: "Song"}, 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

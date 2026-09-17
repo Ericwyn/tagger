@@ -173,6 +173,28 @@ make build
 
 然后在设置页探测并添加音乐库。配置过的活动曲库会保存在 SQLite 中，后续启动时自动恢复；如果目录已经失效，Tagger 会保留旧索引并明确显示“未配置活动曲库”。
 
+### 数据源命令行诊断
+
+使用同一个数据目录可以加载当前保存的端点、代理和鉴权配置，对全部内置数据源执行实时查询并退出；诊断模式不会扫描曲库或启动 HTTP 服务。它会绕过搜索缓存，默认检查每个候选的歌词并实际下载、解码和验证封面。即使某个实验性来源在设置中暂时关闭，也会被纳入测试，但不会改变其启用状态。
+
+```bash
+./dist/tagger --data-dir ./data --test-providers
+```
+
+也可以指定测试歌曲、每个来源保留的候选数，或输出适合脚本处理的 JSON：
+
+```bash
+./dist/tagger --data-dir ./data --test-providers \
+  --test-title "Easy On Me" \
+  --test-artists "Adele" \
+  --test-album "30" \
+  --test-duration 225 \
+  --test-limit 3 \
+  --test-json
+```
+
+不想下载封面时使用 `--test-artwork=false`。搜索或封面探测失败时进程退出码为 `1`；没有候选、候选缺少来源声明支持的歌词或封面只记为 warning，退出码仍为 `0`。
+
 ### 使用 Docker
 
 正式发布的多架构镜像位于 `ghcr.io/ericwyn/tagger`，支持 `linux/amd64` 和 `linux/arm64`。音乐目录和运行数据需要分别挂载：

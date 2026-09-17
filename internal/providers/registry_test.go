@@ -545,6 +545,18 @@ func TestRegistryRejectsEnablingUnavailableExperimentalProvider(t *testing.T) {
 	}
 }
 
+func TestRegistryDiagnosticsCanIncludeDisabledProviders(t *testing.T) {
+	registry := NewRegistry(fakeStrategy{descriptor: Descriptor{ID: "disabled", Name: "Disabled", Enabled: false, Health: HealthDegraded}, candidates: []Candidate{{ExternalID: "1", Title: "Song"}}})
+	normal, err := registry.Search(context.Background(), Query{Title: "Song"}, nil, 1)
+	if err != nil || len(normal.Providers) != 0 {
+		t.Fatalf("normal search = %#v err=%v", normal, err)
+	}
+	diagnostic, err := registry.SearchWithOptions(context.Background(), Query{Title: "Song"}, nil, 1, SearchOptions{BypassCache: true, IncludeDisabled: true})
+	if err != nil || diagnostic.Providers["disabled"].Count != 1 || len(diagnostic.Candidates) != 1 {
+		t.Fatalf("diagnostic search = %#v err=%v", diagnostic, err)
+	}
+}
+
 func TestRegistryAppliesAndMasksProviderConfiguration(t *testing.T) {
 	strategy := &configurableStrategy{config: map[string]string{"baseUrl": "https://initial.test", "auth": "secret"}}
 	registry := NewRegistry(strategy)
@@ -614,6 +626,24 @@ func TestRegistryMigratesLegacyBuiltInUserAgent(t *testing.T) {
 	configurations, err := repository.LoadProviderConfigurations(context.Background())
 	if err != nil || configurations["lrclib"]["userAgent"] != BrowserUserAgent {
 		t.Fatalf("migrated persisted configuration = %#v err=%v", configurations, err)
+	}
+}
+
+func TestMigrateProviderConfigurationUpdatesRetiredEndpoints(t *testing.T) {
+	tests := []struct {
+		provider string
+		key      string
+		old      string
+		want     string
+	}{
+		{"kugou", "searchEndpoint", "https://mobilecdn.kugou.com/api/v3/search/song", "https://songsearch.kugou.com/song_search_v2"},
+		{"kuwo", "lyricsEndpoint", "https://www.kuwo.cn/newh5/singles/songinfoandlrc", "https://www.kuwo.cn/openapi/v1/www/lyric/getlyric"},
+	}
+	for _, test := range tests {
+		values, migrated := migrateProviderConfiguration(test.provider, map[string]string{test.key: test.old, "cookie": "keep-me"})
+		if !migrated || values[test.key] != test.want || values["cookie"] != "keep-me" {
+			t.Errorf("migrate %s = %#v, %v", test.provider, values, migrated)
+		}
 	}
 }
 

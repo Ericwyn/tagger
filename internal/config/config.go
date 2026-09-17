@@ -21,6 +21,14 @@ type Config struct {
 	WatchMode         domain.WatchMode
 	WatcherWait       time.Duration
 	ReconcileInterval time.Duration
+	TestProviders     bool
+	TestTitle         string
+	TestArtists       string
+	TestAlbum         string
+	TestDuration      int64
+	TestLimit         int
+	TestArtwork       bool
+	TestJSON          bool
 }
 
 func Parse(args []string, getenv func(string) string) (Config, error) {
@@ -60,6 +68,10 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 		WatchMode:         domain.WatchMode(valueOr(getenv("TAGGER_WATCH_MODE"), string(domain.WatchModeAuto))),
 		WatcherWait:       watcherWait,
 		ReconcileInterval: reconcileInterval,
+		TestTitle:         "最佳歌手",
+		TestArtists:       "许嵩",
+		TestLimit:         1,
+		TestArtwork:       true,
 	}
 	flags := flag.NewFlagSet("tagger", flag.ContinueOnError)
 	flags.StringVar(&cfg.Listen, "listen", cfg.Listen, "HTTP listen address")
@@ -71,6 +83,14 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	flags.Var((*watchModeValue)(&cfg.WatchMode), "watch-mode", "filesystem update mode: auto, events, or poll")
 	flags.DurationVar(&cfg.WatcherWait, "watcher-wait", cfg.WatcherWait, "debounce delay for filesystem changes")
 	flags.DurationVar(&cfg.ReconcileInterval, "reconcile-interval", cfg.ReconcileInterval, "optional periodic incremental reconciliation (0 disables)")
+	flags.BoolVar(&cfg.TestProviders, "test-providers", false, "test every built-in metadata provider and exit")
+	flags.StringVar(&cfg.TestTitle, "test-title", cfg.TestTitle, "provider test song title")
+	flags.StringVar(&cfg.TestArtists, "test-artists", cfg.TestArtists, "comma-separated provider test artists")
+	flags.StringVar(&cfg.TestAlbum, "test-album", "", "optional provider test album")
+	flags.Int64Var(&cfg.TestDuration, "test-duration", 0, "optional provider test duration in seconds")
+	flags.IntVar(&cfg.TestLimit, "test-limit", cfg.TestLimit, "candidate limit per provider (1-10)")
+	flags.BoolVar(&cfg.TestArtwork, "test-artwork", cfg.TestArtwork, "download and validate candidate artwork")
+	flags.BoolVar(&cfg.TestJSON, "test-json", false, "write provider test results as JSON")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -81,6 +101,9 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	cfg.MusicDir = strings.TrimSpace(cfg.MusicDir)
 	cfg.DataDir = strings.TrimSpace(cfg.DataDir)
 	cfg.AuthToken = strings.TrimSpace(cfg.AuthToken)
+	cfg.TestTitle = strings.TrimSpace(cfg.TestTitle)
+	cfg.TestArtists = strings.TrimSpace(cfg.TestArtists)
+	cfg.TestAlbum = strings.TrimSpace(cfg.TestAlbum)
 	if cfg.Listen == "" {
 		return Config{}, fmt.Errorf("listen address cannot be empty")
 	}
@@ -100,6 +123,17 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	}
 	if cfg.ReconcileInterval < 0 || cfg.ReconcileInterval > 30*24*time.Hour {
 		return Config{}, fmt.Errorf("reconcile interval must be between 0 and 720 hours")
+	}
+	if cfg.TestProviders {
+		if cfg.TestTitle == "" {
+			return Config{}, fmt.Errorf("provider test title cannot be empty")
+		}
+		if cfg.TestDuration < 0 {
+			return Config{}, fmt.Errorf("provider test duration cannot be negative")
+		}
+		if cfg.TestLimit < 1 || cfg.TestLimit > 10 {
+			return Config{}, fmt.Errorf("provider test limit must be between 1 and 10")
+		}
 	}
 	return cfg, nil
 }

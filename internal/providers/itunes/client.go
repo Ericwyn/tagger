@@ -35,7 +35,7 @@ func New(config Config) *Client {
 		config.BaseURL = "https://itunes.apple.com/search"
 	}
 	if config.Country == "" {
-		config.Country = "CN"
+		config.Country = "HK"
 	}
 	if config.UserAgent == "" {
 		config.UserAgent = providers.DefaultUserAgent("apple")
@@ -59,7 +59,7 @@ func (c *Client) ResetConfig() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.baseURL = "https://itunes.apple.com/search"
-	c.country = "CN"
+	c.country = "HK"
 	c.userAgent = providers.DefaultUserAgent("apple")
 	c.gate.SetInterval(3 * time.Second)
 	return c.setProxyLocked("")
@@ -79,7 +79,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 	defer c.mu.RUnlock()
 	return []providers.ConfigField{
 		{Key: "baseUrl", Label: "Search API URL", Type: "url", Value: c.baseURL, Required: true},
-		{Key: "country", Label: "地区代码", Type: "text", Value: c.country, Placeholder: "CN"},
+		{Key: "country", Label: "地区代码", Type: "text", Value: c.country, Placeholder: "HK", Description: "iTunes storefront；CN 零结果时自动回退到 HK"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
@@ -152,15 +152,29 @@ func (c *Client) ArtworkDownloadOptions() providers.ArtworkDownloadOptions {
 func (c *Client) Search(ctx context.Context, query providers.Query, limit int) ([]providers.Candidate, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	values := url.Values{}
-	values.Set("term", strings.TrimSpace(query.Title+" "+strings.Join(query.Artists, " ")))
-	values.Set("country", c.country)
-	values.Set("media", "music")
-	values.Set("entity", "song")
-	values.Set("limit", strconv.Itoa(limit))
 	var response searchResponse
-	if err := providers.GetJSON(ctx, c.http, c.baseURL+"?"+values.Encode(), c.userAgent, &response); err != nil {
-		return nil, err
+	countries := []string{c.country}
+	if c.country == "CN" {
+		// The mainland iTunes Search storefront currently returns an empty
+		// catalog even for widely available Chinese and international tracks.
+		// Preserve explicitly stored CN settings but retry the broadly populated
+		// Hong Kong storefront when the first response contains no songs.
+		countries = append(countries, "HK")
+	}
+	for _, country := range countries {
+		values := url.Values{}
+		values.Set("term", strings.TrimSpace(query.Title+" "+strings.Join(query.Artists, " ")))
+		values.Set("country", country)
+		values.Set("media", "music")
+		values.Set("entity", "song")
+		values.Set("limit", strconv.Itoa(limit))
+		response = searchResponse{}
+		if err := providers.GetJSON(ctx, c.http, c.baseURL+"?"+values.Encode(), c.userAgent, &response); err != nil {
+			return nil, err
+		}
+		if len(response.Results) > 0 {
+			break
+		}
 	}
 	result := make([]providers.Candidate, 0, len(response.Results))
 	for _, item := range response.Results {

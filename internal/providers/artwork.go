@@ -230,6 +230,10 @@ func safeArtworkClient(providerID string, config artworkDownloadConfig, gate *Ga
 		TLSHandshakeTimeout: 5 * time.Second,
 		IdleConnTimeout:     15 * time.Second,
 		DisableCompression:  true,
+		// A custom DialContext disables Go's automatic HTTP/2 setup unless it is
+		// explicitly restored. Several artwork CDNs negotiate h2, which would
+		// otherwise make their SETTINGS frame look like a malformed HTTP/1 reply.
+		ForceAttemptHTTP2: true,
 	}
 	// The desktop development environment (and many user machines) reaches
 	// public music CDNs through HTTPS_PROXY. A proxy connection must dial the

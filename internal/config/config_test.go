@@ -118,3 +118,19 @@ func TestParseWatchMode(t *testing.T) {
 		t.Fatalf("invalid watch mode error=%v", err)
 	}
 }
+
+func TestParseProviderTestFlags(t *testing.T) {
+	cfg, err := Parse([]string{
+		"--test-providers", "--test-title", "Easy On Me", "--test-artists", "Adele,阿黛尔",
+		"--test-album", "30", "--test-duration", "225", "--test-limit", "3", "--test-artwork=false", "--test-json",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.TestProviders || cfg.TestTitle != "Easy On Me" || cfg.TestArtists != "Adele,阿黛尔" || cfg.TestAlbum != "30" || cfg.TestDuration != 225 || cfg.TestLimit != 3 || cfg.TestArtwork || !cfg.TestJSON {
+		t.Fatalf("provider test config = %#v", cfg)
+	}
+	if _, err := Parse([]string{"--test-providers", "--test-limit", "0"}, nil); err == nil || !strings.Contains(err.Error(), "provider test limit") {
+		t.Fatalf("invalid provider test limit error = %v", err)
+	}
+}

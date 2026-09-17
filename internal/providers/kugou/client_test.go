@@ -63,6 +63,44 @@ func TestSearchMapsLyricsAndArtwork(t *testing.T) {
 	}
 }
 
+func TestSearchUsesCurrentEndpointAndResponseShape(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("[00:01.00] 歌词"))
+	client := New(Config{
+		// Simulate an endpoint restored from settings written by an older build.
+		SearchEndpoint:    "https://mobilecdn.kugou.com/api/v3/search/song",
+		LyricsSearchURL:   "https://example.test/lyrics/search",
+		LyricsDownloadURL: "https://example.test/lyrics/download",
+		RateInterval:      -1,
+		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/song_search_v2":
+				if r.URL.Hostname() != "songsearch.kugou.com" || r.URL.Query().Get("platform") != "WebFilter" {
+					t.Fatalf("search request = %s", r.URL)
+				}
+				return response(r, `{"status":1,"data":{"lists":[{"FileHash":"ABC","SongName":"幻听","SingerName":"<em>许嵩</em>","AlbumID":"973046","AlbumName":"梦游计","Duration":273,"Image":"http://imge.kugou.com/stdmusic/{size}/cover.jpg"}]}}`), nil
+			case "/lyrics/search":
+				return response(r, `{"status":200,"candidates":[{"id":7,"accesskey":"key"}]}`), nil
+			case "/lyrics/download":
+				return response(r, `{"status":200,"content":"`+encoded+`"}`), nil
+			default:
+				t.Fatalf("unexpected request %s", r.URL)
+				return nil, nil
+			}
+		})},
+	})
+	items, err := client.Search(context.Background(), providers.Query{Title: "幻听", Artists: []string{"许嵩"}}, 1)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	item := items[0]
+	if item.ExternalID != "ABC" || item.Album != "梦游计" || item.DurationSeconds != 273 || len(item.Artists) != 1 || item.Artists[0] != "许嵩" {
+		t.Fatalf("metadata = %#v", item)
+	}
+	if item.ArtworkURL != "https://imge.kugou.com/stdmusic/500/cover.jpg" || item.Lyrics != "[00:01.00] 歌词" {
+		t.Fatalf("assets = %#v", item)
+	}
+}
+
 func TestSearchSurfacesKuGouBusinessAuthError(t *testing.T) {
 	client := New(Config{SearchEndpoint: "https://example.test/search", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
 		return response(r, `{"status":401,"error":"需要登录"}`), nil

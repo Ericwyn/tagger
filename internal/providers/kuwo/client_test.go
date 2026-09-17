@@ -16,7 +16,7 @@ type roundTrip func(*http.Request) (*http.Response, error)
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestSearchMapsKuwoResponse(t *testing.T) {
-	searchBody := `{"abslist":[{"MUSICRID":"MUSIC_123","SONGNAME":"Song","ARTIST":"Artist&Guest","ALBUM":"Album","ALBUMARTIST":"Artist","SONG_DURATION":"03:21","TRACKNUM":4,"web_albumpic_short":"120/54/7/152082279.jpg"}]}`
+	searchBody := `{"abslist":[{"MUSICRID":"MUSIC_123","SONGNAME":"Song","ARTIST":"Artist&Guest","ALBUM":"Album","ALBUMARTIST":"Artist","DURATION":"201","TRACKNUM":4,"web_albumpic_short":"120/54/7/152082279.jpg"}]}`
 	lyricsBody := `{"data":{"lrclist":[{"time":"1.25","lineLyric":"第一行"},{"time": "65.5", "lineLyric":"第二行"}]}}`
 	client := New(Config{Endpoint: "https://example.test/search", LyricsEndpoint: "https://example.test/lyrics", LyricsRIDEndpoint: "https://example.test/rid", LyricsFileEndpoint: "https://example.test/file", Auth: "Bearer test", Cookie: "kw_token=test-cookie", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/search" && (r.Header.Get("Authorization") != "Bearer test" || r.Header.Get("Cookie") != "kw_token=test-cookie" || r.Header.Get("Referer") == "" || r.Header.Get("Origin") == "") {
@@ -86,6 +86,25 @@ func TestKuwoLyricsFallsBackToRIDAndLyricKey(t *testing.T) {
 	lyrics, err := client.fetchLyrics(context.Background(), "123")
 	if err != nil || lyrics != "[00:02.00]旧接口歌词" {
 		t.Fatalf("lyrics=%q err=%v", lyrics, err)
+	}
+}
+
+func TestKuwoLyricsRetriesCurrentEndpointForPersistedLegacyConfig(t *testing.T) {
+	requests := 0
+	client := New(Config{LyricsEndpoint: legacyLyricsEndpoint, LyricsRIDEndpoint: "https://example.test/rid", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		requests++
+		if r.URL.Path == "/newh5/singles/songinfoandlrc" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"status":301,"msg":"音乐查询失败"}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+		}
+		if r.URL.Path == "/openapi/v1/www/lyric/getlyric" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"code":200,"data":{"lrclist":[{"time":"1.25","lineLyric":"当前接口歌词"}]}}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+		}
+		t.Fatalf("unexpected request %s", r.URL)
+		return nil, nil
+	})}})
+	lyrics, err := client.fetchLyrics(context.Background(), "236362975")
+	if err != nil || lyrics != "[00:01.25]当前接口歌词" || requests != 2 {
+		t.Fatalf("lyrics=%q err=%v requests=%d", lyrics, err, requests)
 	}
 }
 

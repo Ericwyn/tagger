@@ -84,6 +84,9 @@ func TestSafeArtworkClientUsesConfiguredProxyAndProviderGate(t *testing.T) {
 	if !ok {
 		t.Fatalf("artwork base transport = %T", gated.base)
 	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Fatal("artwork transport must enable HTTP/2 for CDN compatibility")
+	}
 	request, _ := http.NewRequest(http.MethodGet, "https://is1-ssl.mzstatic.com/image.jpg", nil)
 	proxy, err := transport.Proxy(request)
 	if err != nil || proxy.String() != "http://127.0.0.1:7890" {
