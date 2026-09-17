@@ -46,11 +46,30 @@ func TestSearchMapsMetadataLyricsAndArtwork(t *testing.T) {
 	if len(item.AlternateTitles) != 1 || item.AlternateTitles[0] != "Song (Live)" {
 		t.Fatalf("aliases = %#v", item.AlternateTitles)
 	}
-	if item.SyncedLyrics != "[00:01.00] hello" || item.Lyrics != item.SyncedLyrics {
+	if item.SyncedLyrics != "[00:01.00] hello\n[00:01.00] translated" || item.Lyrics != item.SyncedLyrics {
 		t.Fatalf("lyrics = %#v", item)
 	}
 	if item.ArtworkURL != "https://img.music.126.net/a.jpg?param=500y" {
 		t.Fatalf("artwork = %q", item.ArtworkURL)
+	}
+}
+
+func TestFetchLyricsUsesTranslationWhenOriginalIsMissing(t *testing.T) {
+	client := New(Config{LyricEndpoint: "https://example.test/lyric", RateInterval: -1, Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		return response(r, `{"tlyric":{"lyric":"[00:01.00] 中文译文"}}`), nil
+	})}})
+	lyrics, err := client.fetchLyrics(context.Background(), 42)
+	if err != nil || lyrics != "[00:01.00] 中文译文" {
+		t.Fatalf("lyrics=%q err=%v", lyrics, err)
+	}
+}
+
+func TestMergeTimedLyricsInterleavesAndPreservesMetadata(t *testing.T) {
+	original := "[ar:Adele]\n[00:05.00]Second\n[00:01.00]First"
+	translated := "[ar:Adele]\n[00:01.00]第一句\n[00:05.00]第二句"
+	want := "[ar:Adele]\n[00:01.00]First\n[00:01.00]第一句\n[00:05.00]Second\n[00:05.00]第二句"
+	if actual := mergeTimedLyrics(original, translated); actual != want {
+		t.Fatalf("merged lyrics = %q, want %q", actual, want)
 	}
 }
 

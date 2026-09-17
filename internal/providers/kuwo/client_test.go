@@ -32,7 +32,7 @@ func TestSearchMapsKuwoResponse(t *testing.T) {
 	if err != nil || len(items) != 1 || items[0].ExternalID != "123" || len(items[0].Artists) != 2 || items[0].DurationSeconds != 201 {
 		t.Fatalf("items=%#v err=%v", items, err)
 	}
-	if items[0].ArtworkURL != "https://img1.kwcdn.kuwo.cn/star/albumcover/500/54/7/152082279.jpg" {
+	if items[0].ArtworkURL != "https://img4.kuwo.cn/star/albumcover/500/54/7/152082279.jpg" {
 		t.Fatalf("artwork = %q", items[0].ArtworkURL)
 	}
 	if items[0].Lyrics != "[00:01.25]第一行\n[01:05.50]第二行" || items[0].SyncedLyrics != items[0].Lyrics {
@@ -106,8 +106,8 @@ func TestParseLyricTimeSupportsSecondsMillisecondsAndClock(t *testing.T) {
 func TestNormalizeArtworkURLSupportsLegacyKuwoValues(t *testing.T) {
 	tests := map[string]string{
 		"http://img1.kuwo.cn/star/albumcover/120/1/2/3.jpg":  "https://img1.kuwo.cn/star/albumcover/120/1/2/3.jpg",
-		"/star/albumcover/120/1/2/3.jpg":                     "https://img1.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg",
-		"//img2.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg": "https://img2.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg",
+		"/star/albumcover/120/1/2/3.jpg":                     "https://img4.kuwo.cn/star/albumcover/500/1/2/3.jpg",
+		"//img2.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg": "https://img4.kuwo.cn/star/albumcover/500/1/2/3.jpg",
 	}
 	for input, expected := range tests {
 		if actual := normalizeArtworkURL(input); actual != expected {

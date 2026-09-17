@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -286,14 +287,91 @@ func (c *Client) fetchLyrics(ctx context.Context, id int64) (string, error) {
 	if err := response.businessError(); err != nil {
 		return "", err
 	}
-	// Prefer original lyrics. YRC/KLyric are still useful when an ordinary LRC
-	// is absent; translated lyrics are deliberately not used as a fallback.
-	for _, value := range []string{response.LRC.Lyric, response.RomaLRC.Lyric, response.YRC.Lyric, response.KLyric.Lyric} {
+	// NetEase returns its translated LRC separately. Merge it with the original
+	// by timestamp so players show the source line followed by its translation,
+	// rather than discarding the translation or appending a second timeline.
+	if original := providers.NormalizeLyrics(response.LRC.Lyric); providers.HasLyrics(original) {
+		if translated := providers.NormalizeLyrics(response.TranslatedLRC.Lyric); providers.HasLyrics(translated) {
+			return mergeTimedLyrics(original, translated), nil
+		}
+		return original, nil
+	}
+	for _, value := range []string{response.TranslatedLRC.Lyric, response.RomaLRC.Lyric, response.YRC.Lyric, response.KLyric.Lyric} {
 		if normalized := providers.NormalizeLyrics(value); providers.HasLyrics(normalized) {
 			return normalized, nil
 		}
 	}
 	return "", nil
+}
+
+var lrcTimestampPattern = regexp.MustCompile(`^\[(\d+):([0-5]?\d(?:\.\d+)?)\]`)
+
+type timedLyricLine struct {
+	text         string
+	milliseconds int64
+	source       int
+	index        int
+}
+
+// mergeTimedLyrics produces the conventional bilingual LRC layout: original
+// first and translation second at an equal timestamp. Stable time sorting also
+// handles providers that return either stream slightly out of order.
+func mergeTimedLyrics(original, translated string) string {
+	original = providers.NormalizeLyrics(original)
+	translated = providers.NormalizeLyrics(translated)
+	if original == "" {
+		return translated
+	}
+	if translated == "" {
+		return original
+	}
+
+	headers := make([]string, 0, 8)
+	timed := make([]timedLyricLine, 0, strings.Count(original, "\n")+strings.Count(translated, "\n")+2)
+	seenHeaders := make(map[string]struct{})
+	for source, value := range []string{original, translated} {
+		for index, line := range strings.Split(value, "\n") {
+			if milliseconds, ok := lyricTimestamp(line); ok {
+				timed = append(timed, timedLyricLine{text: line, milliseconds: milliseconds, source: source, index: index})
+				continue
+			}
+			if _, exists := seenHeaders[line]; !exists {
+				seenHeaders[line] = struct{}{}
+				headers = append(headers, line)
+			}
+		}
+	}
+	if len(timed) == 0 {
+		return providers.NormalizeLyrics(original + "\n" + translated)
+	}
+	sort.SliceStable(timed, func(left, right int) bool {
+		if timed[left].milliseconds != timed[right].milliseconds {
+			return timed[left].milliseconds < timed[right].milliseconds
+		}
+		if timed[left].source != timed[right].source {
+			return timed[left].source < timed[right].source
+		}
+		return timed[left].index < timed[right].index
+	})
+	lines := make([]string, 0, len(headers)+len(timed))
+	lines = append(lines, headers...)
+	for _, line := range timed {
+		lines = append(lines, line.text)
+	}
+	return providers.NormalizeLyrics(strings.Join(lines, "\n"))
+}
+
+func lyricTimestamp(line string) (int64, bool) {
+	matches := lrcTimestampPattern.FindStringSubmatch(strings.TrimSpace(line))
+	if len(matches) != 3 {
+		return 0, false
+	}
+	minutes, minuteErr := strconv.ParseInt(matches[1], 10, 64)
+	seconds, secondErr := strconv.ParseFloat(matches[2], 64)
+	if minuteErr != nil || secondErr != nil {
+		return 0, false
+	}
+	return minutes*60_000 + int64(seconds*1000+0.5), true
 }
 
 func (c *Client) fetchArtwork(ctx context.Context, albumID int64) (string, error) {
@@ -523,12 +601,13 @@ type lyricField struct {
 }
 
 type lyricResponse struct {
-	Code    int        `json:"code"`
-	Message string     `json:"msg"`
-	LRC     lyricField `json:"lrc"`
-	RomaLRC lyricField `json:"romalrc"`
-	YRC     lyricField `json:"yrc"`
-	KLyric  lyricField `json:"klyric"`
+	Code          int        `json:"code"`
+	Message       string     `json:"msg"`
+	LRC           lyricField `json:"lrc"`
+	TranslatedLRC lyricField `json:"tlyric"`
+	RomaLRC       lyricField `json:"romalrc"`
+	YRC           lyricField `json:"yrc"`
+	KLyric        lyricField `json:"klyric"`
 }
 
 func (r searchResponse) businessError() error {

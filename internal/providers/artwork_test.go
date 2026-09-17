@@ -134,6 +134,25 @@ func TestDownloadArtworkValidatesResponseBytes(t *testing.T) {
 	}
 }
 
+func TestDownloadArtworkRewritesLegacyKuwoCDNHost(t *testing.T) {
+	var imageData bytes.Buffer
+	if err := png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 5, 4))); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: artworkRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Hostname() != "img4.kuwo.cn" || request.URL.Path != "/star/albumcover/500/1/2/3.jpg" {
+			t.Fatalf("rewritten artwork URL = %s", request.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(imageData.Bytes())), Request: request}, nil
+	})}
+	_, err := DownloadArtwork(context.Background(), ArtworkReference{
+		ProviderID: "kuwo", URL: "https://img1.kwcdn.kuwo.cn/star/albumcover/500/1/2/3.jpg",
+	}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDownloadArtworkUsesConfiguredArchiveMirror(t *testing.T) {
 	var imageData bytes.Buffer
 	if err := png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 8, 6))); err != nil {

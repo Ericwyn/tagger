@@ -177,10 +177,18 @@ func artworkHostAllowed(providerID, host string) bool {
 }
 
 func rewriteArtworkURL(providerID string, source *url.URL, config artworkDownloadConfig) *url.URL {
-	if providerID != "musicbrainz" || source == nil || config.archiveDownloadBase == nil {
+	if source == nil {
 		return source
 	}
 	host := strings.ToLower(strings.TrimSuffix(source.Hostname(), "."))
+	if providerID == "kuwo" && strings.HasSuffix(host, ".kwcdn.kuwo.cn") {
+		rewritten := *source
+		rewritten.Host = "img4.kuwo.cn"
+		return &rewritten
+	}
+	if providerID != "musicbrainz" || config.archiveDownloadBase == nil {
+		return source
+	}
 	if host != "archive.org" || !strings.HasPrefix(source.EscapedPath(), "/download/") {
 		return source
 	}

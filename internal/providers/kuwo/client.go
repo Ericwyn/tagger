@@ -451,12 +451,19 @@ func normalizeArtworkURL(values ...string) string {
 			continue
 		}
 		if strings.HasPrefix(value, "//") {
-			return "https:" + value
+			value = "https:" + value
 		}
 		if strings.HasPrefix(strings.ToLower(value), "http://") {
-			return "https://" + value[len("http://"):]
+			value = "https://" + value[len("http://"):]
 		}
 		if strings.HasPrefix(strings.ToLower(value), "https://") {
+			if parsed, err := url.Parse(value); err == nil && strings.HasSuffix(strings.ToLower(parsed.Hostname()), ".kwcdn.kuwo.cn") {
+				// The kwcdn hostname currently serves a certificate for an unrelated
+				// Tencent CDN domain. Kuwo exposes the same image paths from img4,
+				// whose certificate and current API examples are valid.
+				parsed.Host = "img4.kuwo.cn"
+				return parsed.String()
+			}
 			return value
 		}
 		value = strings.TrimPrefix(value, "/")
@@ -466,7 +473,7 @@ func normalizeArtworkURL(values ...string) string {
 		if strings.HasPrefix(value, "120/") {
 			value = "500/" + strings.TrimPrefix(value, "120/")
 		}
-		return "https://img1.kwcdn.kuwo.cn/star/albumcover/" + value
+		return "https://img4.kuwo.cn/star/albumcover/" + value
 	}
 	return ""
 }
