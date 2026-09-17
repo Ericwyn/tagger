@@ -565,7 +565,7 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	createMatchJob(trackIds: string[], providerIds: string[] = []): Promise<Job> {
 	  return request<Job>('/api/v1/matches/tracks/batch', {
 		method: 'POST', headers: {'Content-Type': 'application/json'},
-		body: JSON.stringify({trackIds, providerIds, limit: 5}),
+		body: JSON.stringify({trackIds, providerIds, limit: 2}),
 	  });
 	},
 

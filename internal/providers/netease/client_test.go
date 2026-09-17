@@ -110,6 +110,33 @@ func TestSearchUsesAlbumEndpointWhenSearchResultHasNoCover(t *testing.T) {
 	}
 }
 
+func TestSearchOnlyFetchesLyricsForReturnedCandidates(t *testing.T) {
+	lyricCalls := 0
+	client := New(Config{
+		Endpoint: "https://example.test/search", LyricEndpoint: "https://example.test/lyric", RateInterval: -1,
+		Client: &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/search" {
+				return response(r, `{"result":{"songs":[
+					{"id":1,"name":"Song","dt":210000,"ar":[{"name":"Artist"}],"al":{"name":"Album"}},
+					{"id":2,"name":"Song Live","dt":211000,"ar":[{"name":"Artist"}],"al":{"name":"Album"}},
+					{"id":3,"name":"Song Remix","dt":212000,"ar":[{"name":"Artist"}],"al":{"name":"Album"}},
+					{"id":4,"name":"Song Demo","dt":213000,"ar":[{"name":"Artist"}],"al":{"name":"Album"}}
+				]}}`), nil
+			}
+			if r.URL.Path == "/lyric" {
+				lyricCalls++
+				return response(r, `{"lrc":{"lyric":"[00:01.00] line"}}`), nil
+			}
+			t.Fatalf("unexpected path %s", r.URL.Path)
+			return nil, nil
+		})},
+	})
+	items, err := client.Search(context.Background(), providers.Query{Title: "Song", Artists: []string{"Artist"}}, 2)
+	if err != nil || len(items) != 2 || lyricCalls != 2 {
+		t.Fatalf("items=%#v lyricCalls=%d err=%v", items, lyricCalls, err)
+	}
+}
+
 func response(request *http.Request, body string) *http.Response {
 	return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": {"application/json"}}, Request: request}
 }

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ericwyn/tagger/internal/artwork"
@@ -271,37 +272,43 @@ func main() {
 			return err
 		}
 		if payload.Limit <= 0 {
-			payload.Limit = 5
+			payload.Limit = providers.DefaultBatchCandidateLimit
 		}
-		failed, succeeded := 0, 0
+		processed, failed, succeeded := 0, 0, 0
 		providerQueries, candidateCount := 0, 0
-		for index, trackID := range payload.TrackIDs {
+		var progressMu sync.Mutex
+		// Provider gates still enforce one in-flight request per source. Two
+		// tracks here only form a pipeline across different sources, hiding an
+		// occasional slow provider without increasing per-source concurrency.
+		if err := runMatchPipeline(ctx, payload.TrackIDs, func(matchCtx context.Context, trackID string) error {
+			trackFailed, trackSucceeded := 0, 0
+			trackProviderQueries, trackCandidateCount := 0, 0
 			track, err := libraryService.Track(trackID)
 			if err == nil && track.SyncState != "" && track.SyncState != domain.SyncIndexed {
 				err = library.ErrTrackNotIndexed
 			}
 			if err != nil {
-				failed++
-				if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()}); persistErr != nil {
+				trackFailed = 1
+				if persistErr := dataStore.UpsertMatchItem(matchCtx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: err.Error()}); persistErr != nil {
 					return fmt.Errorf("persist failed match item %s: %w", trackID, persistErr)
 				}
 			} else {
-				result, searchErr := providerRegistry.SearchTrack(ctx, track, providers.Query{}, payload.ProviderIDs, payload.Limit)
+				result, searchErr := providerRegistry.SearchTrack(matchCtx, track, providers.Query{}, payload.ProviderIDs, payload.Limit)
 				if searchErr != nil {
-					failed++
-					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()}); persistErr != nil {
+					trackFailed = 1
+					if persistErr := dataStore.UpsertMatchItem(matchCtx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: "failed", Error: searchErr.Error()}); persistErr != nil {
 						return fmt.Errorf("persist failed match item %s: %w", trackID, persistErr)
 					}
 				} else {
-					providerQueries += len(result.Providers)
-					candidateCount += len(result.Candidates)
+					trackProviderQueries = len(result.Providers)
+					trackCandidateCount = len(result.Candidates)
 					state := "review"
 					selectedCandidateID := ""
 					if len(result.Candidates) == 0 {
 						state = "no_match"
-						failed++
+						trackFailed = 1
 					} else {
-						succeeded++
+						trackSucceeded = 1
 						for _, candidate := range result.Candidates {
 							if !candidate.Recommended {
 								continue
@@ -317,14 +324,22 @@ func main() {
 					if marshalErr != nil {
 						return fmt.Errorf("encode match candidates for %s: %w", trackID, marshalErr)
 					}
-					if persistErr := dataStore.UpsertMatchItem(ctx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON, SelectedCandidateID: selectedCandidateID}); persistErr != nil {
+					if persistErr := dataStore.UpsertMatchItem(matchCtx, store.MatchItem{JobID: job.ID, TrackID: trackID, State: state, Candidates: candidateJSON, SelectedCandidateID: selectedCandidateID}); persistErr != nil {
 						return fmt.Errorf("persist match item %s: %w", trackID, persistErr)
 					}
 				}
 			}
-			if err := progress(index+1, len(payload.TrackIDs), succeeded, failed, formatMatchProgress(index+1, len(payload.TrackIDs), providerQueries, candidateCount, failed)); err != nil {
-				return err
-			}
+
+			progressMu.Lock()
+			defer progressMu.Unlock()
+			processed++
+			failed += trackFailed
+			succeeded += trackSucceeded
+			providerQueries += trackProviderQueries
+			candidateCount += trackCandidateCount
+			return progress(processed, len(payload.TrackIDs), succeeded, failed, formatMatchProgress(processed, len(payload.TrackIDs), providerQueries, candidateCount, failed))
+		}); err != nil {
+			return err
 		}
 		if succeeded > 0 {
 			return jobs.ErrNeedsReview

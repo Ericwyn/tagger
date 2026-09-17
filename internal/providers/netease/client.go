@@ -237,10 +237,10 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	sort.SliceStable(songs, func(left, right int) bool {
 		return songScore(query, songs[left]) > songScore(query, songs[right])
 	})
-	lyricsLimit := limit * 2
-	if lyricsLimit < 5 {
-		lyricsLimit = 5
-	}
+	// Only enrich candidates that can actually be returned. The previous 2x
+	// pool fetched as many as ten lyric payloads for a five-candidate result,
+	// making bulk matching spend most of its time on discarded records.
+	lyricsLimit := limit
 	if lyricsLimit > len(songs) {
 		lyricsLimit = len(songs)
 	}

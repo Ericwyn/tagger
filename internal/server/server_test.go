@@ -940,6 +940,36 @@ func TestProviderListAndTrackMatchSearch(t *testing.T) {
 	}
 }
 
+func TestBatchMatchDefaultsToTwoCandidatesPerProvider(t *testing.T) {
+	s := newTestServer(t)
+	s.SetJobManager(jobs.New(s.store))
+	tracksResponse := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/tracks", nil)
+	var tracksEnvelope struct {
+		Data struct {
+			Tracks []struct {
+				ID string `json:"id"`
+			} `json:"tracks"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tracksResponse.Body.Bytes(), &tracksEnvelope); err != nil || len(tracksEnvelope.Data.Tracks) == 0 {
+		t.Fatalf("tracks=%s err=%v", tracksResponse.Body.String(), err)
+	}
+	body := []byte(`{"trackIds":["` + tracksEnvelope.Data.Tracks[0].ID + `"],"providerIds":[]}`)
+	response := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/matches/tracks/batch", &ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	var jobEnvelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if response.Code != 202 || json.Unmarshal(response.Body.Bytes(), &jobEnvelope) != nil {
+		t.Fatalf("response=%d %s", response.Code, response.Body.String())
+	}
+	job, err := s.store.Job(context.Background(), jobEnvelope.Data.ID)
+	if err != nil || !strings.Contains(job.Payload, `"limit":2`) {
+		t.Fatalf("job=%#v err=%v", job, err)
+	}
+}
+
 func TestProviderSettingsAndConnectionTestAPI(t *testing.T) {
 	s := newTestServer(t)
 	disableBody := []byte(`{"enabled":false}`)

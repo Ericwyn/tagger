@@ -182,6 +182,14 @@ func migrateProviderConfiguration(id string, values map[string]string) (map[stri
 		migrated = true
 	}
 	switch id {
+	case "apple":
+		if strings.EqualFold(strings.TrimSpace(result["country"]), "CN") {
+			// CN was the former built-in default but its iTunes Search catalog now
+			// returns empty results. Migrating persisted defaults avoids paying the
+			// three-second per-query storefront fallback indefinitely.
+			result["country"] = "HK"
+			migrated = true
+		}
 	case "kugou":
 		if endpoint := strings.TrimRight(result["searchEndpoint"], "/"); endpoint == "https://mobilecdn.kugou.com/api/v3/search/song" || endpoint == "https://msearchcdn.kugou.com/api/v3/search/song" {
 			result["searchEndpoint"] = "https://songsearch.kugou.com/song_search_v2"

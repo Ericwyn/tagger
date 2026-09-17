@@ -629,13 +629,14 @@ func TestRegistryMigratesLegacyBuiltInUserAgent(t *testing.T) {
 	}
 }
 
-func TestMigrateProviderConfigurationUpdatesRetiredEndpoints(t *testing.T) {
+func TestMigrateProviderConfigurationUpdatesRetiredDefaults(t *testing.T) {
 	tests := []struct {
 		provider string
 		key      string
 		old      string
 		want     string
 	}{
+		{"apple", "country", "CN", "HK"},
 		{"kugou", "searchEndpoint", "https://mobilecdn.kugou.com/api/v3/search/song", "https://songsearch.kugou.com/song_search_v2"},
 		{"kuwo", "lyricsEndpoint", "https://www.kuwo.cn/newh5/singles/songinfoandlrc", "https://www.kuwo.cn/openapi/v1/www/lyric/getlyric"},
 	}

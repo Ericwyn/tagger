@@ -11,6 +11,11 @@ import (
 	"github.com/ericwyn/tagger/internal/domain"
 )
 
+// DefaultBatchCandidateLimit keeps automatic matching fast while retaining a
+// second result for version/disambiguation checks. Interactive searches can
+// continue to request a wider result set.
+const DefaultBatchCandidateLimit = 2
+
 func ParseRateInterval(value string) (time.Duration, error) {
 	parsed, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || parsed < 0 || parsed > 60000 {

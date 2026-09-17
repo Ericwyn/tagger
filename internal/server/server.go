@@ -1021,6 +1021,12 @@ func (s *Server) handleMatchBatch(ctx context.Context, c *app.RequestContext) {
 		s.writeError(c, consts.StatusBadRequest, "invalid_request", "trackIds 不能为空且请求 JSON 必须有效")
 		return
 	}
+	if request.Limit <= 0 {
+		request.Limit = providers.DefaultBatchCandidateLimit
+	}
+	if request.Limit > 20 {
+		request.Limit = 20
+	}
 	limit := s.batchTrackLimit(ctx)
 	if len(request.TrackIDs) > limit {
 		s.writeError(c, consts.StatusBadRequest, "track_selection_too_large", fmt.Sprintf("单次最多处理 %d 首曲目", limit))

@@ -440,6 +440,18 @@ describe('real API client', () => {
     expect(fetcher.mock.calls[1][0]).toBe('/api/v1/providers');
   });
 
+  it('uses the fast two-candidate limit for batch matching', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {id: 'job-1'}}), {status: 202}));
+    const api = createRealAPI(fetcher);
+
+    await api.createMatchJob(['track-1', 'track-2'], ['netease', 'kugou']);
+
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/matches/tracks/batch');
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({
+      trackIds: ['track-1', 'track-2'], providerIds: ['netease', 'kugou'], limit: 2,
+    });
+  });
+
   it('sends an edited candidate query while retaining the file identity', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: {candidates: [], providers: {}}}), {status: 200}));
     const api = createRealAPI(fetcher);
