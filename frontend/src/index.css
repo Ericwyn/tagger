@@ -6159,6 +6159,13 @@ button:disabled {
   border-color: var(--accent);
 }
 
+.provider-config-form input.provider-config-checkbox {
+  width: 18px;
+  min-height: 18px;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
 .provider-config-form label small {
   color: var(--muted);
   font-size: 11px;

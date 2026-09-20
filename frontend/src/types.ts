@@ -351,7 +351,7 @@ export type ProviderHealth = 'ready' | 'degraded' | 'misconfigured' | 'disabled'
 export interface ProviderConfigField {
   key: string;
   label: string;
-  type: 'text' | 'url' | 'password' | 'number' | string;
+  type: 'text' | 'url' | 'password' | 'number' | 'boolean' | string;
   description?: string;
   placeholder?: string;
   secret?: boolean;

@@ -378,6 +378,9 @@ func TestSimilarityHandlesPunctuationAndCJK(t *testing.T) {
 	if got := similarity("AC/DC", "ACDC"); got != 1 {
 		t.Fatalf("ASCII similarity = %f", got)
 	}
+	if got := similarity("想見你", "想见你"); got != 1 {
+		t.Fatalf("traditional/simplified similarity = %f", got)
+	}
 }
 
 func TestAlternateTitlesImproveCandidateScore(t *testing.T) {

@@ -564,13 +564,23 @@ export function SettingsPage({onNotice, showGeneratedCovers, onShowGeneratedCove
             {(provider.config ?? []).map((field) => (
               <label key={field.key}>
                 <span>{field.label}{field.required && <em>必填</em>}</span>
-                <input
-                  aria-label={field.label}
-                  type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : field.type === 'url' ? 'url' : 'text'}
-                  value={configValues[field.key] ?? ''}
-                  placeholder={field.secret && field.configured ? '已配置，留空保持不变' : field.placeholder}
-                  onChange={(event) => setConfigValues((current) => ({...current, [field.key]: event.target.value}))}
-                />
+                {field.type === 'boolean' ? (
+                  <input
+                    className="provider-config-checkbox"
+                    aria-label={field.label}
+                    type="checkbox"
+                    checked={configValues[field.key] === 'true'}
+                    onChange={(event) => setConfigValues((current) => ({...current, [field.key]: String(event.target.checked)}))}
+                  />
+                ) : (
+                  <input
+                    aria-label={field.label}
+                    type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : field.type === 'url' ? 'url' : 'text'}
+                    value={configValues[field.key] ?? ''}
+                    placeholder={field.secret && field.configured ? '已配置，留空保持不变' : field.placeholder}
+                    onChange={(event) => setConfigValues((current) => ({...current, [field.key]: event.target.value}))}
+                  />
+                )}
                 {field.description && <small>{field.description}</small>}
               </label>
             ))}

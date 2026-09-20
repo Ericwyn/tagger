@@ -43,7 +43,8 @@ const (
 
 // ConfigField describes one strategy-owned runtime setting. Values are kept
 // on the strategy and returned to the UI only after the registry masks secret
-// fields. A strategy may choose a text, password or number input type.
+// fields. A strategy may choose a text, password, number or boolean input
+// type.
 type ConfigField struct {
 	Key         string `json:"key"`
 	Label       string `json:"label"`
@@ -70,6 +71,13 @@ type Configurable interface {
 // expose this optional capability.
 type ConfigResetter interface {
 	ResetConfig() error
+}
+
+// CacheVariantProvider lets a provider identify configuration that changes its
+// serialized candidate output. The registry includes the returned value in
+// the persistent search cache key.
+type CacheVariantProvider interface {
+	CacheVariant() string
 }
 
 type Descriptor struct {

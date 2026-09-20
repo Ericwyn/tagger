@@ -166,6 +166,25 @@ describe('SettingsPage provider diagnostics', () => {
     expect(onNotice).toHaveBeenCalledWith(expect.stringContaining('配置已保存'));
   });
 
+  it('renders boolean provider fields as checkboxes and persists false', async () => {
+    const user = userEvent.setup();
+    const appleProvider: ProviderConfig = {
+      ...provider,
+      id: 'apple',
+      name: 'Apple / iTunes',
+      config: [{key: 'simplifyChinese', label: '自动转为简体', type: 'boolean', value: 'true'}],
+    };
+    api.listProviders.mockResolvedValueOnce([appleProvider]);
+    render(<SettingsPage onNotice={vi.fn()} showGeneratedCovers={false} onShowGeneratedCoversChange={vi.fn()} />);
+    await openProviderTab(user);
+    await user.click(await screen.findByRole('button', {name: '配置'}));
+    const toggle = screen.getByRole('checkbox', {name: '自动转为简体'});
+    expect(toggle).toBeChecked();
+    await user.click(toggle);
+    await user.click(screen.getByRole('button', {name: '保存并应用'}));
+    await waitFor(() => expect(api.updateProvider).toHaveBeenCalledWith(appleProvider, true, {simplifyChinese: 'false'}));
+  });
+
   it('sends an empty proxy URL to restore environment proxy behavior', async () => {
     const user = userEvent.setup();
     const configuredProvider: ProviderConfig = {

@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/ericwyn/tagger/internal/domain"
+	"github.com/ericwyn/tagger/internal/textconv"
 )
 
 func toView(query Query, descriptor Descriptor, candidate Candidate) MatchCandidate {
@@ -384,7 +385,7 @@ func similarity(left, right string) float64 {
 
 func normalize(value string) string {
 	var builder strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(value)) {
+	for _, r := range strings.ToLower(strings.TrimSpace(textconv.NormalizeForMatch(value))) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			builder.WriteRune(r)
 		}

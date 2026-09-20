@@ -66,6 +66,55 @@ func TestDefaultStorefrontIsHongKong(t *testing.T) {
 	}
 }
 
+func TestSearchCanSimplifyChineseOutput(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := `{"resultCount":1,"results":[{"trackId":7,"trackName":"想見你","artistName":"許嵩","collectionName":"專輯名","collectionArtistName":"許嵩","primaryGenreName":"國語流行音樂"}]}`
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	client := New(Config{BaseURL: "https://itunes.test/search", Country: "HK", SimplifyChinese: true, Client: httpClient, RateInterval: -1})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "想見你"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("candidates = %#v", candidates)
+	}
+	candidate := candidates[0]
+	if candidate.Title != "想见你" || candidate.Artists[0] != "许嵩" || candidate.Album != "专辑名" || candidate.Genres[0] != "国语流行音乐" {
+		t.Fatalf("candidate was not simplified: %#v", candidate)
+	}
+	if got := client.CacheVariant(); got != "baseUrl=https://itunes.test/search;country=HK;simplifyChinese=true" {
+		t.Fatalf("CacheVariant() = %q", got)
+	}
+}
+
+func TestAppleSimplifyConfigRoundTrips(t *testing.T) {
+	client := New(Config{Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"results":[]}`))}, nil
+	})}, RateInterval: -1})
+	if err := client.Configure(map[string]string{"simplifyChinese": "true"}); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, field := range client.ConfigFields() {
+		if field.Key == "simplifyChinese" {
+			found = true
+			if field.Type != "boolean" || field.Value != "true" {
+				t.Fatalf("simplify field = %#v", field)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("simplifyChinese config field missing")
+	}
+	if err := client.ResetConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if client.CacheVariant() != "baseUrl=https://itunes.apple.com/search;country=HK;simplifyChinese=false" {
+		t.Fatalf("reset CacheVariant() = %q", client.CacheVariant())
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

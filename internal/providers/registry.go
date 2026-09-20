@@ -455,7 +455,11 @@ func (r *Registry) SearchWithOptions(ctx context.Context, query Query, providerI
 			defer wait.Done()
 			started := time.Now()
 			descriptor := r.descriptor(strategy.Descriptor().ID)
-			cacheKey := providerCacheKey(descriptor.ID, query, limit)
+			cacheVariant := ""
+			if variantProvider, ok := strategy.(CacheVariantProvider); ok {
+				cacheVariant = variantProvider.CacheVariant()
+			}
+			cacheKey := providerCacheKey(descriptor.ID, query, limit, cacheVariant)
 			search := func() (any, error) {
 				if !options.BypassCache && r.persistence != nil {
 					if payload, found, cacheErr := r.persistence.LoadProviderCache(ctx, cacheKey); cacheErr == nil && found {
@@ -515,22 +519,22 @@ func (r *Registry) SearchWithOptions(ctx context.Context, query Query, providerI
 	return result, nil
 }
 
-func providerCacheKey(providerID string, query Query, limit int) string {
+func providerCacheKey(providerID string, query Query, limit int, variant string) string {
 	artists := make([]string, len(query.Artists))
 	for index, artist := range query.Artists {
 		artists[index] = normalize(artist)
 	}
 	payload, _ := json.Marshal(struct {
-		Provider, Title, Album string
-		Artists                []string
-		Duration               int64
-		Limit                  int
-	}{providerID, normalize(query.Title), normalize(query.Album), artists, query.DurationSeconds, limit})
+		Provider, Title, Album, Variant string
+		Artists                         []string
+		Duration                        int64
+		Limit                           int
+	}{providerID, normalize(query.Title), normalize(query.Album), variant, artists, query.DurationSeconds, limit})
 	digest := sha256.Sum256(payload)
 	// Bump the cache namespace when candidate enrichment changes. This avoids
 	// serving metadata-only results cached by the old NetEase adapter after
 	// lyrics-capable providers are upgraded.
-	return "provider-search-v2-" + hex.EncodeToString(digest[:])
+	return "provider-search-v3-" + hex.EncodeToString(digest[:])
 }
 
 func providerCacheTTL(providerID string) time.Duration {

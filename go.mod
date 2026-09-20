@@ -5,6 +5,7 @@ go 1.25.7
 require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/fsnotify/fsnotify v1.5.4
+	github.com/longbridgeapp/opencc v0.3.13
 	github.com/pressly/goose/v3 v3.27.3
 	go.senan.xyz/taglib v0.14.0
 	golang.org/x/image v0.35.0
@@ -22,6 +23,8 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
+	github.com/liuzl/cedar-go v0.0.0-20170805034717-80a9c64b256d // indirect
+	github.com/liuzl/da v0.0.0-20180704015230-14771aad5b1d // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

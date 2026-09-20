@@ -11,19 +11,22 @@ import (
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
+	"github.com/ericwyn/tagger/internal/textconv"
 )
 
 type Config struct {
-	BaseURL      string
-	Country      string
-	UserAgent    string
-	Client       *http.Client
-	RateInterval time.Duration
+	BaseURL         string
+	Country         string
+	UserAgent       string
+	SimplifyChinese bool
+	Client          *http.Client
+	RateInterval    time.Duration
 }
 
 type Client struct {
 	mu                          sync.RWMutex
 	baseURL, country, userAgent string
+	simplifyChinese             bool
 	proxyURL                    string
 	baseHTTP                    *http.Client
 	http                        *http.Client
@@ -49,7 +52,8 @@ func New(config Config) *Client {
 	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, country: config.Country, userAgent: config.UserAgent,
-		baseHTTP: config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
+		simplifyChinese: config.SimplifyChinese,
+		baseHTTP:        config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
 
@@ -61,6 +65,7 @@ func (c *Client) ResetConfig() error {
 	c.baseURL = "https://itunes.apple.com/search"
 	c.country = "HK"
 	c.userAgent = providers.DefaultUserAgent("apple")
+	c.simplifyChinese = false
 	c.gate.SetInterval(3 * time.Second)
 	return c.setProxyLocked("")
 }
@@ -81,6 +86,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "Search API URL", Type: "url", Value: c.baseURL, Required: true},
 		{Key: "country", Label: "地区代码", Type: "text", Value: c.country, Placeholder: "HK", Description: "iTunes storefront；CN 零结果时自动回退到 HK"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		{Key: "simplifyChinese", Label: "自动转为简体", Type: "boolean", Value: strconv.FormatBool(c.simplifyChinese), Description: "将 Apple Music 返回的歌曲名、歌手、专辑和风格转换为简体中文"},
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
@@ -108,6 +114,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := strconv.ParseBool(strings.TrimSpace(value))
+			if err != nil {
+				return fmt.Errorf("simplifyChinese 必须是 true 或 false")
+			}
+			c.simplifyChinese = simplify
 		case "proxyUrl":
 			if err := c.setProxyLocked(value); err != nil {
 				return err
@@ -123,6 +135,15 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// CacheVariant identifies Apple settings that change the serialized
+// candidate payload. The registry includes this in provider cache keys so a
+// changed storefront or text transform cannot reuse stale candidates.
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return "baseUrl=" + c.baseURL + ";country=" + c.country + ";simplifyChinese=" + strconv.FormatBool(c.simplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -178,13 +199,25 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 	}
 	result := make([]providers.Candidate, 0, len(response.Results))
 	for _, item := range response.Results {
+		title := item.TrackName
+		artist := item.ArtistName
+		album := item.CollectionName
+		albumArtist := firstNonEmpty(item.CollectionArtistName, item.ArtistName)
+		genre := item.PrimaryGenreName
+		if c.simplifyChinese {
+			title = textconv.Simplify(title)
+			artist = textconv.Simplify(artist)
+			album = textconv.Simplify(album)
+			albumArtist = textconv.Simplify(albumArtist)
+			genre = textconv.Simplify(genre)
+		}
 		result = append(result, providers.Candidate{
-			ProviderID: "apple", ExternalID: strconv.FormatInt(item.TrackID, 10), Title: item.TrackName,
-			Artists: []string{item.ArtistName}, Album: item.CollectionName,
-			AlbumArtists: []string{firstNonEmpty(item.CollectionArtistName, item.ArtistName)},
+			ProviderID: "apple", ExternalID: strconv.FormatInt(item.TrackID, 10), Title: title,
+			Artists: []string{artist}, Album: album,
+			AlbumArtists: []string{albumArtist},
 			Year:         year(item.ReleaseDate), TrackNumber: item.TrackNumber, TrackTotal: item.TrackCount,
 			DiscNumber: item.DiscNumber, DiscTotal: item.DiscCount, DurationSeconds: item.TrackTimeMillis / 1000,
-			Genres: []string{item.PrimaryGenreName}, ArtworkURL: strings.Replace(item.ArtworkURL100, "100x100", "600x600", 1),
+			Genres: []string{genre}, ArtworkURL: strings.Replace(item.ArtworkURL100, "100x100", "600x600", 1),
 		})
 	}
 	return result, nil
