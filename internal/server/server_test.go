@@ -915,6 +915,12 @@ func TestOrganizeAPIPreviewsAndQueuesLocationJob(t *testing.T) {
 	if invalidMode.Code != 400 || !containsJSON(invalidMode.Body.Bytes(), `不支持的整理模式`) {
 		t.Fatalf("invalid organize mode = %d %s", invalidMode.Code, invalidMode.Body.String())
 	}
+	invalidBaseBody := []byte(`{"basePath":"../M","items":[{"trackId":"` + track.ID + `"}]}`)
+	invalidBase := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize-preview",
+		&ut.Body{Body: bytes.NewReader(invalidBaseBody), Len: len(invalidBaseBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if invalidBase.Code != 400 || !containsJSON(invalidBase.Body.Bytes(), `整理根目录无效`) {
+		t.Fatalf("invalid organize base path = %d %s", invalidBase.Code, invalidBase.Body.String())
+	}
 	items := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+envelope.Data.ID+"/organize-items", nil)
 	if items.Code != 200 || !containsJSON(items.Body.Bytes(), "[]") {
 		t.Fatalf("organize items = %d %s", items.Code, items.Body.String())

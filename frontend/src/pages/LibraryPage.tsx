@@ -996,7 +996,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 	    : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
 	};
 
-  const applyOrganize = async (mode: OrganizeMode) => {
+  const applyOrganize = async (mode: OrganizeMode, basePath: string) => {
     const selectedTracksForJob = selectedTracks.filter((track) => track.writable && isTrackIndexed(track));
     if (selectedTracksForJob.length === 0) {
       onNotice('没有可整理的可写曲目');
@@ -1004,7 +1004,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
     setSaving(true);
     try {
-      const job = await createOrganizeJob(selectedTracksForJob.map((track) => ({trackId: track.id, baseRevision: track.revision})), mode);
+      const job = await createOrganizeJob(selectedTracksForJob.map((track) => ({trackId: track.id, baseRevision: track.revision})), mode, basePath);
       setOrganizeOpen(false);
       setSelectedIds(new Set());
       setSelectedDetails(new Map());
@@ -1371,6 +1371,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       <OrganizePanel
         open={organizeOpen}
         tracks={organizableTracks}
+        basePath={activeFolderPath}
         saving={saving}
         onClose={() => setOrganizeOpen(false)}
         onApply={applyOrganize}

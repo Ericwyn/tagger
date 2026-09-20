@@ -3098,6 +3098,24 @@ button:disabled {
   font-size: 12px;
 }
 
+.organize-root-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 0;
+  padding: 9px 10px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.organize-root-note code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
 .organize-loading,
 .organize-error,
 .organize-empty {

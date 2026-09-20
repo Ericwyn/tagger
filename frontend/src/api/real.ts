@@ -604,17 +604,17 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
-	previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<OrganizePreviewItem[]> {
+	previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<OrganizePreviewItem[]> {
 		return request<OrganizePreviewItem[]>('/api/v1/tracks/organize-preview', {
 			method: 'POST', headers: {'Content-Type': 'application/json'},
-			body: JSON.stringify({items, mode, moveLyricsSidecar: true}),
+			body: JSON.stringify({items, mode, moveLyricsSidecar: true, ...(basePath.trim() ? {basePath: basePath.trim()} : {})}),
 		});
 	},
 
-	createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<Job> {
+	createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<Job> {
 		return request<Job>('/api/v1/tracks/organize', {
 			method: 'POST', headers: {'Content-Type': 'application/json'},
-			body: JSON.stringify({items, mode, moveLyricsSidecar: true}),
+			body: JSON.stringify({items, mode, moveLyricsSidecar: true, ...(basePath.trim() ? {basePath: basePath.trim()} : {})}),
 		});
 	},
 

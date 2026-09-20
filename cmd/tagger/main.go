@@ -854,6 +854,11 @@ func newOrganizeHandler(libraryService *library.Service, dataStore *store.Store)
 		if !payload.Mode.Valid() {
 			return fmt.Errorf("unsupported organize mode: %q", payload.Mode)
 		}
+		if normalized, normalizeErr := organizer.NormalizeBasePath(payload.BasePath); normalizeErr != nil {
+			return fmt.Errorf("normalize organize base path: %w", normalizeErr)
+		} else {
+			payload.BasePath = normalized
+		}
 		planner, err := organizer.NewPlanner(libraryService.Root())
 		if err != nil {
 			return err
@@ -867,7 +872,7 @@ func newOrganizeHandler(libraryService *library.Service, dataStore *store.Store)
 				if item.BaseRevision != "" && current.Revision != item.BaseRevision {
 					itemErr = fmt.Errorf("文件在预览后发生变化")
 				} else {
-					plan, itemErr = planner.PlanWithMode(ctx, current, payload.Mode, true)
+					plan, itemErr = planner.PlanWithBasePath(ctx, current, payload.BasePath, payload.Mode, true)
 				}
 			}
 			persist := func(state domain.OrganizeItemState, failure error) error {

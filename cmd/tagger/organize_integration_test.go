@@ -28,14 +28,14 @@ func (organizeTestEngine) Version() string                                      
 
 func TestOrganizeHandlerMovesFilesAndPreservesTrackID(t *testing.T) {
 	root := t.TempDir()
-	oldAudio := filepath.Join(root, "incoming", "song.mp3")
+	oldAudio := filepath.Join(root, "M", "incoming", "song.mp3")
 	if err := os.MkdirAll(filepath.Dir(oldAudio), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(oldAudio, []byte("audio"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "incoming", "song.lrc"), []byte("lyrics"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "M", "incoming", "song.lrc"), []byte("lyrics"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	engine := organizeTestEngine{}
@@ -59,7 +59,7 @@ func TestOrganizeHandlerMovesFilesAndPreservesTrackID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close()
-	payload := domain.OrganizePayload{Mode: domain.OrganizeModeArtist, MoveLyricsSidecar: true, Items: []domain.OrganizeItemRequest{{TrackID: track.ID, BaseRevision: track.Revision}}}
+	payload := domain.OrganizePayload{Mode: domain.OrganizeModeArtist, BasePath: "M", MoveLyricsSidecar: true, Items: []domain.OrganizeItemRequest{{TrackID: track.ID, BaseRevision: track.Revision}}}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -72,18 +72,18 @@ func TestOrganizeHandlerMovesFilesAndPreservesTrackID(t *testing.T) {
 	if job.State != domain.JobSucceeded || job.Succeeded != 1 || job.Failed != 0 {
 		t.Fatalf("organize job = %#v", job)
 	}
-	newAudio := filepath.Join(root, "歌手", "song.mp3")
+	newAudio := filepath.Join(root, "M", "歌手", "song.mp3")
 	if _, err := os.Stat(newAudio); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "歌手", "song.lrc")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "M", "歌手", "song.lrc")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(oldAudio); !os.IsNotExist(err) {
 		t.Fatalf("old audio still exists: %v", err)
 	}
 	updated, err := service.Track(track.ID)
-	if err != nil || updated.ID != track.ID || updated.RelativePath != "歌手/song.mp3" {
+	if err != nil || updated.ID != track.ID || updated.RelativePath != "M/歌手/song.mp3" {
 		t.Fatalf("relocated index = %#v err=%v", updated, err)
 	}
 	items, err := repository.ListOrganizeItems(context.Background(), created.ID)

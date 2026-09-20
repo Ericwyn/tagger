@@ -177,7 +177,7 @@ export const seedTracks: Track[] = [
   ].map(([title, number, tone], index) => track({
     id: `trk-1${String(index + 1).padStart(2, '0')}`,
     fileName: `${title}.mp3`,
-    relativePath: `许嵩-安泊猜想/${title}.mp3`,
+    relativePath: `许嵩/安泊猜想/${title}.mp3`,
     folderId: amphibiousFolder,
     title: String(title),
     artists: ['许嵩'],
@@ -203,7 +203,7 @@ export const seedTracks: Track[] = [
   ].map(([title, number, tone], index) => track({
     id: `trk-2${String(index + 1).padStart(2, '0')}`,
     fileName: `许嵩-${title}.flac`,
-    relativePath: `许嵩-青年晚报/许嵩-${title}.flac`,
+    relativePath: `许嵩/青年晚报/许嵩-${title}.flac`,
     folderId: youthFolder,
     title: String(title),
     artists: ['许嵩'],

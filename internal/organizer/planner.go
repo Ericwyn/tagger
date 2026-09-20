@@ -61,6 +61,10 @@ func (p *Planner) Plan(ctx context.Context, track domain.Track, moveLyricsSideca
 }
 
 func (p *Planner) PlanWithMode(ctx context.Context, track domain.Track, mode domain.OrganizeMode, moveLyricsSidecar bool) (Plan, error) {
+	return p.PlanWithBasePath(ctx, track, "", mode, moveLyricsSidecar)
+}
+
+func (p *Planner) PlanWithBasePath(ctx context.Context, track domain.Track, basePath string, mode domain.OrganizeMode, moveLyricsSidecar bool) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
 	}
@@ -68,9 +72,16 @@ func (p *Planner) PlanWithMode(ctx context.Context, track domain.Track, mode dom
 	if !mode.Valid() {
 		return Plan{}, fmt.Errorf("unsupported organize mode: %q", mode)
 	}
+	basePath, err := NormalizeBasePath(basePath)
+	if err != nil {
+		return Plan{}, err
+	}
 	sourceRel, err := containedRelative(track.RelativePath)
 	if err != nil {
 		return Plan{}, err
+	}
+	if basePath != "" && !relativeWithinBase(sourceRel, basePath) {
+		return Plan{}, fmt.Errorf("source path is outside organize base path")
 	}
 	if strings.TrimSpace(track.FileName) == "" || filepath.Base(filepath.FromSlash(track.FileName)) != track.FileName {
 		return Plan{}, fmt.Errorf("invalid track file name")
@@ -87,6 +98,9 @@ func (p *Planner) PlanWithMode(ctx context.Context, track domain.Track, mode dom
 		pathParts = append(pathParts, album)
 	}
 	pathParts = append(pathParts, fileName)
+	if basePath != "" {
+		pathParts = append([]string{basePath}, pathParts...)
+	}
 	targetRel := filepath.ToSlash(filepath.Join(pathParts...))
 	if _, err := containedRelative(targetRel); err != nil {
 		return Plan{}, err
@@ -168,10 +182,14 @@ func (p *Planner) PlanMany(ctx context.Context, tracks []domain.Track, moveLyric
 }
 
 func (p *Planner) PlanManyWithMode(ctx context.Context, tracks []domain.Track, mode domain.OrganizeMode, moveLyricsSidecar bool) ([]Plan, error) {
+	return p.PlanManyWithBasePath(ctx, tracks, "", mode, moveLyricsSidecar)
+}
+
+func (p *Planner) PlanManyWithBasePath(ctx context.Context, tracks []domain.Track, basePath string, mode domain.OrganizeMode, moveLyricsSidecar bool) ([]Plan, error) {
 	plans := make([]Plan, 0, len(tracks))
 	seen := make(map[string]int)
 	for _, track := range tracks {
-		plan, err := p.PlanWithMode(ctx, track, mode, moveLyricsSidecar)
+		plan, err := p.PlanWithBasePath(ctx, track, basePath, mode, moveLyricsSidecar)
 		if err != nil {
 			return nil, err
 		}
@@ -187,6 +205,18 @@ func (p *Planner) PlanManyWithMode(ctx context.Context, tracks []domain.Track, m
 		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+func NormalizeBasePath(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	return containedRelative(value)
+}
+
+func relativeWithinBase(relative, base string) bool {
+	return base == "" || relative == base || strings.HasPrefix(relative, base+"/")
 }
 
 func (p *Planner) containedPath(relative string) (string, error) {

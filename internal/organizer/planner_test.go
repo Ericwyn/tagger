@@ -61,6 +61,31 @@ func TestPlanBuildsArtistOnlyPath(t *testing.T) {
 	}
 }
 
+func TestPlanUsesCurrentDirectoryAsOrganizationBase(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "M", "incoming"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "M", "incoming", "song.flac"), []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planner, err := NewPlanner(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := domain.Track{ID: "trk-base", FileName: "song.flac", RelativePath: "M/incoming/song.flac", Artists: []string{"歌手"}, Album: "专辑"}
+	plan, err := planner.PlanWithBasePath(context.Background(), track, "M", domain.OrganizeModeArtistAlbum, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Target != "M/歌手/专辑/song.flac" {
+		t.Fatalf("base path target = %q", plan.Target)
+	}
+	if _, err := planner.PlanWithBasePath(context.Background(), domain.Track{ID: "outside", FileName: "song.flac", RelativePath: "Other/song.flac", Artists: []string{"歌手"}, Album: "专辑"}, "M", domain.OrganizeModeArtistAlbum, false); err == nil {
+		t.Fatal("track outside the selected base path was accepted")
+	}
+}
+
 func TestPlanPreservesArtistNamesThatUseSlashAndAmpersand(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "song.mp3"), []byte("audio"), 0o644); err != nil {

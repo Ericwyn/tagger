@@ -122,10 +122,12 @@ export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery
   return {tracks: structuredClone(result), total: result.length};
 }
 
-function mockOrganizePlan(track: Track, mode: OrganizeMode): OrganizePreviewItem {
+function mockOrganizePlan(track: Track, mode: OrganizeMode, basePath: string): OrganizePreviewItem {
   const artist = (track.artists[0] || '未知歌手').trim() || '未知歌手';
   const album = track.album.trim() || '未知专辑';
-  const target = mode === 'artist' ? `${artist}/${track.fileName}` : `${artist}/${album}/${track.fileName}`;
+  const prefix = basePath.trim().replace(/^\/+|\/+$/g, '');
+  const relativeTarget = mode === 'artist' ? `${artist}/${track.fileName}` : `${artist}/${album}/${track.fileName}`;
+  const target = prefix ? `${prefix}/${relativeTarget}` : relativeTarget;
   return {
     trackId: track.id,
     source: track.relativePath,
@@ -138,18 +140,18 @@ function mockOrganizePlan(track: Track, mode: OrganizeMode): OrganizePreviewItem
   };
 }
 
-export async function previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<OrganizePreviewItem[]> {
+export async function previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<OrganizePreviewItem[]> {
   await wait(120);
   const byID = new Map(tracks.map((track) => [track.id, track]));
   return items.map((item) => {
     const track = byID.get(item.trackId);
     if (!track) throw new Error('track_not_found');
-    return mockOrganizePlan(track, mode);
+    return mockOrganizePlan(track, mode, basePath);
   });
 }
 
-export async function createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<Job> {
-  const plans = await previewOrganize(items, mode);
+export async function createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<Job> {
+  const plans = await previewOrganize(items, mode, basePath);
   plans.forEach((plan) => {
     const index = tracks.findIndex((track) => track.id === plan.trackId);
     if (index < 0 || plan.state === 'noop') return;

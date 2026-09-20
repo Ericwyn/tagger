@@ -35,6 +35,7 @@ type OrganizePayload struct {
 	Items             []OrganizeItemRequest `json:"items"`
 	MoveLyricsSidecar bool                  `json:"moveLyricsSidecar"`
 	Mode              OrganizeMode          `json:"mode,omitempty"`
+	BasePath          string                `json:"basePath,omitempty"`
 }
 
 type OrganizeItemState string

@@ -956,6 +956,11 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 			return "", fmt.Errorf("decode organize retry payload: %w", err)
 		}
+		if normalized, normalizeErr := organizer.NormalizeBasePath(payload.BasePath); normalizeErr != nil {
+			return "", fmt.Errorf("normalize organize retry base path: %w", normalizeErr)
+		} else {
+			payload.BasePath = normalized
+		}
 		items, err := s.store.ListOrganizeItems(ctx, job.ID)
 		if err != nil {
 			return "", err
@@ -1624,6 +1629,11 @@ func (s *Server) decodeOrganizePayload(c *app.RequestContext) (domain.OrganizePa
 	if !payload.Mode.Valid() {
 		return domain.OrganizePayload{}, fmt.Errorf("不支持的整理模式：%s", payload.Mode)
 	}
+	basePath, err := organizer.NormalizeBasePath(payload.BasePath)
+	if err != nil {
+		return domain.OrganizePayload{}, errors.New("整理根目录无效")
+	}
+	payload.BasePath = basePath
 	limit := s.batchTrackLimit(context.Background())
 	if len(payload.Items) == 0 || len(payload.Items) > limit {
 		return domain.OrganizePayload{}, fmt.Errorf("items 必须在 1 到 %d 之间", limit)
@@ -1672,7 +1682,7 @@ func (s *Server) organizePlans(ctx context.Context, payload *domain.OrganizePayl
 		}
 		tracks = append(tracks, track)
 	}
-	return planner.PlanManyWithMode(ctx, tracks, payload.Mode, true)
+	return planner.PlanManyWithBasePath(ctx, tracks, payload.BasePath, payload.Mode, true)
 }
 
 func organizeItemFromPlan(plan organizer.Plan, jobID string) domain.OrganizeItem {

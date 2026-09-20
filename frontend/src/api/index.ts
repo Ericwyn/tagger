@@ -230,16 +230,16 @@ export async function createBatchEditJob(items: BatchEditSelection[], operations
   return real.createBatchEditJob(items, operations, sequenceTracks, payload);
 }
 
-export function previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<OrganizePreviewItem[]> {
+export function previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<OrganizePreviewItem[]> {
   if (apiReadMode === 'mock') {
-    return mock.previewOrganize(items, mode);
+    return mock.previewOrganize(items, mode, basePath);
   }
-  return real.previewOrganize(items, mode);
+  return real.previewOrganize(items, mode, basePath);
 }
 
-export function createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<Job | null> {
-  if (apiReadMode === 'mock') return mock.createOrganizeJob(items, mode);
-  return real.createOrganizeJob(items, mode);
+export function createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album', basePath = ''): Promise<Job | null> {
+  if (apiReadMode === 'mock') return mock.createOrganizeJob(items, mode, basePath);
+  return real.createOrganizeJob(items, mode, basePath);
 }
 
 export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {

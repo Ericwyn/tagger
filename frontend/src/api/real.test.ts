@@ -287,13 +287,13 @@ describe('real API client', () => {
     const api = createRealAPI(fetcher);
     const selection = [{trackId: 'trk-1', baseRevision: 'rev-1'}];
 
-    await expect(api.previewOrganize(selection, 'artist')).resolves.toEqual([]);
-    await expect(api.createOrganizeJob(selection, 'artist')).resolves.toEqual(job);
+    await expect(api.previewOrganize(selection, 'artist', 'M')).resolves.toEqual([]);
+    await expect(api.createOrganizeJob(selection, 'artist', 'M')).resolves.toEqual(job);
     expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({
-      items: selection, mode: 'artist', moveLyricsSidecar: true,
+      items: selection, mode: 'artist', basePath: 'M', moveLyricsSidecar: true,
     });
     expect(JSON.parse(String((fetcher.mock.calls[1][1] as RequestInit).body))).toEqual({
-      items: selection, mode: 'artist', moveLyricsSidecar: true,
+      items: selection, mode: 'artist', basePath: 'M', moveLyricsSidecar: true,
     });
   });
 

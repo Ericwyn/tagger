@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {AlertTriangle, Check, LoaderCircle, MoveRight, X} from 'lucide-react';
+import {AlertTriangle, Check, FolderOpen, LoaderCircle, MoveRight, X} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {previewOrganize} from '@/api';
 import type {OrganizeMode, OrganizePreviewItem, Track} from '@/types';
@@ -7,9 +7,10 @@ import type {OrganizeMode, OrganizePreviewItem, Track} from '@/types';
 interface OrganizePanelProps {
   open: boolean;
   tracks: Track[];
+  basePath?: string | null;
   saving: boolean;
   onClose: () => void;
-  onApply: (mode: OrganizeMode) => Promise<void>;
+  onApply: (mode: OrganizeMode, basePath: string) => Promise<void>;
 }
 
 const stateLabels: Record<OrganizePreviewItem['state'], string> = {
@@ -26,25 +27,26 @@ const modeOptions: Array<{value: OrganizeMode; label: string; hint: string}> = [
   {value: 'artist', label: '第一歌手 / 原文件名', hint: '更扁平，适合单曲较多的曲库'},
 ];
 
-export function OrganizePanel({open, tracks, saving, onClose, onApply}: OrganizePanelProps) {
+export function OrganizePanel({open, tracks, basePath = '', saving, onClose, onApply}: OrganizePanelProps) {
   const [items, setItems] = useState<OrganizePreviewItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mode, setMode] = useState<OrganizeMode>('artist_album');
 
   const trackKey = useMemo(() => tracks.map((track) => `${track.id}:${track.revision}`).join('|'), [tracks]);
+  const rootPath = basePath?.trim() ?? '';
   useEffect(() => {
     if (!open) return;
     let active = true;
     setLoading(true);
     setError('');
     setItems([]);
-    void previewOrganize(tracks.map((track) => ({trackId: track.id, baseRevision: track.revision})), mode)
+    void previewOrganize(tracks.map((track) => ({trackId: track.id, baseRevision: track.revision})), mode, rootPath)
       .then((next) => { if (active) setItems(next); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '整理预览失败'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [open, trackKey, mode]);
+  }, [open, trackKey, mode, rootPath]);
 
   if (!open) return null;
   const selectedMode = modeOptions.find((option) => option.value === mode) ?? modeOptions[0];
@@ -80,6 +82,11 @@ export function OrganizePanel({open, tracks, saving, onClose, onApply}: Organize
               {modeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
+          <div className="organize-root-note">
+            <FolderOpen size={15} />
+            <span>整理根目录</span>
+            <code>{rootPath || '曲库根目录'}</code>
+          </div>
           <div className="organize-policy-note">
             <MoveRight size={16} />
             <span>目标冲突不会覆盖已有文件；同名 .lrc 会和音频一起移动。</span>
@@ -114,7 +121,7 @@ export function OrganizePanel({open, tracks, saving, onClose, onApply}: Organize
         <footer className="batch-edit-footer organize-footer">
           <span>{blocked ? '请解决目标冲突后重新预览' : '确认后将创建后台整理任务'}</span>
           <button className="secondary-button" onClick={onClose} disabled={saving}>取消</button>
-          <button className="primary-button" disabled={loading || Boolean(error) || blocked || items.length === 0 || saving} onClick={() => void onApply(mode)}>
+          <button className="primary-button" disabled={loading || Boolean(error) || blocked || items.length === 0 || saving} onClick={() => void onApply(mode, rootPath)}>
             {saving ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
             {saving ? '创建中…' : `确认整理 ${readyCount} 首`}
           </button>
