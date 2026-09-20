@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {CandidateDrawer} from '@/components/library/CandidateDrawer';
 import {BatchEditPanel, buildBatchPatch, type BatchOperation} from '@/components/library/BatchEditPanel';
+import {OrganizePanel} from '@/components/library/OrganizePanel';
 import {LibrarySidebar, type SidebarFilter} from '@/components/library/LibrarySidebar';
 import {TrackInspector} from '@/components/library/TrackInspector';
 import {TrackList} from '@/components/library/TrackList';
@@ -25,6 +26,7 @@ import {
   apiReadMode,
   applyCandidateArtwork,
   createBatchEditJob,
+	  createOrganizeJob,
 	  getSystem,
 	  listLibraries,
 	  listTrackPage,
@@ -229,6 +231,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   const [candidates, setCandidates] = useState<MatchCandidate[]>([]);
   const [candidateFocus, setCandidateFocus] = useState<'metadata' | 'lyrics'>('metadata');
   const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [organizeOpen, setOrganizeOpen] = useState(false);
   const [mobileSidebar, setMobileSidebar] = useState(false);
   const [mobileInspector, setMobileInspector] = useState(false);
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
@@ -738,6 +741,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
   }, [selectedDetails, selectedIds, tracks]);
 	const activeTrackIndexed = isTrackIndexed(activeTrack);
 	const hasUnindexedSelection = selectedTracks.some((track) => !isTrackIndexed(track));
+	const organizableTracks = selectedTracks.filter((track) => track.writable && isTrackIndexed(track));
   const snapshotTracks = selectedIds.size > 0 ? selectedTracks : visibleTracks;
   const hasActiveToolbarFilters = formatFilter !== 'all' || activeFilter !== 'all' || includeSubfolders || sortMode !== 'album';
 
@@ -929,7 +933,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
   };
 
-		const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
+  const applyBatchEdit = async (operations: BatchOperation[], sequenceTracks: boolean, artwork?: BatchArtworkInput) => {
 	    // Match the drawer's "应用到 N 首" contract: tracks already known to
 	    // be read-only are excluded, while the backend still performs an
 	    // authoritative effective-permission preflight before enqueueing.
@@ -991,6 +995,38 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 	    ? `已安全写入 ${succeeded} 首曲目的批量${artwork ? '标签与封面' : '标签'}修改`
 	    : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
 	};
+
+  const applyOrganize = async () => {
+    const selectedTracksForJob = selectedTracks.filter((track) => track.writable && isTrackIndexed(track));
+    if (selectedTracksForJob.length === 0) {
+      onNotice('没有可整理的可写曲目');
+      return;
+    }
+    setSaving(true);
+    try {
+      const job = await createOrganizeJob(selectedTracksForJob.map((track) => ({trackId: track.id, baseRevision: track.revision})));
+      setOrganizeOpen(false);
+      setSelectedIds(new Set());
+      setSelectedDetails(new Map());
+      setResultSelectionActive(false);
+      if (apiReadMode === 'real' && job) {
+        onNotice(`文件整理任务已创建：${job.id}`);
+        void waitForJob(job.id).then(async (completed) => {
+          await loadData(true);
+          onNotice(completed.state === 'succeeded'
+            ? `文件整理已完成，共处理 ${completed.succeeded} 首`
+            : `文件整理结束：${completed.detail || completed.state}`);
+        }).catch((error) => onNotice(error instanceof Error ? `文件整理完成后刷新失败：${error.message}` : '文件整理完成后刷新失败'));
+      } else {
+        await loadData(true);
+        onNotice('文件位置已整理');
+      }
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : '文件整理任务创建失败');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const applySnapshot = async (updates: SnapshotUpdate[]) => {
     if (saving || updates.length === 0) return;
@@ -1297,13 +1333,14 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
       />
 
       {selectedIds.size > 0 && (
-        <div className="selection-bar">
+	  <div className="selection-bar">
           <div className="selection-count">
             <strong>{selectedIds.size}</strong>
             <span>首已选择</span>
           </div>
           <span className="selection-divider" />
 		  <button disabled={hasUnindexedSelection} title={hasUnindexedSelection ? '索引完成后可批量编辑' : undefined} onClick={() => setBatchEditOpen(true)}><Tags size={16} /> 批量编辑</button>
+		  <button className="selection-organize" disabled={hasUnindexedSelection || organizableTracks.length === 0} title={hasUnindexedSelection ? '索引完成后可整理文件' : organizableTracks.length === 0 ? '没有可写曲目' : undefined} onClick={() => setOrganizeOpen(true)}><FolderTree size={16} /> 整理文件</button>
 		  <button className="is-accent" disabled={hasUnindexedSelection} title={hasUnindexedSelection ? '索引完成后可抓取元数据' : undefined} onClick={() => void openReviewSelection()}>
             <Sparkles size={16} /> 抓取元数据
           </button>
@@ -1329,6 +1366,14 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
         saving={saving}
         onClose={() => setBatchEditOpen(false)}
         onApply={applyBatchEdit}
+      />
+
+      <OrganizePanel
+        open={organizeOpen}
+        tracks={organizableTracks}
+        saving={saving}
+        onClose={() => setOrganizeOpen(false)}
+        onApply={applyOrganize}
       />
 
       <TagSnapshotPanel

@@ -28,6 +28,7 @@ import (
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
+	"github.com/ericwyn/tagger/internal/organizer"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/store"
@@ -140,6 +141,8 @@ func (s *Server) routes() {
 	api.GET("/tracks", s.handleTracks)
 	api.POST("/tracks/resolve", s.handleTrackResolve)
 	api.POST("/tracks/:id/scan", s.handleTrackScan)
+	api.POST("/tracks/organize-preview", s.handleOrganizePreview)
+	api.POST("/tracks/organize", s.handleOrganize)
 	api.POST("/tracks/batch-edit", s.handleBatchEdit)
 	api.GET("/tracks/:id", s.handleTrack)
 	api.GET("/tracks/:id/raw-tags", s.handleRawTags)
@@ -170,6 +173,7 @@ func (s *Server) routes() {
 	api.GET("/jobs/:id/events", s.handleJobEvents)
 	api.GET("/jobs/:id/matches", s.handleJobMatches)
 	api.GET("/jobs/:id/batch-edit-items", s.handleBatchEditItems)
+	api.GET("/jobs/:id/organize-items", s.handleOrganizeItems)
 	api.GET("/revisions", s.handleRevisions)
 	api.GET("/revisions/:id", s.handleRevision)
 	api.POST("/revisions/:id/snapshot", s.handleRevisionSnapshot)
@@ -947,6 +951,38 @@ func (s *Server) retryPayload(ctx context.Context, job domain.Job) (string, erro
 		payload.Items = items
 		encoded, err := json.Marshal(payload)
 		return string(encoded), err
+	case domain.JobOrganize:
+		var payload domain.OrganizePayload
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return "", fmt.Errorf("decode organize retry payload: %w", err)
+		}
+		items, err := s.store.ListOrganizeItems(ctx, job.ID)
+		if err != nil {
+			return "", err
+		}
+		states := make(map[string]domain.OrganizeItemState, len(items))
+		for _, item := range items {
+			states[item.TrackID] = item.State
+		}
+		retryItems := make([]domain.OrganizeItemRequest, 0, len(payload.Items))
+		for _, item := range payload.Items {
+			state, found := states[item.TrackID]
+			if found && state != domain.OrganizeFailed {
+				continue
+			}
+			track, trackErr := s.library.Track(item.TrackID)
+			if trackErr != nil {
+				return "", trackErr
+			}
+			item.BaseRevision = track.Revision
+			retryItems = append(retryItems, item)
+		}
+		if len(retryItems) == 0 {
+			return "", jobs.ErrJobNotRetryable
+		}
+		payload.Items = retryItems
+		encoded, err := json.Marshal(payload)
+		return string(encoded), err
 	default:
 		return "", jobs.ErrJobNotRetryable
 	}
@@ -1504,6 +1540,144 @@ func (s *Server) handleTrackScan(ctx context.Context, c *app.RequestContext) {
 	}
 	c.Header("ETag", `"`+track.Revision+`"`)
 	s.writeData(c, track)
+}
+
+func (s *Server) handleOrganizePreview(ctx context.Context, c *app.RequestContext) {
+	payload, err := s.decodeOrganizePayload(c)
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	plans, err := s.organizePlans(ctx, &payload)
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	items := make([]domain.OrganizeItem, 0, len(plans))
+	for _, plan := range plans {
+		items = append(items, organizeItemFromPlan(plan, ""))
+	}
+	s.writeData(c, items)
+}
+
+func (s *Server) handleOrganize(ctx context.Context, c *app.RequestContext) {
+	if s.jobs == nil || s.library == nil || s.writer == nil {
+		s.writeError(c, consts.StatusServiceUnavailable, "job_unavailable", "任务队列尚未启用")
+		return
+	}
+	payload, err := s.decodeOrganizePayload(c)
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	plans, err := s.organizePlans(ctx, &payload)
+	if err != nil {
+		s.writeError(c, consts.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	for _, plan := range plans {
+		if plan.State != domain.OrganizeReady && plan.State != domain.OrganizeNoop {
+			s.writeError(c, consts.StatusConflict, "organize_conflict", "整理预览包含无法安全移动的曲目，请刷新预览后重试："+strings.Join(plan.Warnings, "；"))
+			return
+		}
+	}
+	trackIDs := make([]string, 0, len(payload.Items))
+	for _, item := range payload.Items {
+		trackIDs = append(trackIDs, item.TrackID)
+	}
+	if err := s.validateWritableTracks(trackIDs); err != nil {
+		s.writeWritablePreflightError(c, err)
+		return
+	}
+	payload.MoveLyricsSidecar = true
+	job, err := s.jobs.Enqueue(ctx, domain.Job{
+		Kind: domain.JobOrganize, LibraryID: s.library.Library().ID,
+		Title: "整理文件位置", Detail: "等待文件整理 worker", Total: len(payload.Items),
+		Payload: mustJSON(payload),
+	})
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "job_enqueue_failed", err.Error())
+		return
+	}
+	c.JSON(consts.StatusAccepted, map[string]any{"data": toJobResponse(job)})
+}
+
+func (s *Server) handleOrganizeItems(ctx context.Context, c *app.RequestContext) {
+	if s.store == nil {
+		s.writeData(c, []domain.OrganizeItem{})
+		return
+	}
+	items, err := s.store.ListOrganizeItems(ctx, c.Param("id"))
+	if err != nil {
+		s.writeError(c, consts.StatusInternalServerError, "organize_items_failed", err.Error())
+		return
+	}
+	s.writeData(c, items)
+}
+
+func (s *Server) decodeOrganizePayload(c *app.RequestContext) (domain.OrganizePayload, error) {
+	var payload domain.OrganizePayload
+	if err := json.Unmarshal(c.Request.Body(), &payload); err != nil {
+		return domain.OrganizePayload{}, errors.New("请求 JSON 无效")
+	}
+	limit := s.batchTrackLimit(context.Background())
+	if len(payload.Items) == 0 || len(payload.Items) > limit {
+		return domain.OrganizePayload{}, fmt.Errorf("items 必须在 1 到 %d 之间", limit)
+	}
+	seen := make(map[string]struct{}, len(payload.Items))
+	for index := range payload.Items {
+		item := &payload.Items[index]
+		item.TrackID = strings.TrimSpace(item.TrackID)
+		if item.TrackID == "" {
+			return domain.OrganizePayload{}, errors.New("trackId 不能为空")
+		}
+		if _, found := seen[item.TrackID]; found {
+			return domain.OrganizePayload{}, fmt.Errorf("trackId 重复：%s", item.TrackID)
+		}
+		seen[item.TrackID] = struct{}{}
+	}
+	return payload, nil
+}
+
+func (s *Server) organizePlans(ctx context.Context, payload *domain.OrganizePayload) ([]organizer.Plan, error) {
+	if s.library == nil {
+		return nil, errors.New("音乐曲库尚未初始化")
+	}
+	planner, err := organizer.NewPlanner(s.library.Root())
+	if err != nil {
+		return nil, err
+	}
+	tracks := make([]domain.Track, 0, len(payload.Items))
+	for index := range payload.Items {
+		item := &payload.Items[index]
+		track, trackErr := s.library.Track(item.TrackID)
+		if errors.Is(trackErr, library.ErrTrackNotFound) {
+			return nil, fmt.Errorf("曲目不存在：%s", item.TrackID)
+		}
+		if trackErr != nil {
+			return nil, trackErr
+		}
+		if track.Missing {
+			return nil, fmt.Errorf("曲目文件缺失：%s", track.FileName)
+		}
+		if track.SyncState != "" && track.SyncState != domain.SyncIndexed {
+			return nil, fmt.Errorf("曲目仍在索引：%s", track.FileName)
+		}
+		if item.BaseRevision == "" {
+			item.BaseRevision = track.Revision
+		}
+		tracks = append(tracks, track)
+	}
+	return planner.PlanMany(ctx, tracks, true)
+}
+
+func organizeItemFromPlan(plan organizer.Plan, jobID string) domain.OrganizeItem {
+	return domain.OrganizeItem{
+		JobID: jobID, TrackID: plan.TrackID, Source: plan.Source, Target: plan.Target,
+		PrimaryArtist: plan.PrimaryArtist, Album: plan.Album,
+		SidecarSource: plan.SidecarSource, SidecarTarget: plan.SidecarTarget,
+		SidecarExists: plan.SidecarExists, State: plan.State, Warnings: append([]string(nil), plan.Warnings...),
+	}
 }
 
 func (s *Server) handleBatchEdit(ctx context.Context, c *app.RequestContext) {

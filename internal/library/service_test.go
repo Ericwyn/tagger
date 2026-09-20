@@ -225,6 +225,45 @@ func TestServiceRescanTrackOnlyReadsRequestedFile(t *testing.T) {
 	}
 }
 
+func TestRelocateTrackPreservesIdentityAndUpdatesFolder(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old.mp3")
+	if err := os.WriteFile(oldPath, []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	musicScanner, err := scanner.New(serviceEngine{}, scanner.Options{Root: root, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := New(context.Background(), musicScanner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracks := service.ListTracks(TrackFilter{})
+	if len(tracks) != 1 {
+		t.Fatalf("tracks = %#v", tracks)
+	}
+	originalID := tracks[0].ID
+	newRelativePath := "测试歌手/专辑/old.mp3"
+	newAbsolutePath := filepath.Join(root, filepath.FromSlash(newRelativePath))
+	if err := os.MkdirAll(filepath.Dir(newAbsolutePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(oldPath, newAbsolutePath); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := service.RelocateTrack(context.Background(), originalID, newRelativePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != originalID || updated.RelativePath != newRelativePath || updated.FolderID == "folder-root" {
+		t.Fatalf("relocated track = %#v", updated)
+	}
+	if got, err := service.Track(originalID); err != nil || got.RelativePath != newRelativePath {
+		t.Fatalf("stored track = %#v err=%v", got, err)
+	}
+}
+
 func TestServiceQuickScanSkipsUnchangedFilesAndMarksMissing(t *testing.T) {
 	root := t.TempDir()
 	firstPath := filepath.Join(root, "First.mp3")

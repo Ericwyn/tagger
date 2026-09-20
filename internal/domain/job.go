@@ -10,6 +10,7 @@ const (
 	JobMatch     JobKind = "match"
 	JobWrite     JobKind = "write"
 	JobBatchEdit JobKind = "batch_edit"
+	JobOrganize  JobKind = "organize"
 
 	JobWaiting   JobState = "waiting"
 	JobRunning   JobState = "running"

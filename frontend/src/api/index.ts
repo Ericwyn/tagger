@@ -24,6 +24,7 @@ import type {
 	BatchEditOperation,
 	BatchEditSelection,
 	BatchArtworkInput,
+	OrganizePreviewItem,
 	CandidateSearchQuery,
 	MatchQueryHistory,
 	ScanMode,
@@ -226,6 +227,18 @@ export async function createBatchEditJob(items: BatchEditSelection[], operations
     }
   }
   return real.createBatchEditJob(items, operations, sequenceTracks, payload);
+}
+
+export function previewOrganize(items: BatchEditSelection[]): Promise<OrganizePreviewItem[]> {
+  if (apiReadMode === 'mock') {
+    return mock.previewOrganize(items);
+  }
+  return real.previewOrganize(items);
+}
+
+export function createOrganizeJob(items: BatchEditSelection[]): Promise<Job | null> {
+  if (apiReadMode === 'mock') return mock.createOrganizeJob(items);
+  return real.createOrganizeJob(items);
 }
 
 export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {

@@ -5,6 +5,7 @@ import {
   CircleAlert,
   Clock3,
   FilePenLine,
+  FolderTree,
   LoaderCircle,
   RefreshCw,
   ScanSearch,
@@ -37,6 +38,7 @@ const kindIcon = {
   match: Sparkles,
   write: FilePenLine,
   batch_edit: Tags,
+  organize: FolderTree,
 };
 
 const batchItemStateText: Record<BatchEditItem['state'], string> = {
@@ -234,7 +236,7 @@ export function JobsPage({onOpenReview, focusJobId}: JobsPageProps) {
 			  <div><span style={{width: `${activeProgress}%`}} /></div>
             </div>
             <dl>
-              <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : active.kind === 'write' ? '安全写入' : '批量编辑'}</dd></div>
+			  <div><dt>任务类型</dt><dd>{active.kind === 'scan' ? '曲库扫描' : active.kind === 'match' ? '元数据抓取' : active.kind === 'write' ? '安全写入' : active.kind === 'organize' ? '整理文件位置' : '批量编辑'}</dd></div>
               <div><dt>当前状态</dt><dd>{stateMeta[active.state].label}</dd></div>
               <div><dt>已处理</dt><dd>{active.processed} / {active.total}</dd></div>
               <div><dt>成功</dt><dd>{active.succeeded}</dd></div>

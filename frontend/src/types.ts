@@ -251,7 +251,7 @@ export type JobState = 'running' | 'review' | 'waiting' | 'succeeded' | 'partial
 
 export interface Job {
   id: string;
-  kind: 'scan' | 'match' | 'write' | 'batch_edit';
+  kind: 'scan' | 'match' | 'write' | 'batch_edit' | 'organize';
   title: string;
   detail: string;
   state: JobState;
@@ -300,6 +300,21 @@ export interface BatchEditOperation {
 export interface BatchEditSelection {
   trackId: string;
   baseRevision: string;
+}
+
+export type OrganizeItemState = 'ready' | 'noop' | 'conflict' | 'invalid' | 'moved' | 'failed';
+
+export interface OrganizePreviewItem {
+  trackId: string;
+  source: string;
+  target: string;
+  primaryArtist: string;
+  album: string;
+  sidecarSource?: string;
+  sidecarTarget?: string;
+  sidecarExists?: boolean;
+  state: OrganizeItemState;
+  warnings?: string[];
 }
 
 export interface BatchArtworkInput {

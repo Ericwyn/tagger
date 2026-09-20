@@ -17,6 +17,7 @@ import (
 	"github.com/ericwyn/tagger/internal/artwork"
 	"github.com/ericwyn/tagger/internal/domain"
 	"github.com/ericwyn/tagger/internal/library"
+	"github.com/ericwyn/tagger/internal/mutation"
 	"github.com/ericwyn/tagger/internal/scanner"
 	"github.com/ericwyn/tagger/internal/tags"
 )
@@ -107,7 +108,6 @@ type Writer struct {
 	rootMu sync.RWMutex
 	root   string
 	engine tags.Engine
-	locks  sync.Map
 }
 
 func New(root string, engine tags.Engine) (*Writer, error) {
@@ -253,10 +253,8 @@ func (w *Writer) WriteSidecar(ctx context.Context, ref library.FileRef, baseRevi
 	if err != nil {
 		return SidecarResult{}, err
 	}
-	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := mutation.Acquire(path)
+	defer unlock()
 
 	if err := ctx.Err(); err != nil {
 		return SidecarResult{}, err
@@ -376,10 +374,8 @@ func (w *Writer) ReadArtwork(ctx context.Context, ref library.FileRef, index int
 	if err != nil {
 		return artwork.Asset{}, err
 	}
-	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := mutation.Acquire(path)
+	defer unlock()
 	data, err := engine.ReadArtwork(ctx, path, index)
 	if err != nil {
 		return artwork.Asset{}, err
@@ -409,10 +405,8 @@ func (w *Writer) WriteArtwork(ctx context.Context, ref library.FileRef, baseRevi
 	if err != nil {
 		return ArtworkResult{}, err
 	}
-	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := mutation.Acquire(path)
+	defer unlock()
 
 	if err := ctx.Err(); err != nil {
 		return ArtworkResult{}, err
@@ -546,10 +540,8 @@ func (w *Writer) mutate(ctx context.Context, ref library.FileRef, baseRevision s
 	if err != nil {
 		return Result{}, err
 	}
-	lockValue, _ := w.locks.LoadOrStore(path, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
+	unlock := mutation.Acquire(path)
+	defer unlock()
 
 	if err := ctx.Err(); err != nil {
 		return Result{}, err

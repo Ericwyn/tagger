@@ -42,6 +42,10 @@ type DeltaRepository interface {
 	SaveTrackUpdates(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error
 }
 
+type RelocationRepository interface {
+	SaveTrackRelocation(ctx context.Context, root string, result scanner.Result, previousPath string, track domain.Track) error
+}
+
 type RootRepository interface {
 	SetLibraryRoot(context.Context, string) error
 }
@@ -194,6 +198,71 @@ func (s *Service) RescanTracks(ctx context.Context, ids []string) ([]domain.Trac
 		}
 	}
 	return tracks, nil
+}
+
+// RelocateTrack re-reads a file at its new path while retaining the existing
+// track identity. The organizer uses this after an in-library rename so
+// revision history, selected rows, and persisted match items remain attached
+// to the same track ID.
+func (s *Service) RelocateTrack(ctx context.Context, id, relativePath string) (domain.Track, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
+
+	current, err := s.Track(id)
+	if err != nil {
+		return domain.Track{}, err
+	}
+	relativePath = filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(relativePath))))
+	if relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") || filepath.IsAbs(filepath.FromSlash(relativePath)) {
+		return domain.Track{}, fmt.Errorf("invalid relative track path")
+	}
+	next, scanErr := s.currentScanner().ScanTrack(ctx, relativePath)
+	if next.ID == "" {
+		return domain.Track{}, scanErr
+	}
+	next.ID = current.ID
+	next.CoverTone = current.CoverTone
+	if scanErr != nil {
+		return domain.Track{}, scanErr
+	}
+
+	s.mu.RLock()
+	tracks := cloneTracks(s.tracks)
+	librarySummary := cloneLibrary(s.library)
+	report := s.report
+	s.mu.RUnlock()
+	found := false
+	for index := range tracks {
+		if tracks[index].ID == current.ID {
+			tracks[index] = cloneTrack(next)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.Track{}, ErrTrackNotFound
+	}
+	sort.Slice(tracks, func(i, j int) bool { return tracks[i].RelativePath < tracks[j].RelativePath })
+	librarySummary.TrackCount = presentTrackCount(tracks)
+	librarySummary.Folders = buildFoldersForTracks(tracks)
+	librarySummary.FolderCount = len(librarySummary.Folders)
+	result := scanner.Result{Library: librarySummary, Tracks: tracks, Report: report}
+	if s.repo != nil {
+		if relocationRepo, ok := s.repo.(RelocationRepository); ok {
+			if err := relocationRepo.SaveTrackRelocation(ctx, s.currentScanner().Root(), result, current.RelativePath, next); err != nil {
+				return domain.Track{}, fmt.Errorf("persist track relocation: %w", err)
+			}
+		} else if deltaRepo, ok := s.repo.(DeltaRepository); ok {
+			if err := deltaRepo.SaveTrackUpdates(ctx, s.currentScanner().Root(), result, []domain.Track{next}); err != nil {
+				return domain.Track{}, fmt.Errorf("persist track relocation: %w", err)
+			}
+		} else if err := s.repo.SaveScan(ctx, s.currentScanner().Root(), result); err != nil {
+			return domain.Track{}, fmt.Errorf("persist track relocation: %w", err)
+		}
+	}
+	s.apply(result)
+	s.publishEvent(Event{Kind: EventInventory, Paths: []string{current.RelativePath, next.RelativePath}})
+	return next, nil
 }
 
 func (s *Service) RemoveMissing() int {

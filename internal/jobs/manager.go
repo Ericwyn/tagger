@@ -139,7 +139,7 @@ func (m *Manager) HasBlockingFileWork(ctx context.Context) (bool, error) {
 			continue
 		}
 		switch job.Kind {
-		case domain.JobScan, domain.JobWrite, domain.JobBatchEdit:
+		case domain.JobScan, domain.JobWrite, domain.JobBatchEdit, domain.JobOrganize:
 			return true, nil
 		}
 	}
@@ -397,7 +397,7 @@ func retryPayloadTotal(kind domain.JobKind, payload string, fallback int) int {
 		if len(counts.TrackIDs) > 0 {
 			return len(counts.TrackIDs)
 		}
-	case domain.JobWrite, domain.JobBatchEdit:
+	case domain.JobWrite, domain.JobBatchEdit, domain.JobOrganize:
 		if len(counts.Items) > 0 {
 			return len(counts.Items)
 		}

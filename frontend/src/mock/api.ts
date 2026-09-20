@@ -1,5 +1,5 @@
 import {candidatesFor, jobs, library, providerConfigs, revisions, seedTracks} from '@/mock/data';
-import {defaultBatchTrackLimit, type CandidateSearchQuery, type DirectoryProbe, type Job, type LibrarySummary, type LyricsSidecarWriteResult, type MatchCandidate, type ProviderConfig, type ProviderTestResponse, type Revision, type SidecarInfo, type Track, type TrackPatch, type TrackPage, type TrackQuery, type TrackSort} from '@/types';
+import {defaultBatchTrackLimit, type BatchEditSelection, type CandidateSearchQuery, type DirectoryProbe, type Job, type LibrarySummary, type LyricsSidecarWriteResult, type MatchCandidate, type OrganizePreviewItem, type ProviderConfig, type ProviderTestResponse, type Revision, type SidecarInfo, type Track, type TrackPatch, type TrackPage, type TrackQuery, type TrackSort} from '@/types';
 
 let tracks = structuredClone(seedTracks);
 
@@ -120,6 +120,42 @@ export async function resolveTracks(request: {ids?: string[]; query?: TrackQuery
   const result = filteredMockTracks(request.query ?? {});
   if (result.length > limit) throw new Error(`当前结果超过 ${limit} 首，请缩小搜索、目录或筛选范围后再操作`);
   return {tracks: structuredClone(result), total: result.length};
+}
+
+function mockOrganizePlan(track: Track): OrganizePreviewItem {
+  const artist = (track.artists[0] || '未知歌手').trim() || '未知歌手';
+  const album = track.album.trim() || '未知专辑';
+  const target = `${artist}/${album}/${track.fileName}`;
+  return {
+    trackId: track.id,
+    source: track.relativePath,
+    target,
+    primaryArtist: artist,
+    album,
+    sidecarExists: Boolean(track.lyricsSidecar?.exists),
+    state: track.relativePath === target ? 'noop' : 'ready',
+    warnings: [],
+  };
+}
+
+export async function previewOrganize(items: BatchEditSelection[]): Promise<OrganizePreviewItem[]> {
+  await wait(120);
+  const byID = new Map(tracks.map((track) => [track.id, track]));
+  return items.map((item) => {
+    const track = byID.get(item.trackId);
+    if (!track) throw new Error('track_not_found');
+    return mockOrganizePlan(track);
+  });
+}
+
+export async function createOrganizeJob(items: BatchEditSelection[]): Promise<Job> {
+  const plans = await previewOrganize(items);
+  plans.forEach((plan) => {
+    const index = tracks.findIndex((track) => track.id === plan.trackId);
+    if (index < 0 || plan.state === 'noop') return;
+    tracks[index] = {...tracks[index], relativePath: plan.target, folderId: `folder-${plan.primaryArtist}-${plan.album}`};
+  });
+  return {id: `mock-organize-${Date.now()}`, kind: 'organize', title: '整理文件位置', detail: 'Mock 文件整理完成', state: 'succeeded', processed: plans.length, total: plans.length, succeeded: plans.length, failed: 0, startedAt: '刚刚'};
 }
 
 function mockTagIssues(track: Track): Track['tagIssues'] {

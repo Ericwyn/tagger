@@ -21,6 +21,7 @@ import (
 	"github.com/ericwyn/tagger/internal/filewrite"
 	"github.com/ericwyn/tagger/internal/jobs"
 	"github.com/ericwyn/tagger/internal/library"
+	"github.com/ericwyn/tagger/internal/organizer"
 	"github.com/ericwyn/tagger/internal/providers"
 	"github.com/ericwyn/tagger/internal/providers/itunes"
 	"github.com/ericwyn/tagger/internal/providers/kugou"
@@ -496,6 +497,7 @@ func main() {
 		return nil
 	})
 	jobManager.Register(domain.JobBatchEdit, newBatchEditHandler(libraryService, tagWriter, dataStore))
+	jobManager.Register(domain.JobOrganize, newOrganizeHandler(libraryService, dataStore))
 	if err := jobManager.Start(context.Background()); err != nil {
 		logger.Error("start persistent job worker", "error", err)
 		os.Exit(1)
@@ -835,6 +837,84 @@ func newBatchEditHandler(libraryService *library.Service, tagWriter *filewrite.W
 				BeforeTags: item.result.BeforeTags, AfterTags: item.result.AfterTags,
 				BeforeArtwork: beforeArtwork, AfterArtwork: afterArtwork,
 			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+func newOrganizeHandler(libraryService *library.Service, dataStore *store.Store) jobs.Handler {
+	return func(ctx context.Context, job domain.Job, progress jobs.Progress) error {
+		var payload domain.OrganizePayload
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			return fmt.Errorf("decode organize payload: %w", err)
+		}
+		planner, err := organizer.NewPlanner(libraryService.Root())
+		if err != nil {
+			return err
+		}
+		succeeded, failed := 0, 0
+		var lastFailure error
+		for index, item := range payload.Items {
+			current, itemErr := libraryService.Track(item.TrackID)
+			var plan organizer.Plan
+			if itemErr == nil {
+				if item.BaseRevision != "" && current.Revision != item.BaseRevision {
+					itemErr = fmt.Errorf("文件在预览后发生变化")
+				} else {
+					plan, itemErr = planner.Plan(ctx, current, true)
+				}
+			}
+			persist := func(state domain.OrganizeItemState, failure error) error {
+				if dataStore == nil {
+					return nil
+				}
+				itemResult := domain.OrganizeItem{
+					JobID: job.ID, TrackID: item.TrackID, State: state,
+					Error: errorText(failure), Warnings: append([]string(nil), plan.Warnings...),
+				}
+				if plan.TrackID != "" {
+					itemResult.Source, itemResult.Target = plan.Source, plan.Target
+					itemResult.PrimaryArtist, itemResult.Album = plan.PrimaryArtist, plan.Album
+					itemResult.SidecarSource, itemResult.SidecarTarget = plan.SidecarSource, plan.SidecarTarget
+					itemResult.SidecarExists = plan.SidecarExists
+				}
+				return dataStore.UpsertOrganizeItem(ctx, itemResult)
+			}
+			if itemErr == nil {
+				switch plan.State {
+				case domain.OrganizeNoop:
+					if err := persist(domain.OrganizeNoop, nil); err != nil {
+						return err
+					}
+					succeeded++
+				case domain.OrganizeReady:
+					if moveErr := organizer.Move(ctx, plan); moveErr != nil {
+						itemErr = moveErr
+					} else if _, relocateErr := libraryService.RelocateTrack(ctx, item.TrackID, plan.Target); relocateErr != nil {
+						itemErr = relocateErr
+						if rollbackErr := organizer.Rollback(context.Background(), plan); rollbackErr != nil {
+							itemErr = fmt.Errorf("%w；回滚失败：%v", itemErr, rollbackErr)
+						}
+					} else {
+						if err := persist(domain.OrganizeMoved, nil); err != nil {
+							return err
+						}
+						succeeded++
+					}
+				default:
+					itemErr = fmt.Errorf("无法整理：%s", strings.Join(plan.Warnings, "；"))
+				}
+			}
+			if itemErr != nil {
+				failed++
+				lastFailure = itemErr
+				if err := persist(domain.OrganizeFailed, itemErr); err != nil {
+					return err
+				}
+			}
+			if err := progress(index+1, len(payload.Items), succeeded, failed, formatItemProgress("整理", index+1, len(payload.Items), succeeded, failed, lastFailure)); err != nil {
 				return err
 			}
 		}

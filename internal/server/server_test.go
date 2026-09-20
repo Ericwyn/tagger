@@ -854,6 +854,42 @@ func TestBatchEditAPIQueuesRevisionGuardedJob(t *testing.T) {
 	}
 }
 
+func TestOrganizeAPIPreviewsAndQueuesLocationJob(t *testing.T) {
+	s := newTestServer(t)
+	manager := jobs.New(s.store)
+	s.SetJobManager(manager)
+	track := s.library.ListTracks(library.TrackFilter{})[0]
+	body := []byte(`{"items":[{"trackId":"` + track.ID + `","baseRevision":"` + track.Revision + `"}],"moveLyricsSidecar":true}`)
+	preview := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize-preview",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if preview.Code != 200 || !containsJSON(preview.Body.Bytes(), `"source":"`+track.FileName+`"`) || !containsJSON(preview.Body.Bytes(), `"target":"歌手/未知专辑/`+track.FileName+`"`) {
+		t.Fatalf("organize preview = %d %s", preview.Code, preview.Body.String())
+	}
+	queued := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize",
+		&ut.Body{Body: bytes.NewReader(body), Len: len(body)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if queued.Code != 202 || !containsJSON(queued.Body.Bytes(), `"kind":"organize"`) {
+		t.Fatalf("organize queue = %d %s", queued.Code, queued.Body.String())
+	}
+	var envelope struct {
+		Data jobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(queued.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.store.Job(context.Background(), envelope.Data.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload domain.OrganizePayload
+	if err := json.Unmarshal([]byte(stored.Payload), &payload); err != nil || len(payload.Items) != 1 || payload.Items[0].BaseRevision != track.Revision || !payload.MoveLyricsSidecar {
+		t.Fatalf("organize payload = %#v err=%v", payload, err)
+	}
+	items := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+envelope.Data.ID+"/organize-items", nil)
+	if items.Code != 200 || !containsJSON(items.Body.Bytes(), "[]") {
+		t.Fatalf("organize items = %d %s", items.Code, items.Body.String())
+	}
+}
+
 func TestBatchEditAPIRejectsUnwritableMusicDirectoryBeforeEnqueue(t *testing.T) {
 	s := newTestServer(t)
 	manager := jobs.New(s.store)

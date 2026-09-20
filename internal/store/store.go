@@ -210,14 +210,18 @@ func (s *Store) SaveScan(ctx context.Context, root string, result scanner.Result
 // deliberately separate from SaveScan so quick scans never rewrite every row
 // in a large library.
 func (s *Store) SaveScanDelta(ctx context.Context, root string, result scanner.Result, changed []domain.Track) error {
-	return s.saveTrackDelta(ctx, root, result, changed)
+	return s.saveTrackDelta(ctx, root, result, changed, nil)
 }
 
 func (s *Store) SaveTrackUpdates(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error {
-	return s.saveTrackDelta(ctx, root, result, tracks)
+	return s.saveTrackDelta(ctx, root, result, tracks, nil)
 }
 
-func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.Result, tracks []domain.Track) error {
+func (s *Store) SaveTrackRelocation(ctx context.Context, root string, result scanner.Result, previousPath string, track domain.Track) error {
+	return s.saveTrackDelta(ctx, root, result, []domain.Track{track}, []string{previousPath})
+}
+
+func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.Result, tracks []domain.Track, removedPaths []string) error {
 	summaryJSON, err := json.Marshal(result.Library)
 	if err != nil {
 		return fmt.Errorf("encode library summary: %w", err)
@@ -285,6 +289,14 @@ func (s *Store) saveTrackDelta(ctx context.Context, root string, result scanner.
 		}
 		if execErr := upsertLibraryFile(fileStatement, result.Library.ID, track, now); execErr != nil {
 			return execErr
+		}
+	}
+	for _, previousPath := range removedPaths {
+		if strings.TrimSpace(previousPath) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM library_files WHERE library_id=? AND relative_path=?`, result.Library.ID, previousPath); err != nil {
+			return fmt.Errorf("remove previous library file path %s: %w", previousPath, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
