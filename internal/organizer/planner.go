@@ -57,8 +57,16 @@ func NewPlanner(root string) (*Planner, error) {
 func (p *Planner) Root() string { return p.root }
 
 func (p *Planner) Plan(ctx context.Context, track domain.Track, moveLyricsSidecar bool) (Plan, error) {
+	return p.PlanWithMode(ctx, track, domain.DefaultOrganizeMode, moveLyricsSidecar)
+}
+
+func (p *Planner) PlanWithMode(ctx context.Context, track domain.Track, mode domain.OrganizeMode, moveLyricsSidecar bool) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, err
+	}
+	mode = domain.NormalizeOrganizeMode(mode)
+	if !mode.Valid() {
+		return Plan{}, fmt.Errorf("unsupported organize mode: %q", mode)
 	}
 	sourceRel, err := containedRelative(track.RelativePath)
 	if err != nil {
@@ -74,7 +82,12 @@ func (p *Planner) Plan(ctx context.Context, track domain.Track, moveLyricsSideca
 	album := sanitizeSegment(track.Album, "未知专辑")
 	artist = sanitizeSegment(artist, "未知歌手")
 	fileName := filepath.Base(filepath.FromSlash(track.FileName))
-	targetRel := filepath.ToSlash(filepath.Join(artist, album, fileName))
+	pathParts := []string{artist}
+	if mode == domain.OrganizeModeArtistAlbum {
+		pathParts = append(pathParts, album)
+	}
+	pathParts = append(pathParts, fileName)
+	targetRel := filepath.ToSlash(filepath.Join(pathParts...))
 	if _, err := containedRelative(targetRel); err != nil {
 		return Plan{}, err
 	}
@@ -151,10 +164,14 @@ func (p *Planner) Plan(ctx context.Context, track domain.Track, moveLyricsSideca
 }
 
 func (p *Planner) PlanMany(ctx context.Context, tracks []domain.Track, moveLyricsSidecar bool) ([]Plan, error) {
+	return p.PlanManyWithMode(ctx, tracks, domain.DefaultOrganizeMode, moveLyricsSidecar)
+}
+
+func (p *Planner) PlanManyWithMode(ctx context.Context, tracks []domain.Track, mode domain.OrganizeMode, moveLyricsSidecar bool) ([]Plan, error) {
 	plans := make([]Plan, 0, len(tracks))
 	seen := make(map[string]int)
 	for _, track := range tracks {
-		plan, err := p.Plan(ctx, track, moveLyricsSidecar)
+		plan, err := p.PlanWithMode(ctx, track, mode, moveLyricsSidecar)
 		if err != nil {
 			return nil, err
 		}

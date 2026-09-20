@@ -302,6 +302,8 @@ export interface BatchEditSelection {
   baseRevision: string;
 }
 
+export type OrganizeMode = 'artist_album' | 'artist';
+
 export type OrganizeItemState = 'ready' | 'noop' | 'conflict' | 'invalid' | 'moved' | 'failed';
 
 export interface OrganizePreviewItem {

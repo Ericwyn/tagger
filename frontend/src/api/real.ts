@@ -24,6 +24,7 @@ import type {
 	BatchEditItem,
 	BatchEditOperation,
 	BatchEditSelection,
+	OrganizeMode,
 	OrganizePreviewItem,
 	UpdateProvenance,
 	CandidateSearchQuery,
@@ -603,17 +604,17 @@ export function createRealAPI(fetcher: typeof fetch = fetch) {
 	  });
 	},
 
-	previewOrganize(items: BatchEditSelection[]): Promise<OrganizePreviewItem[]> {
+	previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<OrganizePreviewItem[]> {
 		return request<OrganizePreviewItem[]>('/api/v1/tracks/organize-preview', {
 			method: 'POST', headers: {'Content-Type': 'application/json'},
-			body: JSON.stringify({items, moveLyricsSidecar: true}),
+			body: JSON.stringify({items, mode, moveLyricsSidecar: true}),
 		});
 	},
 
-	createOrganizeJob(items: BatchEditSelection[]): Promise<Job> {
+	createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<Job> {
 		return request<Job>('/api/v1/tracks/organize', {
 			method: 'POST', headers: {'Content-Type': 'application/json'},
-			body: JSON.stringify({items, moveLyricsSidecar: true}),
+			body: JSON.stringify({items, mode, moveLyricsSidecar: true}),
 		});
 	},
 

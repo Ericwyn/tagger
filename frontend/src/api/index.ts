@@ -25,6 +25,7 @@ import type {
 	BatchEditSelection,
 	BatchArtworkInput,
 	OrganizePreviewItem,
+	OrganizeMode,
 	CandidateSearchQuery,
 	MatchQueryHistory,
 	ScanMode,
@@ -229,16 +230,16 @@ export async function createBatchEditJob(items: BatchEditSelection[], operations
   return real.createBatchEditJob(items, operations, sequenceTracks, payload);
 }
 
-export function previewOrganize(items: BatchEditSelection[]): Promise<OrganizePreviewItem[]> {
+export function previewOrganize(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<OrganizePreviewItem[]> {
   if (apiReadMode === 'mock') {
-    return mock.previewOrganize(items);
+    return mock.previewOrganize(items, mode);
   }
-  return real.previewOrganize(items);
+  return real.previewOrganize(items, mode);
 }
 
-export function createOrganizeJob(items: BatchEditSelection[]): Promise<Job | null> {
-  if (apiReadMode === 'mock') return mock.createOrganizeJob(items);
-  return real.createOrganizeJob(items);
+export function createOrganizeJob(items: BatchEditSelection[], mode: OrganizeMode = 'artist_album'): Promise<Job | null> {
+  if (apiReadMode === 'mock') return mock.createOrganizeJob(items, mode);
+  return real.createOrganizeJob(items, mode);
 }
 
 export function listBatchEditItems(jobId: string): Promise<BatchEditItem[]> {

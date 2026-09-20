@@ -40,6 +40,27 @@ func TestPlanBuildsArtistAlbumPathAndMovesSidecarReference(t *testing.T) {
 	}
 }
 
+func TestPlanBuildsArtistOnlyPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "song.flac"), []byte("audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planner, err := NewPlanner(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planner.PlanWithMode(context.Background(), domain.Track{
+		ID: "trk-artist", FileName: "song.flac", RelativePath: "song.flac",
+		Artists: []string{"许嵩 / 其他歌手"}, Album: "苏格拉没有底",
+	}, domain.OrganizeModeArtist, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Target != "许嵩/song.flac" || plan.PrimaryArtist != "许嵩" || plan.Album != "苏格拉没有底" {
+		t.Fatalf("artist-only plan = %#v", plan)
+	}
+}
+
 func TestPlanPreservesArtistNamesThatUseSlashAndAmpersand(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "song.mp3"), []byte("audio"), 0o644); err != nil {

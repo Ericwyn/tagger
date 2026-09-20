@@ -279,6 +279,24 @@ describe('real API client', () => {
 	});
   });
 
+  it('serializes the selected organize hierarchy for preview and execution', async () => {
+    const job = {id: 'job-organize', kind: 'organize', state: 'waiting', title: '整理', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: []}), {status: 200}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({data: job}), {status: 202}));
+    const api = createRealAPI(fetcher);
+    const selection = [{trackId: 'trk-1', baseRevision: 'rev-1'}];
+
+    await expect(api.previewOrganize(selection, 'artist')).resolves.toEqual([]);
+    await expect(api.createOrganizeJob(selection, 'artist')).resolves.toEqual(job);
+    expect(JSON.parse(String((fetcher.mock.calls[0][1] as RequestInit).body))).toEqual({
+      items: selection, mode: 'artist', moveLyricsSidecar: true,
+    });
+    expect(JSON.parse(String((fetcher.mock.calls[1][1] as RequestInit).body))).toEqual({
+      items: selection, mode: 'artist', moveLyricsSidecar: true,
+    });
+  });
+
   it('serializes a shared batch artwork payload for replacement and resize', async () => {
     const job = {id: 'job-art-edit', kind: 'batch_edit', state: 'waiting', title: 'Edit', detail: 'Waiting', processed: 0, total: 1, succeeded: 0, failed: 0, startedAt: 'now'};
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({data: job}), {status: 202}));

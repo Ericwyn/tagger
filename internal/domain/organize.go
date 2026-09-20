@@ -8,9 +8,33 @@ type OrganizeItemRequest struct {
 	BaseRevision string `json:"baseRevision"`
 }
 
+// OrganizeMode controls the directory hierarchy used for a file-location job.
+// The original artist/album layout remains the default for backwards
+// compatibility with jobs created before mode selection was added.
+type OrganizeMode string
+
+const (
+	OrganizeModeArtistAlbum OrganizeMode = "artist_album"
+	OrganizeModeArtist      OrganizeMode = "artist"
+)
+
+const DefaultOrganizeMode = OrganizeModeArtistAlbum
+
+func (mode OrganizeMode) Valid() bool {
+	return mode == OrganizeModeArtistAlbum || mode == OrganizeModeArtist
+}
+
+func NormalizeOrganizeMode(mode OrganizeMode) OrganizeMode {
+	if mode == "" {
+		return DefaultOrganizeMode
+	}
+	return mode
+}
+
 type OrganizePayload struct {
 	Items             []OrganizeItemRequest `json:"items"`
 	MoveLyricsSidecar bool                  `json:"moveLyricsSidecar"`
+	Mode              OrganizeMode          `json:"mode,omitempty"`
 }
 
 type OrganizeItemState string

@@ -1620,6 +1620,10 @@ func (s *Server) decodeOrganizePayload(c *app.RequestContext) (domain.OrganizePa
 	if err := json.Unmarshal(c.Request.Body(), &payload); err != nil {
 		return domain.OrganizePayload{}, errors.New("请求 JSON 无效")
 	}
+	payload.Mode = domain.NormalizeOrganizeMode(payload.Mode)
+	if !payload.Mode.Valid() {
+		return domain.OrganizePayload{}, fmt.Errorf("不支持的整理模式：%s", payload.Mode)
+	}
 	limit := s.batchTrackLimit(context.Background())
 	if len(payload.Items) == 0 || len(payload.Items) > limit {
 		return domain.OrganizePayload{}, fmt.Errorf("items 必须在 1 到 %d 之间", limit)
@@ -1668,7 +1672,7 @@ func (s *Server) organizePlans(ctx context.Context, payload *domain.OrganizePayl
 		}
 		tracks = append(tracks, track)
 	}
-	return planner.PlanMany(ctx, tracks, true)
+	return planner.PlanManyWithMode(ctx, tracks, payload.Mode, true)
 }
 
 func organizeItemFromPlan(plan organizer.Plan, jobID string) domain.OrganizeItem {

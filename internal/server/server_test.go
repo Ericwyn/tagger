@@ -884,6 +884,37 @@ func TestOrganizeAPIPreviewsAndQueuesLocationJob(t *testing.T) {
 	if err := json.Unmarshal([]byte(stored.Payload), &payload); err != nil || len(payload.Items) != 1 || payload.Items[0].BaseRevision != track.Revision || !payload.MoveLyricsSidecar {
 		t.Fatalf("organize payload = %#v err=%v", payload, err)
 	}
+	artistBody := []byte(`{"mode":"artist","items":[{"trackId":"` + track.ID + `","baseRevision":"` + track.Revision + `"}],"moveLyricsSidecar":true}`)
+	artistPreview := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize-preview",
+		&ut.Body{Body: bytes.NewReader(artistBody), Len: len(artistBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if artistPreview.Code != 200 || !containsJSON(artistPreview.Body.Bytes(), `"target":"歌手/`+track.FileName+`"`) {
+		t.Fatalf("artist-only organize preview = %d %s", artistPreview.Code, artistPreview.Body.String())
+	}
+	artistQueued := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize",
+		&ut.Body{Body: bytes.NewReader(artistBody), Len: len(artistBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if artistQueued.Code != 202 {
+		t.Fatalf("artist-only organize queue = %d %s", artistQueued.Code, artistQueued.Body.String())
+	}
+	var artistEnvelope struct {
+		Data jobResponse `json:"data"`
+	}
+	if err := json.Unmarshal(artistQueued.Body.Bytes(), &artistEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	artistStored, err := s.store.Job(context.Background(), artistEnvelope.Data.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artistPayload domain.OrganizePayload
+	if err := json.Unmarshal([]byte(artistStored.Payload), &artistPayload); err != nil || artistPayload.Mode != domain.OrganizeModeArtist {
+		t.Fatalf("artist organize payload = %#v err=%v", artistPayload, err)
+	}
+	invalidModeBody := []byte(`{"mode":"artist_album_file","items":[{"trackId":"` + track.ID + `"}]}`)
+	invalidMode := ut.PerformRequest(s.h.Engine, "POST", "/api/v1/tracks/organize-preview",
+		&ut.Body{Body: bytes.NewReader(invalidModeBody), Len: len(invalidModeBody)}, ut.Header{Key: "content-type", Value: "application/json"})
+	if invalidMode.Code != 400 || !containsJSON(invalidMode.Body.Bytes(), `不支持的整理模式`) {
+		t.Fatalf("invalid organize mode = %d %s", invalidMode.Code, invalidMode.Body.String())
+	}
 	items := ut.PerformRequest(s.h.Engine, "GET", "/api/v1/jobs/"+envelope.Data.ID+"/organize-items", nil)
 	if items.Code != 200 || !containsJSON(items.Body.Bytes(), "[]") {
 		t.Fatalf("organize items = %d %s", items.Code, items.Body.String())

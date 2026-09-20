@@ -41,7 +41,7 @@ import {
 	updateTrack,
 	waitForJob,
 } from '@/api';
-import {defaultBatchTrackLimit, type BatchArtworkInput, type CandidateSearchQuery, type LibrarySummary, type MatchCandidate, type RestoreDraftRequest, type Track, type TrackFormat, type TrackPatch, type TrackQuery, type TrackSort, type UpdateProvenance} from '@/types';
+import {defaultBatchTrackLimit, type BatchArtworkInput, type CandidateSearchQuery, type LibrarySummary, type MatchCandidate, type OrganizeMode, type RestoreDraftRequest, type Track, type TrackFormat, type TrackPatch, type TrackQuery, type TrackSort, type UpdateProvenance} from '@/types';
 import type {StateSnapshot} from 'react-virtuoso';
 import {clearLibraryViewSnapshot, getLibraryViewSnapshot, setLibraryViewSnapshot} from '@/pages/libraryViewCache';
 
@@ -996,7 +996,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
 	    : `已写入 ${succeeded} 首，${failed.size} 首失败并保留选择，请检查后重试`);
 	};
 
-  const applyOrganize = async () => {
+  const applyOrganize = async (mode: OrganizeMode) => {
     const selectedTracksForJob = selectedTracks.filter((track) => track.writable && isTrackIndexed(track));
     if (selectedTracksForJob.length === 0) {
       onNotice('没有可整理的可写曲目');
@@ -1004,7 +1004,7 @@ export function LibraryPage({onOpenReview, onOpenSettings, onNotice, playerTrack
     }
     setSaving(true);
     try {
-      const job = await createOrganizeJob(selectedTracksForJob.map((track) => ({trackId: track.id, baseRevision: track.revision})));
+      const job = await createOrganizeJob(selectedTracksForJob.map((track) => ({trackId: track.id, baseRevision: track.revision})), mode);
       setOrganizeOpen(false);
       setSelectedIds(new Set());
       setSelectedDetails(new Map());
