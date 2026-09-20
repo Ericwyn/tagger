@@ -25,6 +25,7 @@ type Config struct {
 	UserAgent         string
 	Auth              string
 	Cookie            string
+	SimplifyChinese   bool
 	RateInterval      time.Duration
 }
 
@@ -77,6 +78,7 @@ func (c *Client) ResetConfig() error {
 	c.config.UserAgent = providers.DefaultUserAgent("kugou")
 	c.config.Auth = ""
 	c.config.Cookie = ""
+	c.config.SimplifyChinese = false
 	c.gate.SetInterval(180 * time.Millisecond)
 	return c.setProxyLocked("")
 }
@@ -100,6 +102,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "lyricsDownloadUrl", Label: "歌词下载 URL", Type: "url", Value: c.config.LyricsDownloadURL, Required: true},
 		{Key: "artworkEndpoint", Label: "封面 API URL", Type: "url", Value: c.config.ArtworkEndpoint, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
+		providers.SimplifyChineseConfigField(c.config.SimplifyChinese),
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
 		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "kg_mid=…"},
 		providers.ProxyConfigField(c.proxyURL),
@@ -141,6 +144,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.config.UserAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := providers.ParseSimplifyChinese(value)
+			if err != nil {
+				return err
+			}
+			c.config.SimplifyChinese = simplify
 		case "auth":
 			c.config.Auth = strings.TrimSpace(value)
 		case "cookie":
@@ -160,6 +169,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.SimplifyChineseCacheVariant(c.config.SimplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -269,6 +284,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 			if artwork, _ := c.fetchArtwork(ctx, hash, item.albumID()); artwork != "" {
 				candidate.ArtworkURL = artwork
 			}
+		}
+		if c.config.SimplifyChinese {
+			candidate = providers.SimplifyCandidate(candidate)
 		}
 		result = append(result, candidate)
 		if len(result) >= limit {

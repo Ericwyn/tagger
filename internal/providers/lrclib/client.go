@@ -15,22 +15,24 @@ import (
 )
 
 type Config struct {
-	BaseURL      string
-	SearchURL    string
-	UserAgent    string
-	Client       *http.Client
-	RateInterval time.Duration
+	BaseURL         string
+	SearchURL       string
+	UserAgent       string
+	SimplifyChinese bool
+	Client          *http.Client
+	RateInterval    time.Duration
 }
 
 type Client struct {
-	mu        sync.RWMutex
-	baseURL   string
-	searchURL string
-	userAgent string
-	proxyURL  string
-	baseHTTP  *http.Client
-	http      *http.Client
-	gate      *providers.Gate
+	mu              sync.RWMutex
+	baseURL         string
+	searchURL       string
+	userAgent       string
+	simplifyChinese bool
+	proxyURL        string
+	baseHTTP        *http.Client
+	http            *http.Client
+	gate            *providers.Gate
 }
 
 func New(config Config) *Client {
@@ -52,7 +54,8 @@ func New(config Config) *Client {
 	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, searchURL: config.SearchURL, userAgent: config.UserAgent,
-		baseHTTP: config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
+		simplifyChinese: config.SimplifyChinese,
+		baseHTTP:        config.Client, http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
 
@@ -64,6 +67,7 @@ func (c *Client) ResetConfig() error {
 	c.baseURL = "https://lrclib.net/api/get"
 	c.searchURL = "https://lrclib.net/api/search"
 	c.userAgent = providers.DefaultUserAgent("lrclib")
+	c.simplifyChinese = false
 	c.gate.SetInterval(300 * time.Millisecond)
 	return c.setProxyLocked("")
 }
@@ -84,6 +88,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "精确查询 URL", Type: "url", Value: c.baseURL, Required: true},
 		{Key: "searchUrl", Label: "宽搜索 URL", Type: "url", Value: c.searchURL, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		providers.SimplifyChineseConfigField(c.simplifyChinese),
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
@@ -111,6 +116,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := providers.ParseSimplifyChinese(value)
+			if err != nil {
+				return err
+			}
+			c.simplifyChinese = simplify
 		case "proxyUrl":
 			if err := c.setProxyLocked(value); err != nil {
 				return err
@@ -126,6 +137,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.SimplifyChineseCacheVariant(c.simplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -175,6 +192,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		err := providers.GetJSON(ctx, c.http, c.baseURL+"?"+values.Encode(), c.userAgent, &response)
 		if err == nil {
 			if candidate, ok := responseCandidate(response); ok {
+				if c.simplifyChinese {
+					candidate = providers.SimplifyCandidate(candidate)
+				}
 				return []providers.Candidate{candidate}, nil
 			}
 		} else if !isNotFound(err) {
@@ -184,6 +204,11 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 
 	results, err := c.searchFallback(ctx, query, limit)
 	if err == nil {
+		if c.simplifyChinese {
+			for index := range results {
+				results[index] = providers.SimplifyCandidate(results[index])
+			}
+		}
 		return results, nil
 	}
 	if firstErr != nil {

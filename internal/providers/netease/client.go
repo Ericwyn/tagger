@@ -16,14 +16,15 @@ import (
 )
 
 type Config struct {
-	Client        *http.Client
-	Endpoint      string
-	LyricEndpoint string
-	AlbumEndpoint string
-	UserAgent     string
-	Auth          string
-	Cookie        string
-	RateInterval  time.Duration
+	Client          *http.Client
+	Endpoint        string
+	LyricEndpoint   string
+	AlbumEndpoint   string
+	UserAgent       string
+	Auth            string
+	Cookie          string
+	SimplifyChinese bool
+	RateInterval    time.Duration
 }
 
 type Client struct {
@@ -69,6 +70,7 @@ func (c *Client) ResetConfig() error {
 	c.config.UserAgent = providers.DefaultUserAgent("netease")
 	c.config.Auth = ""
 	c.config.Cookie = ""
+	c.config.SimplifyChinese = false
 	c.gate.SetInterval(180 * time.Millisecond)
 	return c.setProxyLocked("")
 }
@@ -91,6 +93,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "lyricEndpoint", Label: "歌词 API URL", Type: "url", Value: c.config.LyricEndpoint, Required: true},
 		{Key: "albumEndpoint", Label: "专辑 API URL", Type: "url", Value: c.config.AlbumEndpoint, Required: true},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.config.UserAgent, Required: true},
+		providers.SimplifyChineseConfigField(c.config.SimplifyChinese),
 		{Key: "auth", Label: "鉴权头（可选）", Type: "password", Value: c.config.Auth, Secret: true, Placeholder: "Bearer …"},
 		{Key: "cookie", Label: "Cookie（可选）", Type: "password", Value: c.config.Cookie, Secret: true, Placeholder: "MUSIC_U=…"},
 		providers.ProxyConfigField(c.proxyURL),
@@ -126,6 +129,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.config.UserAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := providers.ParseSimplifyChinese(value)
+			if err != nil {
+				return err
+			}
+			c.config.SimplifyChinese = simplify
 		case "auth":
 			c.config.Auth = strings.TrimSpace(value)
 		case "cookie":
@@ -145,6 +154,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.SimplifyChineseCacheVariant(c.config.SimplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -259,6 +274,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		if err == nil {
 			candidate.SyncedLyrics = lyrics
 			candidate.Lyrics = lyrics
+		}
+		if c.config.SimplifyChinese {
+			candidate = providers.SimplifyCandidate(candidate)
 		}
 		result = append(result, candidate)
 	}

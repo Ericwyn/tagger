@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ericwyn/tagger/internal/providers"
-	"github.com/ericwyn/tagger/internal/textconv"
 )
 
 type Config struct {
@@ -86,7 +85,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "Search API URL", Type: "url", Value: c.baseURL, Required: true},
 		{Key: "country", Label: "地区代码", Type: "text", Value: c.country, Placeholder: "HK", Description: "iTunes storefront；CN 零结果时自动回退到 HK"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
-		{Key: "simplifyChinese", Label: "自动转为简体", Type: "boolean", Value: strconv.FormatBool(c.simplifyChinese), Description: "将 Apple Music 返回的歌曲名、歌手、专辑和风格转换为简体中文"},
+		providers.SimplifyChineseConfigField(c.simplifyChinese),
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
@@ -115,9 +114,9 @@ func (c *Client) Configure(values map[string]string) error {
 			}
 			c.userAgent = strings.TrimSpace(value)
 		case "simplifyChinese":
-			simplify, err := strconv.ParseBool(strings.TrimSpace(value))
+			simplify, err := providers.ParseSimplifyChinese(value)
 			if err != nil {
-				return fmt.Errorf("simplifyChinese 必须是 true 或 false")
+				return err
 			}
 			c.simplifyChinese = simplify
 		case "proxyUrl":
@@ -204,21 +203,18 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		album := item.CollectionName
 		albumArtist := firstNonEmpty(item.CollectionArtistName, item.ArtistName)
 		genre := item.PrimaryGenreName
-		if c.simplifyChinese {
-			title = textconv.Simplify(title)
-			artist = textconv.Simplify(artist)
-			album = textconv.Simplify(album)
-			albumArtist = textconv.Simplify(albumArtist)
-			genre = textconv.Simplify(genre)
-		}
-		result = append(result, providers.Candidate{
+		candidate := providers.Candidate{
 			ProviderID: "apple", ExternalID: strconv.FormatInt(item.TrackID, 10), Title: title,
 			Artists: []string{artist}, Album: album,
 			AlbumArtists: []string{albumArtist},
 			Year:         year(item.ReleaseDate), TrackNumber: item.TrackNumber, TrackTotal: item.TrackCount,
 			DiscNumber: item.DiscNumber, DiscTotal: item.DiscCount, DurationSeconds: item.TrackTimeMillis / 1000,
 			Genres: []string{genre}, ArtworkURL: strings.Replace(item.ArtworkURL100, "100x100", "600x600", 1),
-		})
+		}
+		if c.simplifyChinese {
+			candidate = providers.SimplifyCandidate(candidate)
+		}
+		result = append(result, candidate)
 	}
 	return result, nil
 }

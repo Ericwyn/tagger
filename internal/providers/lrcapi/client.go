@@ -20,17 +20,19 @@ import (
 )
 
 type Config struct {
-	BaseURL      string
-	CoverURL     string
-	Auth         string
-	UserAgent    string
-	Client       *http.Client
-	RateInterval time.Duration
+	BaseURL         string
+	CoverURL        string
+	Auth            string
+	UserAgent       string
+	SimplifyChinese bool
+	Client          *http.Client
+	RateInterval    time.Duration
 }
 
 type Client struct {
 	mu                                 sync.RWMutex
 	baseURL, coverURL, auth, userAgent string
+	simplifyChinese                    bool
 	proxyURL                           string
 	baseHTTP                           *http.Client
 	http                               *http.Client
@@ -56,7 +58,7 @@ func New(config Config) *Client {
 	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, coverURL: config.CoverURL, auth: strings.TrimSpace(config.Auth),
-		userAgent: config.UserAgent, baseHTTP: config.Client,
+		userAgent: config.UserAgent, simplifyChinese: config.SimplifyChinese, baseHTTP: config.Client,
 		http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
@@ -70,6 +72,7 @@ func (c *Client) ResetConfig() error {
 	c.coverURL = "https://api.lrc.cx/cover"
 	c.auth = ""
 	c.userAgent = providers.DefaultUserAgent("lrcapi")
+	c.simplifyChinese = false
 	c.gate.SetInterval(500 * time.Millisecond)
 	return c.setProxyLocked("")
 }
@@ -92,6 +95,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "coverUrl", Label: "封面 API URL", Type: "url", Value: c.coverURL, Required: true},
 		{Key: "auth", Label: "Authorization", Type: "password", Value: c.auth, Secret: true, Placeholder: "可选鉴权令牌"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true},
+		providers.SimplifyChineseConfigField(c.simplifyChinese),
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10)},
 	}
@@ -121,6 +125,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := providers.ParseSimplifyChinese(value)
+			if err != nil {
+				return err
+			}
+			c.simplifyChinese = simplify
 		case "proxyUrl":
 			if err := c.setProxyLocked(value); err != nil {
 				return err
@@ -136,6 +146,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.SimplifyChineseCacheVariant(c.simplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -199,6 +215,9 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		}
 		if candidate.ExternalID == "" {
 			candidate.ExternalID = stableID(candidate.Title, candidate.Artists, candidate.Album, candidate.Lyrics)
+		}
+		if c.simplifyChinese {
+			candidate = providers.SimplifyCandidate(candidate)
 		}
 		if _, exists := seen[candidate.ExternalID]; exists {
 			continue

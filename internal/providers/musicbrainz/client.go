@@ -17,6 +17,7 @@ type Config struct {
 	BaseURL                string
 	ArchiveDownloadBaseURL string
 	UserAgent              string
+	SimplifyChinese        bool
 	Client                 *http.Client
 	RateInterval           time.Duration
 }
@@ -26,6 +27,7 @@ type Client struct {
 	baseURL                string
 	archiveDownloadBaseURL string
 	userAgent              string
+	simplifyChinese        bool
 	proxyURL               string
 	baseHTTP               *http.Client
 	http                   *http.Client
@@ -51,7 +53,7 @@ func New(config Config) *Client {
 	gate := providers.NewGate(config.RateInterval)
 	return &Client{
 		baseURL: config.BaseURL, archiveDownloadBaseURL: config.ArchiveDownloadBaseURL,
-		userAgent: config.UserAgent, baseHTTP: config.Client,
+		userAgent: config.UserAgent, simplifyChinese: config.SimplifyChinese, baseHTTP: config.Client,
 		http: providers.WrapHTTPClient(config.Client, gate), gate: gate,
 	}
 }
@@ -64,6 +66,7 @@ func (c *Client) ResetConfig() error {
 	c.baseURL = "https://musicbrainz.org/ws/2/recording/"
 	c.archiveDownloadBaseURL = providers.DefaultArchiveDownloadBaseURL
 	c.userAgent = providers.DefaultUserAgent("musicbrainz")
+	c.simplifyChinese = false
 	c.gate.SetInterval(time.Second)
 	return c.setProxyLocked("")
 }
@@ -84,6 +87,7 @@ func (c *Client) ConfigFields() []providers.ConfigField {
 		{Key: "baseUrl", Label: "API Base URL", Type: "url", Value: c.baseURL, Required: true, Description: "MusicBrainz recording 查询地址"},
 		{Key: "archiveDownloadBaseUrl", Label: "Internet Archive 下载基址", Type: "url", Value: c.archiveDownloadBaseURL, Required: true, Description: "支持镜像 origin 或带路径的代理前缀；末尾会拼接 archive.org 的 /download/ 路径"},
 		{Key: "userAgent", Label: "User-Agent", Type: "text", Value: c.userAgent, Required: true, Description: "请保留可联系的应用标识"},
+		providers.SimplifyChineseConfigField(c.simplifyChinese),
 		providers.ProxyConfigField(c.proxyURL),
 		{Key: "rateIntervalMs", Label: "请求间隔（毫秒）", Type: "number", Value: strconv.FormatInt(c.gate.Interval().Milliseconds(), 10), Description: "避免触发官方 API 限流"},
 	}
@@ -111,6 +115,12 @@ func (c *Client) Configure(values map[string]string) error {
 				return fmt.Errorf("userAgent 不能为空")
 			}
 			c.userAgent = strings.TrimSpace(value)
+		case "simplifyChinese":
+			simplify, err := providers.ParseSimplifyChinese(value)
+			if err != nil {
+				return err
+			}
+			c.simplifyChinese = simplify
 		case "proxyUrl":
 			if err := c.setProxyLocked(value); err != nil {
 				return err
@@ -126,6 +136,12 @@ func (c *Client) Configure(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) CacheVariant() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return providers.SimplifyChineseCacheVariant(c.simplifyChinese)
 }
 
 func (c *Client) setProxyLocked(value string) error {
@@ -207,12 +223,16 @@ func (c *Client) Search(ctx context.Context, query providers.Query, limit int) (
 		if len(recording.Releases) > 0 {
 			releaseID = recording.Releases[0].ID
 		}
-		result = append(result, providers.Candidate{
+		candidate := providers.Candidate{
 			ProviderID: "musicbrainz", ExternalID: recording.ID, Title: recording.Title,
 			Artists: artists, Album: album, AlbumArtists: artists, Year: year(recording.FirstReleaseDate),
 			MusicBrainzTrackID: recording.ID, MusicBrainzReleaseID: releaseID, MusicBrainzArtistIDs: artistIDs,
 			DurationSeconds: int64(recording.Length / 1000), Genres: genres, ArtworkURL: artworkURL,
-		})
+		}
+		if c.simplifyChinese {
+			candidate = providers.SimplifyCandidate(candidate)
+		}
+		result = append(result, candidate)
 	}
 	return result, nil
 }

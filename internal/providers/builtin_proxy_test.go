@@ -40,6 +40,24 @@ func TestBuiltInProvidersExposeProxyForAPIAndArtwork(t *testing.T) {
 			if proxyField.Type != "url" || proxyField.Required || proxyField.Value != "" {
 				t.Fatalf("default proxy field = %#v", proxyField)
 			}
+			var simplifyField providers.ConfigField
+			for _, field := range configurable.ConfigFields() {
+				if field.Key == "simplifyChinese" {
+					simplifyField = field
+					break
+				}
+			}
+			if simplifyField.Type != "boolean" || simplifyField.Value != "false" {
+				t.Fatalf("default simplify field = %#v", simplifyField)
+			}
+			if err := configurable.Configure(map[string]string{"simplifyChinese": "true"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, field := range configurable.ConfigFields() {
+				if field.Key == "simplifyChinese" && field.Value != "true" {
+					t.Fatalf("configured simplify field = %#v", field)
+				}
+			}
 			if err := configurable.Configure(map[string]string{"proxyUrl": "http://127.0.0.1:7890/"}); err != nil {
 				t.Fatal(err)
 			}
@@ -60,6 +78,11 @@ func TestBuiltInProvidersExposeProxyForAPIAndArtwork(t *testing.T) {
 			}
 			if reset := artworkOptions.ArtworkDownloadOptions(); reset.ProxyURL != "" || reset.Gate != options.Gate {
 				t.Fatalf("reset artwork options = %#v", reset)
+			}
+			for _, field := range configurable.ConfigFields() {
+				if field.Key == "simplifyChinese" && field.Value != "false" {
+					t.Fatalf("reset simplify field = %#v", field)
+				}
 			}
 		})
 	}

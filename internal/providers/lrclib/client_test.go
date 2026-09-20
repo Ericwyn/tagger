@@ -33,6 +33,21 @@ func TestSearchUsesMetadataLookupAndMapsLyrics(t *testing.T) {
 	}
 }
 
+func TestSearchCanSimplifyChineseLyricsAndMetadata(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		body := `{"id":43,"trackName":"想見你","artistName":"許嵩","albumName":"專輯名","plainLyrics":"[00:01.00] 想見你","syncedLyrics":"[00:01.00] 想見你"}`
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	client := New(Config{BaseURL: "https://lrclib.test/api/get", SimplifyChinese: true, Client: httpClient, RateInterval: -1})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "想見你", Artists: []string{"許嵩"}}, 1)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+	if candidates[0].Title != "想见你" || candidates[0].Artists[0] != "许嵩" || candidates[0].Album != "专辑名" || candidates[0].Lyrics != "[00:01.00] 想见你" {
+		t.Fatalf("candidate was not simplified: %#v", candidates[0])
+	}
+}
+
 func TestSearchTreatsNotFoundAsEmpty(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 404, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found"))}, nil

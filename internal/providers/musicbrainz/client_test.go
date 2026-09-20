@@ -41,6 +41,24 @@ func TestSearchBuildsOfficialRecordingQueryAndMapsResponse(t *testing.T) {
 	}
 }
 
+func TestSearchCanSimplifyChineseOutput(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := `{"recordings":[{"id":"mbid-trad","title":"想見你","artist-credit":[{"name":"許嵩","artist":{"name":"許嵩"}}],"releases":[{"title":"專輯名"}],"tags":[{"name":"國語流行音樂"}]}]}`
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	client := New(Config{BaseURL: "https://musicbrainz.test/recording", SimplifyChinese: true, Client: httpClient, RateInterval: -1})
+	candidates, err := client.Search(context.Background(), providers.Query{Title: "想見你"}, 1)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates=%#v err=%v", candidates, err)
+	}
+	if candidates[0].Title != "想见你" || candidates[0].Artists[0] != "许嵩" || candidates[0].Album != "专辑名" || candidates[0].Genres[0] != "国语流行音乐" {
+		t.Fatalf("candidate was not simplified: %#v", candidates[0])
+	}
+	if client.CacheVariant() != "simplifyChinese=true" {
+		t.Fatalf("cache variant = %q", client.CacheVariant())
+	}
+}
+
 func TestArchiveDownloadBaseURLConfiguration(t *testing.T) {
 	client := New(Config{})
 	if got := client.ArtworkDownloadOptions().ArchiveDownloadBaseURL; got != providers.DefaultArchiveDownloadBaseURL {
